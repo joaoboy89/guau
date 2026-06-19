@@ -7,6 +7,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { UsersModule } from "./modules/users/users.module";
 import { OwnersModule } from "./modules/owners/owners.module";
 import { WalkersModule } from "./modules/walkers/walkers.module";
+import { DogsModule } from "./modules/dogs/dogs.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
 
@@ -19,6 +20,7 @@ import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
     UsersModule,
     OwnersModule,
     WalkersModule,
+    DogsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
