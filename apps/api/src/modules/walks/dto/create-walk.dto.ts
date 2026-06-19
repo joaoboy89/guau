@@ -1,0 +1,55 @@
+import {
+  IsString,
+  IsArray,
+  IsDateString,
+  IsNumber,
+  IsOptional,
+  IsIn,
+  ArrayMinSize,
+  ArrayMaxSize,
+  Min,
+  Max,
+} from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+
+export class CreateWalkDto {
+  @ApiProperty({ description: "ID del WalkerProfile seleccionado" })
+  @IsString()
+  walkerId: string;
+
+  @ApiProperty({ description: "ID del WalkType (duración + precio)" })
+  @IsString()
+  walkTypeId: string;
+
+  @ApiProperty({ description: "IDs de los perros que van al paseo", type: [String] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(6)
+  @IsString({ each: true })
+  dogIds: string[];
+
+  @ApiProperty({ example: "2026-07-01T09:00:00Z" })
+  @IsDateString()
+  scheduledAt: string;
+
+  @ApiProperty({ example: -34.5885 })
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  pickupLat: number;
+
+  @ApiProperty({ example: -58.4233 })
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  pickupLng: number;
+
+  @ApiProperty({ example: "Av. Santa Fe 1234, Palermo, CABA" })
+  @IsString()
+  pickupAddress: string;
+
+  @ApiPropertyOptional({ enum: ["GRUPAL", "EXCLUSIVO"], default: "GRUPAL" })
+  @IsOptional()
+  @IsIn(["GRUPAL", "EXCLUSIVO"])
+  mode?: "GRUPAL" | "EXCLUSIVO";
+}
