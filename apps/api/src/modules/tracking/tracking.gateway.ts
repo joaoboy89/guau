@@ -167,6 +167,12 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       .emit(SOCKET_EVENTS.NOTIFICATION_NEW, notification);
   }
 
+  emitMessage(recipientUserId: string, payload: unknown) {
+    this.server
+      .to(`user:${recipientUserId}`)
+      .emit(SOCKET_EVENTS.MESSAGE_NEW, payload);
+  }
+
   // ─── Sala personal por usuario (para notificaciones) ────
 
   @SubscribeMessage("user:join")

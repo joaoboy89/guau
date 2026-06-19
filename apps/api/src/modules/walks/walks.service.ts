@@ -13,6 +13,7 @@ import { CreateWalkDto } from "./dto/create-walk.dto";
 import { CancelWalkDto } from "./dto/cancel-walk.dto";
 import { QueryWalksDto } from "./dto/query-walks.dto";
 import { TrackingGateway } from "../tracking/tracking.gateway";
+import { ChatService } from "../chat/chat.service";
 
 // Incluye las relaciones que siempre se devuelven con un Walk
 const WALK_INCLUDE = {
@@ -40,6 +41,7 @@ export class WalksService {
     private prisma: PrismaService,
     private config: ConfigService,
     @Optional() private trackingGateway?: TrackingGateway,
+    @Optional() private chatService?: ChatService,
   ) {}
 
   // ─── Crear reserva ───────────────────────────────────────
@@ -212,7 +214,12 @@ export class WalksService {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.PENDING, "confirmar");
 
-    return this.updateStatus(walkId, WalkStatus.CONFIRMED);
+    const updated = await this.updateStatus(walkId, WalkStatus.CONFIRMED);
+
+    // Crear conversación entre paseador y dueño al confirmar
+    await this.chatService?.ensureConversationForWalk(walkId);
+
+    return updated;
   }
 
   // ─── Rechazar (paseador) ─────────────────────────────────
