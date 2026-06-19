@@ -5,6 +5,8 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { DatabaseModule } from "./database/database.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { UsersModule } from "./modules/users/users.module";
+import { OwnersModule } from "./modules/owners/owners.module";
+import { WalkersModule } from "./modules/walkers/walkers.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
 
@@ -15,6 +17,8 @@ import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
     DatabaseModule,
     AuthModule,
     UsersModule,
+    OwnersModule,
+    WalkersModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
