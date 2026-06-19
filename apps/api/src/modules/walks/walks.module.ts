@@ -3,9 +3,10 @@ import { WalksController } from "./walks.controller";
 import { WalksService } from "./walks.service";
 import { TrackingModule } from "../tracking/tracking.module";
 import { ChatModule } from "../chat/chat.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 
 @Module({
-  imports: [TrackingModule, ChatModule],
+  imports: [TrackingModule, ChatModule, NotificationsModule],
   controllers: [WalksController],
   providers: [WalksService],
   exports: [WalksService],

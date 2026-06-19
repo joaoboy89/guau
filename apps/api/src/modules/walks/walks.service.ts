@@ -14,6 +14,7 @@ import { CancelWalkDto } from "./dto/cancel-walk.dto";
 import { QueryWalksDto } from "./dto/query-walks.dto";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { ChatService } from "../chat/chat.service";
+import { NotificationsService } from "../notifications/notifications.service";
 
 // Incluye las relaciones que siempre se devuelven con un Walk
 const WALK_INCLUDE = {
@@ -42,6 +43,7 @@ export class WalksService {
     private config: ConfigService,
     @Optional() private trackingGateway?: TrackingGateway,
     @Optional() private chatService?: ChatService,
+    @Optional() private notificationsService?: NotificationsService,
   ) {}
 
   // ─── Crear reserva ───────────────────────────────────────
@@ -370,8 +372,11 @@ export class WalksService {
       include: WALK_INCLUDE,
     });
 
-    // Notificar a todos los usuarios en la sala del paseo
+    // Emitir cambio de estado via Socket.io
     this.trackingGateway?.emitStatusChanged(walkId, status);
+
+    // Crear notificación push en DB y emitirla al usuario correspondiente
+    void this.notificationsService?.notifyWalkStatusChange(walkId, status);
 
     return updated;
   }

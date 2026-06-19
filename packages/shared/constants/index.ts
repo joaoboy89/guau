@@ -14,6 +14,18 @@ export const SOCKET_EVENTS = {
   MESSAGE_NEW: "message:new",
 } as const;
 
+export const NOTIFICATION_TYPES = {
+  WALK_CONFIRMED:         "walk_confirmed",
+  WALK_REJECTED:          "walk_rejected",
+  WALK_CANCELLED_WALKER:  "walk_cancelled_walker",
+  WALK_CANCELLED_OWNER:   "walk_cancelled_owner",
+  WALK_WALKER_ON_WAY:     "walk_walker_on_way",
+  WALK_IN_PROGRESS:       "walk_in_progress",
+  WALK_COMPLETED:         "walk_completed",
+} as const;
+
+export type NotificationType = typeof NOTIFICATION_TYPES[keyof typeof NOTIFICATION_TYPES];
+
 export const CONTACT_PATTERNS = [
   /\b\d{10,11}\b/,
   /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
