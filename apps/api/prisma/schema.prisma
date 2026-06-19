@@ -1,0 +1,287 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ───────────────────────────────────────────────
+
+enum UserRole {
+  OWNER
+  WALKER
+  ADMIN
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum WalkStatus {
+  PENDING
+  CONFIRMED
+  WALKER_ON_WAY
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED_OWNER
+  CANCELLED_WALKER
+}
+
+enum WalkMode {
+  GRUPAL
+  EXCLUSIVO
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ─── USUARIOS ────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  firstName    String
+  lastName     String
+  avatarUrl    String?
+  role         UserRole
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownerProfile    OwnerProfile?
+  walkerProfile   WalkerProfile?
+  sentMessages    Message[]      @relation("SentMessages")
+  notifications   Notification[]
+  reviewsGiven    Review[]       @relation("ReviewsGiven")
+  reviewsReceived Review[]       @relation("ReviewsReceived")
+}
+
+// ─── PERFIL DUEÑO ────────────────────────────────────────
+
+model OwnerProfile {
+  id           String  @id @default(uuid())
+  userId       String  @unique
+  user         User    @relation(fields: [userId], references: [id])
+  address      String?
+  neighborhood String?
+  lat          Float?
+  lng          Float?
+
+  dogs             Dog[]
+  walkParticipants WalkParticipant[]
+  conversations    Conversation[]
+}
+
+// ─── PERFIL PASEADOR ─────────────────────────────────────
+
+model WalkerProfile {
+  id                 String             @id @default(uuid())
+  userId             String             @unique
+  user               User               @relation(fields: [userId], references: [id])
+  bio                String?
+  dniNumber          String?
+  dniPhotoUrl        String?
+  selfieUrl          String?
+  verificationStatus VerificationStatus @default(PENDING)
+  verificationNotes  String?
+  rating             Float              @default(0)
+  totalReviews       Int                @default(0)
+  isAvailable        Boolean            @default(false)
+  maxDogsPerWalk     Int                @default(6)
+  centerLat          Float?
+  centerLng          Float?
+  radiusKm           Float?
+  mpAccessToken      String?
+  mpUserId           String?
+
+  schedules     WalkerSchedule[]
+  walks         Walk[]
+  payouts       Payout[]
+  conversations Conversation[]
+}
+
+// ─── HORARIOS DEL PASEADOR ───────────────────────────────
+
+model WalkerSchedule {
+  id        String        @id @default(uuid())
+  walkerId  String
+  walker    WalkerProfile @relation(fields: [walkerId], references: [id])
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  isActive  Boolean       @default(true)
+}
+
+// ─── PERROS ──────────────────────────────────────────────
+
+model Dog {
+  id        String       @id @default(uuid())
+  ownerId   String
+  owner     OwnerProfile @relation(fields: [ownerId], references: [id])
+  name      String
+  breed     String?
+  size      String
+  ageYears  Int?
+  weightKg  Float?
+  photoUrl  String?
+  notes     String?
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+
+  walkParticipants WalkParticipant[]
+}
+
+// ─── TIPOS DE PASEO (PRICING) ────────────────────────────
+
+model WalkType {
+  id                  String  @id @default(uuid())
+  durationMinutes     Int
+  label               String
+  basePrice           Float
+  exclusiveMultiplier Float   @default(1.5)
+  isActive            Boolean @default(true)
+
+  walks Walk[]
+}
+
+// ─── PASEOS ──────────────────────────────────────────────
+
+model Walk {
+  id                 String        @id @default(uuid())
+  walkTypeId         String
+  walkType           WalkType      @relation(fields: [walkTypeId], references: [id])
+  walkerId           String
+  walker             WalkerProfile @relation(fields: [walkerId], references: [id])
+  mode               WalkMode      @default(GRUPAL)
+  status             WalkStatus    @default(PENDING)
+  scheduledAt        DateTime
+  startedAt          DateTime?
+  endedAt            DateTime?
+  pickupLat          Float
+  pickupLng          Float
+  pickupAddress      String
+  totalAmount        Float
+  platformFee        Float
+  walkerAmount       Float
+  commissionRate     Float
+  mpPaymentId        String?
+  cancellationReason String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  participants WalkParticipant[]
+  locations    WalkLocation[]
+  reviews      Review[]
+  conversation Conversation?
+}
+
+// ─── PARTICIPANTES DEL PASEO ─────────────────────────────
+
+model WalkParticipant {
+  id         String       @id @default(uuid())
+  walkId     String
+  walk       Walk         @relation(fields: [walkId], references: [id])
+  ownerId    String
+  owner      OwnerProfile @relation(fields: [ownerId], references: [id])
+  dogId      String
+  dog        Dog          @relation(fields: [dogId], references: [id])
+  amountPaid Float
+  joinedAt   DateTime     @default(now())
+
+  @@unique([walkId, dogId])
+}
+
+// ─── TRACKING GPS ────────────────────────────────────────
+
+model WalkLocation {
+  id         String   @id @default(uuid())
+  walkId     String
+  walk       Walk     @relation(fields: [walkId], references: [id])
+  lat        Float
+  lng        Float
+  recordedAt DateTime @default(now())
+
+  @@index([walkId, recordedAt])
+}
+
+// ─── REVIEWS ─────────────────────────────────────────────
+
+model Review {
+  id         String   @id @default(uuid())
+  walkId     String
+  walk       Walk     @relation(fields: [walkId], references: [id])
+  reviewerId String
+  reviewer   User     @relation("ReviewsGiven", fields: [reviewerId], references: [id])
+  revieweeId String
+  reviewee   User     @relation("ReviewsReceived", fields: [revieweeId], references: [id])
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([walkId, reviewerId])
+}
+
+// ─── CHAT ────────────────────────────────────────────────
+
+model Conversation {
+  id        String        @id @default(uuid())
+  walkId    String?       @unique
+  walk      Walk?         @relation(fields: [walkId], references: [id])
+  ownerId   String
+  owner     OwnerProfile  @relation(fields: [ownerId], references: [id])
+  walkerId  String
+  walker    WalkerProfile @relation(fields: [walkerId], references: [id])
+  createdAt DateTime      @default(now())
+
+  messages Message[]
+}
+
+model Message {
+  id                  String       @id @default(uuid())
+  conversationId      String
+  conversation        Conversation @relation(fields: [conversationId], references: [id])
+  senderId            String
+  sender              User         @relation("SentMessages", fields: [senderId], references: [id])
+  content             String
+  isRead              Boolean      @default(false)
+  containsContactInfo Boolean      @default(false)
+  createdAt           DateTime     @default(now())
+}
+
+// ─── NOTIFICACIONES ──────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  body      String
+  type      String
+  data      Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ─── PAGOS A PASEADORES ──────────────────────────────────
+
+model Payout {
+  id           String        @id @default(uuid())
+  walkerId     String
+  walker       WalkerProfile @relation(fields: [walkerId], references: [id])
+  amount       Float
+  periodStart  DateTime
+  periodEnd    DateTime
+  status       PayoutStatus  @default(PENDING)
+  mpTransferId String?
+  createdAt    DateTime      @default(now())
+}
