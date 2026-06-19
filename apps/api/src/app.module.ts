@@ -14,6 +14,7 @@ import { ChatModule } from "./modules/chat/chat.module";
 import { ReviewsModule } from "./modules/reviews/reviews.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
+import { AdminModule } from "./modules/admin/admin.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
 
@@ -33,6 +34,7 @@ import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
     ReviewsModule,
     PaymentsModule,
     NotificationsModule,
+    AdminModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
