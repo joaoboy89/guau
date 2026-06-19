@@ -9,6 +9,7 @@ import { OwnersModule } from "./modules/owners/owners.module";
 import { WalkersModule } from "./modules/walkers/walkers.module";
 import { DogsModule } from "./modules/dogs/dogs.module";
 import { WalksModule } from "./modules/walks/walks.module";
+import { TrackingModule } from "./modules/tracking/tracking.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
 
@@ -23,6 +24,7 @@ import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
     WalkersModule,
     DogsModule,
     WalksModule,
+    TrackingModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Optional,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -11,6 +12,7 @@ import { WalkStatus, WalkMode, VerificationStatus, UserRole } from "@prisma/clie
 import { CreateWalkDto } from "./dto/create-walk.dto";
 import { CancelWalkDto } from "./dto/cancel-walk.dto";
 import { QueryWalksDto } from "./dto/query-walks.dto";
+import { TrackingGateway } from "../tracking/tracking.gateway";
 
 // Incluye las relaciones que siempre se devuelven con un Walk
 const WALK_INCLUDE = {
@@ -37,6 +39,7 @@ export class WalksService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    @Optional() private trackingGateway?: TrackingGateway,
   ) {}
 
   // ─── Crear reserva ───────────────────────────────────────
@@ -349,15 +352,20 @@ export class WalksService {
     }
   }
 
-  private updateStatus(
+  private async updateStatus(
     walkId: string,
     status: WalkStatus,
     extra: Record<string, unknown> = {},
   ) {
-    return this.prisma.walk.update({
+    const updated = await this.prisma.walk.update({
       where: { id: walkId },
       data: { status, ...extra },
       include: WALK_INCLUDE,
     });
+
+    // Notificar a todos los usuarios en la sala del paseo
+    this.trackingGateway?.emitStatusChanged(walkId, status);
+
+    return updated;
   }
 }
