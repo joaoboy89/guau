@@ -12,6 +12,7 @@ import { WalksModule } from "./modules/walks/walks.module";
 import { TrackingModule } from "./modules/tracking/tracking.module";
 import { ChatModule } from "./modules/chat/chat.module";
 import { ReviewsModule } from "./modules/reviews/reviews.module";
+import { PaymentsModule } from "./modules/payments/payments.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
 
@@ -29,6 +30,7 @@ import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
     TrackingModule,
     ChatModule,
     ReviewsModule,
+    PaymentsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
