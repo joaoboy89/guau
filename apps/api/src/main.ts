@@ -30,8 +30,8 @@ async function bootstrap() {
   SwaggerModule.setup("docs", app, document);
 
   const port = process.env.PORT ?? 3001;
-  await app.listen(port);
-  console.log(`Güau API corriendo en http://localhost:${port}`);
+  await app.listen(port, "0.0.0.0");
+  console.log(`Güau API corriendo en puerto ${port}`);
   console.log(`Swagger docs en http://localhost:${port}/docs`);
 }
 
