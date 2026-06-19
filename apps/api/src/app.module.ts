@@ -11,6 +11,7 @@ import { DogsModule } from "./modules/dogs/dogs.module";
 import { WalksModule } from "./modules/walks/walks.module";
 import { TrackingModule } from "./modules/tracking/tracking.module";
 import { ChatModule } from "./modules/chat/chat.module";
+import { ReviewsModule } from "./modules/reviews/reviews.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
 
@@ -27,6 +28,7 @@ import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
     WalksModule,
     TrackingModule,
     ChatModule,
+    ReviewsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
