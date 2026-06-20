@@ -54,7 +54,8 @@ cp "$REPO_DIR/infra/vps/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
 # ── Build y levantar ──────────────────────────────────────────
 cd "$DEPLOY_DIR"
 echo "→ Levantando contenedores (primera vez tarda ~5 min por el build)..."
-docker compose up -d --build
+docker compose build --no-cache
+docker compose up -d
 
 # ── Eliminar swap si lo creamos nosotros ──────────────────────
 if [ "$SWAP_CREATED" = true ]; then
