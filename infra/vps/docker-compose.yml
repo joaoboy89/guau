@@ -11,6 +11,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - internal
+    mem_limit: 256m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U guau -d guau"]
       interval: 10s
@@ -35,6 +36,7 @@ services:
         condition: service_healthy
     networks:
       - internal
+    mem_limit: 400m
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/docs > /dev/null 2>&1 || exit 1"]
       interval: 30s
