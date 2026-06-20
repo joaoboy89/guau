@@ -2,6 +2,9 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# openssl requerido por Prisma en Alpine (musl)
+RUN apk add --no-cache openssl
+
 # Limitar memoria durante el build (VPS con RAM limitada)
 ENV NODE_OPTIONS=--max-old-space-size=512
 
@@ -22,6 +25,9 @@ RUN cd apps/api && npm run build
 # ── Stage 2: Runtime ─────────────────────────────────────────
 FROM node:20-alpine AS runner
 WORKDIR /app
+
+# openssl requerido por Prisma en runtime
+RUN apk add --no-cache openssl
 
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size=256
