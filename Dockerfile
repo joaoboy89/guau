@@ -16,7 +16,7 @@ COPY packages/shared ./packages/shared
 COPY apps/api ./apps/api
 
 RUN cd apps/api && npx prisma generate
-RUN cd apps/api && npm run build 2>&1 || true && ls -la /app/apps/api/dist/ || echo 'dist vacío'
+RUN cd apps/api && npm run build 2>&1; ls -la /app/apps/api/dist/ 2>&1 || echo 'dist vacio'
 
 # Verificar que el output existe antes de continuar
 RUN ls -la apps/api/dist/main.js
