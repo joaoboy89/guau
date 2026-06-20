@@ -16,10 +16,12 @@ COPY packages/shared ./packages/shared
 COPY apps/api ./apps/api
 
 RUN cd apps/api && npx prisma generate
-RUN cd apps/api && npm run build 2>&1; ls -la /app/apps/api/dist/ 2>&1 || echo 'dist vacio'
 
-# Verificar que el output existe antes de continuar
-RUN ls -la apps/api/dist/main.js
+RUN cat apps/api/tsconfig.json && cat apps/api/tsconfig.build.json 2>/dev/null || echo 'no tsconfig.build.json'
+
+RUN cd apps/api && npm run build || (echo 'BUILD FAILED' && exit 1)
+
+RUN ls -la apps/api/dist/ 2>&1 || echo 'dist vacio'
 
 # ── Stage 2: Runtime ─────────────────────────────────────────
 FROM node:20-alpine AS runner
