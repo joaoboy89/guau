@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: guau_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: guau
+      POSTGRES_USER: guau
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guau -d guau"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./repo
+      dockerfile: Dockerfile
+    container_name: guau_api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://guau:${POSTGRES_PASSWORD}@postgres:5432/guau
+      NODE_ENV: production
+      PORT: 3001
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/docs > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+networks:
+  internal:
+    name: guau_internal
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: guau_postgres_data
