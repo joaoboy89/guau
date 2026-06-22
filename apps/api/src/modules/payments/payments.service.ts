@@ -23,7 +23,7 @@ export class PaymentsService {
     private config: ConfigService,
   ) {
     this.mpClient = new MercadoPago({
-      accessToken: this.config.getOrThrow<string>("MP_ACCESS_TOKEN"),
+      accessToken: this.config.get<string>("MP_ACCESS_TOKEN") ?? "no_configurado",
     });
   }
 
