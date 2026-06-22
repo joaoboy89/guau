@@ -4,6 +4,7 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 
 ENV NODE_OPTIONS=--max-old-space-size=512
+ENV PRISMA_SKIP_POSTINSTALL_GENERATE=true
 
 COPY package.json package-lock.json ./
 COPY apps/api/package.json ./apps/api/
