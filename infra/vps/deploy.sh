@@ -38,10 +38,7 @@ fi
 
 cp "$REPO_DIR/infra/vps/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
 
-# ── Autenticar en GHCR y bajar imagen ────────────────────────
-echo "→ Autenticando en ghcr.io..."
-echo "$GH_TOKEN" | docker login ghcr.io -u joaoboy89 --password-stdin
-
+# ── Bajar imagen (paquete público, sin auth) ─────────────────
 echo "→ Bajando imagen $IMAGE..."
 docker pull "$IMAGE"
 
