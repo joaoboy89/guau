@@ -19,9 +19,7 @@ services:
       retries: 5
 
   api:
-    build:
-      context: ./repo
-      dockerfile: Dockerfile
+    image: ghcr.io/joaoboy89/guau-api:latest
     container_name: guau_api
     restart: unless-stopped
     env_file: .env
@@ -42,7 +40,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 90s
+      start_period: 60s
 
 networks:
   internal:
