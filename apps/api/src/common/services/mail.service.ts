@@ -4,16 +4,23 @@ import { Resend } from "resend";
 
 @Injectable()
 export class MailService {
-  private readonly resend: Resend;
+  private readonly resend: Resend | null = null;
   private readonly from: string;
   private readonly logger = new Logger(MailService.name);
 
   constructor(private config: ConfigService) {
-    this.resend = new Resend(config.get<string>("RESEND_API_KEY"));
+    const apiKey = config.get<string>("RESEND_API_KEY") ?? "";
+    const isPlaceholder = !apiKey || apiKey.startsWith("re_placeholder") || apiKey === "your_resend_api_key";
+    if (isPlaceholder) {
+      this.logger.warn("RESEND_API_KEY no configurada — emails deshabilitados");
+    } else {
+      this.resend = new Resend(apiKey);
+    }
     this.from = config.get<string>("EMAIL_FROM") ?? "noreply@guau.com.ar";
   }
 
   async sendVerificationEmail(to: string, firstName: string, token: string) {
+    if (!this.resend) return;
     const url = `${this.config.get("API_URL")}/auth/verify-email/${token}`;
 
     await this.resend.emails.send({
@@ -35,6 +42,7 @@ export class MailService {
   }
 
   async sendWelcomeEmail(to: string, firstName: string) {
+    if (!this.resend) return;
     await this.resend.emails.send({
       from: this.from,
       to,
