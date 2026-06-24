@@ -14,6 +14,7 @@ RUN npm ci --legacy-peer-deps
 COPY packages/shared ./packages/shared
 COPY apps/api ./apps/api
 
+RUN cd packages/shared && npx tsc
 RUN cd apps/api && npx prisma generate
 RUN cd apps/api && npm run build || (echo 'BUILD FAILED' && exit 1)
 RUN ls -la apps/api/dist/main.js
