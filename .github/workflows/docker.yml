@@ -70,6 +70,19 @@ jobs:
     needs: [build-api, build-web]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      # Sincroniza el docker-compose desde el repo al VPS (strip: infra/vps/)
+      - name: Sync docker-compose al VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "infra/vps/docker-compose.yml"
+          target: "/opt/guau/"
+          strip_components: 2
+
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -78,44 +91,16 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             set -euo pipefail
-            DEPLOY_DIR="/opt/guau"
-            REPO_DIR="$DEPLOY_DIR/repo"
-
-            echo "→ Actualizando repo..."
-            if [ -d "$REPO_DIR/.git" ]; then
-              git -C "$REPO_DIR" pull --ff-only
-            else
-              git clone "https://$GH_TOKEN@github.com/joaoboy89/guau.git" "$REPO_DIR"
-            fi
-
-            # Copiar docker-compose actualizado
-            cp "$REPO_DIR/infra/vps/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
+            cd /opt/guau
 
             echo "→ Bajando imágenes..."
             docker pull ghcr.io/joaoboy89/guau-api:latest
             docker pull ghcr.io/joaoboy89/guau-web:latest
 
-            echo "→ Asegurar Postgres activo para migrations..."
-            cd "$DEPLOY_DIR"
-            docker compose up -d postgres
-            echo "   Esperando postgres..."
-            until docker exec guau_postgres pg_isready -U guau -d guau; do sleep 2; done
-
-            echo "→ Ejecutando prisma migrate deploy..."
-            source "$DEPLOY_DIR/.env"
-            docker run --rm \
-              --network guau_internal \
-              -e DATABASE_URL="postgresql://guau:${POSTGRES_PASSWORD}@postgres:5432/guau" \
-              ghcr.io/joaoboy89/guau-api:latest \
-              sh -c "node_modules/.bin/prisma migrate deploy --schema=apps/api/prisma/schema.prisma"
-
-            echo "→ Levantando todos los servicios..."
+            echo "→ Levantando servicios..."
             docker compose up -d --remove-orphans
 
             echo "→ Limpiando imágenes viejas..."
             docker image prune -f
 
-            echo ""
-            echo "✓ Deploy completado"
-            echo "  API: http://38.54.57.20:3001"
-            echo "  Web: http://38.54.57.20:3000"
+            echo "✓ Deploy completado — API :3001  Web :3000"
