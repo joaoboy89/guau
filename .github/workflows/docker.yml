@@ -84,11 +84,12 @@ jobs:
           strip_components: 2
 
       - name: SSH deploy
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.1.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: "30m"
           script: |
             set -euo pipefail
             cd /opt/guau
@@ -103,4 +104,4 @@ jobs:
             echo "→ Limpiando imágenes viejas..."
             docker image prune -f
 
-            echo "✓ Deploy completado — API :3001  Web :3000"
+            echo "✓ Deploy comple
