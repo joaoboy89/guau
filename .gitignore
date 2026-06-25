@@ -37,3 +37,12 @@ Thumbs.db
 
 # Prisma
 apps/api/prisma/migrations/dev.db
+
+# SSL / certificados (Nginx + Certbot)
+*.pem
+*.key
+*.crt
+infra/vps/ssl/
+
+# Coverage
+coverage/
