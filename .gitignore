@@ -29,5 +29,11 @@ Thumbs.db
 .vscode
 .idea
 
+# Claude Code
+.claude/settings.local.json
+
+# TypeScript build info
+*.tsbuildinfo
+
 # Prisma
 apps/api/prisma/migrations/dev.db

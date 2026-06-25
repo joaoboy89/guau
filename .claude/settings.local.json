@@ -3,7 +3,10 @@
     "allow": [
       "PowerShell(npm *)",
       "PowerShell(New-Item *)",
-      "PowerShell(Get-Content *)"
+      "PowerShell(Get-Content *)",
+      "PowerShell(gh auth *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

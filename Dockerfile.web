@@ -1,0 +1,59 @@
+# ── Stage 1: deps ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS deps
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat
+
+# Copiar solo los package.json del workspace para aprovechar el cache de capas
+COPY package.json package-lock.json ./
+COPY apps/web/package.json ./apps/web/
+COPY packages/shared/package.json ./packages/shared/
+
+RUN npm ci --legacy-peer-deps
+
+# ── Stage 2: builder ─────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Variables públicas: se resuelven en build-time (NEXT_PUBLIC_*)
+ARG NEXT_PUBLIC_API_URL=http://38.54.57.20:3001
+ARG NEXT_PUBLIC_WS_URL=http://38.54.57.20:3001
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY packages/shared ./packages/shared
+COPY apps/web ./apps/web
+COPY package.json ./
+
+# next.config.ts tiene transpilePackages + paths → Next.js compila shared desde fuente
+RUN cd apps/web && npx next build
+
+# ── Stage 3: runner ───────────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser  --system --uid 1001 nextjs
+
+# standalone output mantiene la estructura del monorepo:
+#   .next/standalone/apps/web/server.js
+COPY --from=builder /app/apps/web/public              ./apps/web/public
+COPY --from=builder --chown=nextjs:nodejs \
+     /app/apps/web/.next/standalone                   ./
+COPY --from=builder --chown=nextjs:nodejs \
+     /app/apps/web/.next/static                       ./apps/web/.next/static
+
+USER nextjs
+
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# El server.js vive en apps/web/ porque es un npm workspace monorepo
+CMD ["node", "apps/web/server.js"]
