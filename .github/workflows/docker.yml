@@ -1,11 +1,11 @@
-name: CI/CD — Güau
+name: CI/CD - Guau
 
 on:
   push:
     branches: [master]
 
 jobs:
-  # ── 1. Build & push imagen API ──────────────────────────────────────────────
+  # -- 1. Build & push imagen API -----------------------------------------------
   build-api:
     name: Build API image
     runs-on: ubuntu-latest
@@ -33,7 +33,7 @@ jobs:
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
 
-  # ── 2. Build & push imagen Web ──────────────────────────────────────────────
+  # -- 2. Build & push imagen Web -----------------------------------------------
   build-web:
     name: Build Web image
     runs-on: ubuntu-latest
@@ -64,7 +64,7 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
-  # ── 3. Deploy al VPS vía SSH ────────────────────────────────────────────────
+  # -- 3. Deploy al VPS via SSH -------------------------------------------------
   deploy:
     name: Deploy to VPS
     needs: [build-api, build-web]
@@ -72,7 +72,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Sincroniza el docker-compose desde el repo al VPS (strip: infra/vps/)
       - name: Sync docker-compose al VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -94,14 +93,14 @@ jobs:
             set -euo pipefail
             cd /opt/guau
 
-            echo "→ Bajando imágenes..."
+            echo "Bajando imagenes..."
             docker pull ghcr.io/joaoboy89/guau-api:latest
             docker pull ghcr.io/joaoboy89/guau-web:latest
 
-            echo "→ Levantando servicios..."
+            echo "Levantando servicios..."
             docker compose up -d --remove-orphans
 
-            echo "→ Limpiando imágenes viejas..."
+            echo "Limpiando imagenes viejas..."
             docker image prune -f
 
-            echo "✓ Deploy comple
+            echo "Deploy completado - API :3001 Web :3000"
