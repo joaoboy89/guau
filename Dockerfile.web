@@ -55,5 +55,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# El server.js vive en apps/web/ porque es un npm workspace monorepo
-CMD ["node", "apps/web/server.js"]
+# server.js se copia a la raiz /app/ con el standalone output
+CMD ["node", "server.js"]
