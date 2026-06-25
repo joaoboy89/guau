@@ -26,4 +26,4 @@ ENV NODE_OPTIONS=--max-old-space-size=256
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "node_modules/.bin/prisma db push --schema=apps/api/prisma/schema.prisma --skip-generate && node apps/api/dist/main.js
+CMD ["sh", "-c", "node_modules/.bin/prisma db push --schema=apps/api/prisma/schema.prisma --skip-generate && node apps/api/dist/main.js"]
