@@ -1,36 +1,121 @@
-name: Build & Push Docker image
+name: CI/CD — Güau
 
 on:
   push:
     branches: [master]
 
 jobs:
-  build:
+  # ── 1. Build & push imagen API ──────────────────────────────────────────────
+  build-api:
+    name: Build API image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v5
         with:
           context: .
+          file: Dockerfile
           push: true
           platforms: linux/amd64
           tags: ghcr.io/joaoboy89/guau-api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+  # ── 2. Build & push imagen Web ──────────────────────────────────────────────
+  build-web:
+    name: Build Web image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          platforms: linux/amd64
+          tags: ghcr.io/joaoboy89/guau-web:latest
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://38.54.57.20:3001
+            NEXT_PUBLIC_WS_URL=http://38.54.57.20:3001
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  # ── 3. Deploy al VPS vía SSH ────────────────────────────────────────────────
+  deploy:
+    name: Deploy to VPS
+    needs: [build-api, build-web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            DEPLOY_DIR="/opt/guau"
+            REPO_DIR="$DEPLOY_DIR/repo"
+
+            echo "→ Actualizando repo..."
+            if [ -d "$REPO_DIR/.git" ]; then
+              git -C "$REPO_DIR" pull --ff-only
+            else
+              git clone "https://$GH_TOKEN@github.com/joaoboy89/guau.git" "$REPO_DIR"
+            fi
+
+            # Copiar docker-compose actualizado
+            cp "$REPO_DIR/infra/vps/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
+
+            echo "→ Bajando imágenes..."
+            docker pull ghcr.io/joaoboy89/guau-api:latest
+            docker pull ghcr.io/joaoboy89/guau-web:latest
+
+            echo "→ Asegurar Postgres activo para migrations..."
+            cd "$DEPLOY_DIR"
+            docker compose up -d postgres
+            echo "   Esperando postgres..."
+            until docker exec guau_postgres pg_isready -U guau -d guau; do sleep 2; done
+
+            echo "→ Ejecutando prisma migrate deploy..."
+            source "$DEPLOY_DIR/.env"
+            docker run --rm \
+              --network guau_internal \
+              -e DATABASE_URL="postgresql://guau:${POSTGRES_PASSWORD}@postgres:5432/guau" \
+              ghcr.io/joaoboy89/guau-api:latest \
+              sh -c "node_modules/.bin/prisma migrate deploy --schema=apps/api/prisma/schema.prisma"
+
+            echo "→ Levantando todos los servicios..."
+            docker compose up -d --remove-orphans
+
+            echo "→ Limpiando imágenes viejas..."
+            docker image prune -f
+
+            echo ""
+            echo "✓ Deploy completado"
+            echo "  API: http://38.54.57.20:3001"
+            echo "  Web: http://38.54.57.20:3000"

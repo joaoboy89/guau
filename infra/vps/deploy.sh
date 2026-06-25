@@ -4,7 +4,8 @@ set -euo pipefail
 DEPLOY_DIR="/opt/guau"
 REPO_DIR="$DEPLOY_DIR/repo"
 REPO="joaoboy89/guau"
-IMAGE="ghcr.io/joaoboy89/guau-api:latest"
+API_IMAGE="ghcr.io/joaoboy89/guau-api:latest"
+WEB_IMAGE="ghcr.io/joaoboy89/guau-web:latest"
 
 echo ""
 echo "╔═══════════════════════════════╗"
@@ -25,12 +26,11 @@ if [ -z "${GH_TOKEN:-}" ]; then
   exit 1
 fi
 
-# ── Actualizar repo (para tener el docker-compose.yml actualizado) ─
+# ── Actualizar repo ────────────────────────────────────────────
 if [ -d "$REPO_DIR/.git" ]; then
   echo "→ Actualizando repo..."
-  cd "$REPO_DIR"
-  git remote set-url origin "https://$GH_TOKEN@github.com/$REPO.git"
-  git pull
+  git -C "$REPO_DIR" remote set-url origin "https://$GH_TOKEN@github.com/$REPO.git"
+  git -C "$REPO_DIR" pull --ff-only
 else
   echo "→ Clonando repo..."
   git clone "https://$GH_TOKEN@github.com/$REPO.git" "$REPO_DIR"
@@ -38,23 +38,44 @@ fi
 
 cp "$REPO_DIR/infra/vps/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
 
-# ── Bajar imagen (paquete público, sin auth) ─────────────────
-echo "→ Bajando imagen $IMAGE..."
-docker pull "$IMAGE"
+# ── Bajar imágenes ─────────────────────────────────────────────
+echo "→ Bajando imágenes..."
+docker pull "$API_IMAGE"
+docker pull "$WEB_IMAGE"
 
-# ── Levantar servicios ────────────────────────────────────────
+# ── Postgres primero, para poder migrar ───────────────────────
 cd "$DEPLOY_DIR"
+echo "→ Asegurando Postgres..."
+docker compose up -d postgres
+echo "   Esperando postgres..."
+ATTEMPTS=0
+until docker exec guau_postgres pg_isready -U guau -d guau 2>/dev/null; do
+  ATTEMPTS=$((ATTEMPTS + 1))
+  if [ $ATTEMPTS -ge 15 ]; then echo "✗ Postgres no arrancó."; exit 1; fi
+  sleep 2
+done
+
+# ── Prisma migrate deploy ──────────────────────────────────────
+echo "→ Ejecutando prisma migrate deploy..."
+docker run --rm \
+  --network guau_internal \
+  -e DATABASE_URL="postgresql://guau:${POSTGRES_PASSWORD}@postgres:5432/guau" \
+  "$API_IMAGE" \
+  sh -c "node_modules/.bin/prisma migrate deploy --schema=apps/api/prisma/schema.prisma" \
+  && echo "   Migrations OK." \
+  || echo "   (sin migraciones pendientes — OK)"
+
+# ── Levantar todos los servicios ──────────────────────────────
 echo "→ Levantando contenedores..."
-docker compose up -d
+docker compose up -d --remove-orphans
 
 # ── Esperar que la API responda ───────────────────────────────
-echo "→ Esperando que la API responda..."
+echo "→ Esperando API..."
 ATTEMPTS=0
 until docker exec guau_api wget -qO- http://localhost:3001/docs > /dev/null 2>&1; do
   ATTEMPTS=$((ATTEMPTS + 1))
   if [ $ATTEMPTS -ge 24 ]; then
-    echo ""
-    echo "✗ Timeout. Revisá los logs: docker logs guau_api"
+    echo "✗ Timeout. Logs: docker logs guau_api"
     exit 1
   fi
   printf "   (%d/24) esperando...\r" "$ATTEMPTS"
@@ -74,12 +95,17 @@ VALUES
 ON CONFLICT DO NOTHING;
 " 2>/dev/null && echo "   Seed OK." || echo "   (ya existían — OK)"
 
+# ── Limpiar imágenes viejas ───────────────────────────────────
+docker image prune -f 2>/dev/null || true
+
 # ── Resultado ─────────────────────────────────────────────────
 echo ""
 echo "✓ Güau corriendo"
 echo "  → API:     http://38.54.57.20:3001"
 echo "  → Swagger: http://38.54.57.20:3001/docs"
+echo "  → Web:     http://38.54.57.20:3000"
 echo ""
 echo "Comandos útiles:"
-echo "  docker logs -f guau_api    # logs en vivo"
+echo "  docker logs -f guau_api    # API logs"
+echo "  docker logs -f guau_web    # Web logs"
 echo "  docker compose -f $DEPLOY_DIR/docker-compose.yml ps"

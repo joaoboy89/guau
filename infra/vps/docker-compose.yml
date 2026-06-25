@@ -42,6 +42,28 @@ services:
       retries: 3
       start_period: 60s
 
+  web:
+    image: ghcr.io/joaoboy89/guau-web:latest
+    container_name: guau_web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - internal
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 networks:
   internal:
     name: guau_internal

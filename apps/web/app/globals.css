@@ -2,8 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --radius: 0.5rem;
-  }
+:root {
+  --bg:           #1a1a2e;
+  --surface:      #22223a;
+  --border:       #2e2e4a;
+  --accent:       #00a89c;
+  --accent-light: #4dd2c7;
+  --text:         #f0f0f8;
+  --muted:        #8888aa;
+  --safe-bottom:  env(safe-area-inset-bottom, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.pb-safe { padding-bottom: max(1rem, var(--safe-bottom)); }
+
+.mapboxgl-ctrl-logo { display: none !important; }
+.mapboxgl-ctrl-attrib { display: none !important; }
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+  .gradient-brand  { background: linear-gradient(135deg, #1a1a2e 0%, #22223a 100%); }
+  .gradient-accent { background: linear-gradient(135deg, #00baad 0%, #4dd2c7 100%); }
 }

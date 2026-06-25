@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Güau — Brand Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: #FAF5EE; color: #1E1B16; padding: 40px 24px; max-width: 780px; margin: 0 auto; }
+  h1 { font-family: 'Fraunces', serif; font-size: 48px; font-weight: 600; color: #1E1B16; }
+  h2 { font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #8B7355; margin-bottom: 20px; }
+  h3 { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 600; color: #1E1B16; margin-bottom: 8px; }
+  p { font-size: 15px; line-height: 1.7; color: #3D3628; }
+  .section { margin-bottom: 56px; }
+  hr { border: none; border-top: 1px solid #E8DDD0; margin: 48px 0; }
+
+  /* Header */
+  .header { margin-bottom: 64px; }
+  .logo-area { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+  .logo-mark { width: 64px; height: 64px; border-radius: 50%; background: #C25C2A; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .brand-name { font-family: 'Fraunces', serif; font-size: 52px; font-weight: 600; color: #1E1B16; line-height: 1; }
+  .tagline { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #8B7355; margin-top: 4px; }
+
+  /* Color palette */
+  .palette { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .swatch-card { }
+  .swatch { height: 80px; border-radius: 10px; margin-bottom: 10px; }
+  .swatch-name { font-size: 13px; font-weight: 500; color: #1E1B16; }
+  .swatch-hex { font-size: 11px; color: #8B7355; font-family: monospace; }
+  .swatch-use { font-size: 11px; color: #A89070; margin-top: 4px; }
+
+  /* Typography */
+  .type-row { display: flex; gap: 32px; }
+  .type-card { flex: 1; background: white; border-radius: 14px; padding: 24px; border: 1px solid #E8DDD0; }
+  .type-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #8B7355; margin-bottom: 12px; }
+  .type-specimen { }
+
+  /* Values */
+  .values { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .value-card { background: white; border-radius: 14px; padding: 20px; border: 1px solid #E8DDD0; }
+  .value-title { font-family: 'Fraunces', serif; font-size: 18px; font-weight: 600; color: #C25C2A; margin-bottom: 6px; }
+
+  /* Logo concepts */
+  .concepts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .concept { background: white; border-radius: 14px; padding: 20px; border: 1px solid #E8DDD0; }
+  .concept-num { font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #C25C2A; margin-bottom: 8px; }
+  .concept-name { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 600; color: #1E1B16; margin-bottom: 8px; }
+  .concept-desc { font-size: 13px; color: #5A4E3A; line-height: 1.5; margin-bottom: 12px; }
+  .mj-prompt { background: #FAF5EE; border-radius: 8px; padding: 10px 12px; font-family: monospace; font-size: 10px; color: #5A4E3A; line-height: 1.6; border-left: 3px solid #C25C2A; }
+  .mj-label { font-size: 10px; font-weight: 500; color: #8B7355; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 6px; }
+
+  /* UI components */
+  .ui-demo { background: white; border-radius: 14px; padding: 24px; border: 1px solid #E8DDD0; }
+  .walker-card { background: #FAF5EE; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .walker-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .avatar { width: 44px; height: 44px; border-radius: 50%; background: #C25C2A; display: flex; align-items: center; justify-content: center; color: white; font-weight: 500; font-size: 15px; flex-shrink: 0; }
+  .walker-info h4 { font-size: 15px; font-weight: 500; }
+  .walker-info p { font-size: 12px; color: #8B7355; }
+  .stars { color: #C25C2A; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tag { font-size: 11px; padding: 4px 12px; border-radius: 20px; }
+  .tag-terra { background: #FFF0E8; color: #C25C2A; }
+  .tag-green { background: #EBF3EE; color: #2D5A3D; }
+  .tag-sand { background: #F7F0E5; color: #8B7355; }
+  .btn-primary { background: #C25C2A; color: white; border: none; border-radius: 100px; padding: 12px 24px; font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; width: 100%; }
+  .btn-secondary { background: transparent; color: #C25C2A; border: 1.5px solid #C25C2A; border-radius: 100px; padding: 11px 24px; font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; width: 100%; }
+
+  /* Guidelines */
+  .do-dont { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .do { background: #EBF3EE; border-radius: 10px; padding: 16px; }
+  .dont { background: #FFF0E8; border-radius: 10px; padding: 16px; }
+  .do-label { font-size: 11px; font-weight: 500; color: #2D5A3D; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+  .dont-label { font-size: 11px; font-weight: 500; color: #C25C2A; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+  li { font-size: 13px; color: #3D3628; line-height: 1.8; margin-left: 16px; }
+
+  @media (max-width: 600px) {
+    .palette { grid-template-columns: repeat(3, 1fr); }
+    .type-row { flex-direction: column; }
+    .concepts { grid-template-columns: 1fr; }
+    .do-dont { grid-template-columns: 1fr; }
+    .values { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo-area">
+    <div class="logo-mark">
+      <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
+        <ellipse cx="19" cy="22" rx="12" ry="9" fill="white" opacity="0.9"/>
+        <ellipse cx="9" cy="15" rx="5.5" ry="4" fill="white" opacity="0.7" transform="rotate(-20 9 15)"/>
+        <ellipse cx="29" cy="15" rx="5.5" ry="4" fill="white" opacity="0.7" transform="rotate(20 29 15)"/>
+        <circle cx="15" cy="21" r="2" fill="#C25C2A"/>
+        <circle cx="23" cy="21" r="2" fill="#C25C2A"/>
+        <ellipse cx="19" cy="25" rx="2.5" ry="1.5" fill="#C25C2A" opacity="0.5"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-name">Güau</div>
+      <div class="tagline">Paseo de perros · Buenos Aires</div>
+    </div>
+  </div>
+  <p style="max-width: 520px; color: #5A4E3A; font-size: 16px; line-height: 1.7;">Marketplace de confianza que conecta dueños de perros con paseadores verificados en Buenos Aires. El diferencial es la confianza.</p>
+</div>
+
+<hr>
+
+<!-- VALORES DE MARCA -->
+<div class="section">
+  <h2>Valores de marca</h2>
+  <div class="values">
+    <div class="value-card">
+      <div class="value-title">Confianza</div>
+      <p style="font-size: 13px; color: #5A4E3A;">El núcleo de todo. Cada decisión de diseño debe reforzar que los usuarios están en buenas manos. Verificación, transparencia, reseñas reales.</p>
+    </div>
+    <div class="value-card">
+      <div class="value-title">Calidez</div>
+      <p style="font-size: 13px; color: #5A4E3A;">Buenos Aires tiene una energía particular — barrial, cercana, humana. La marca debe sentirse como un vecino de confianza, no como una multinacional.</p>
+    </div>
+    <div class="value-card">
+      <div class="value-title">Modernidad</div>
+      <p style="font-size: 13px; color: #5A4E3A;">Startup del siglo XXI. La experiencia tiene que ser rápida, limpia y fluida. Sin fricciones. La tecnología al servicio de la confianza.</p>
+    </div>
+    <div class="value-card">
+      <div class="value-title">Personalidad</div>
+      <p style="font-size: 13px; color: #5A4E3A;">El nombre "Güau" ya es una declaración. La marca puede ser juguetona sin perder seriedad. Humor sutil, nunca infantil.</p>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- PALETA -->
+<div class="section">
+  <h2>Paleta de colores</h2>
+  <div class="palette">
+    <div class="swatch-card">
+      <div class="swatch" style="background: #C25C2A;"></div>
+      <div class="swatch-name">Terracota</div>
+      <div class="swatch-hex">#C25C2A</div>
+      <div class="swatch-use">Principal, CTAs, énfasis</div>
+    </div>
+    <div class="swatch-card">
+      <div class="swatch" style="background: #2D5A3D;"></div>
+      <div class="swatch-name">Selva</div>
+      <div class="swatch-hex">#2D5A3D</div>
+      <div class="swatch-use">Secundario, confianza</div>
+    </div>
+    <div class="swatch-card">
+      <div class="swatch" style="background: #D4A96A;"></div>
+      <div class="swatch-name">Arena</div>
+      <div class="swatch-hex">#D4A96A</div>
+      <div class="swatch-use">Acento, ilustraciones</div>
+    </div>
+    <div class="swatch-card">
+      <div class="swatch" style="background: #FAF5EE; border: 1px solid #E8DDD0;"></div>
+      <div class="swatch-name">Crema</div>
+      <div class="swatch-hex">#FAF5EE</div>
+      <div class="swatch-use">Fondo principal</div>
+    </div>
+    <div class="swatch-card">
+      <div class="swatch" style="background: #1E1B16;"></div>
+      <div class="swatch-name">Carbón</div>
+      <div class="swatch-hex">#1E1B16</div>
+      <div class="swatch-use">Texto, titulares</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 20px; background: white; border-radius: 12px; padding: 16px; border: 1px solid #E8DDD0;">
+    <p style="font-size: 13px; color: #5A4E3A; line-height: 1.7;"><strong>Nota:</strong> El fondo crema (#FAF5EE) es la base de toda la app — más cálido que el blanco puro, más limpio que el beige. La terracota es el color de acción; el verde selva aparece en elementos de verificación y confianza.</p>
+  </div>
+</div>
+
+<hr>
+
+<!-- TIPOGRAFÍAS -->
+<div class="section">
+  <h2>Tipografías</h2>
+  <div class="type-row">
+    <div class="type-card">
+      <div class="type-label">Display / Logo / Titulares</div>
+      <div class="type-specimen">
+        <div style="font-family: 'Fraunces', serif; font-size: 36px; font-weight: 600; color: #1E1B16; line-height: 1;">Fraunces</div>
+        <div style="font-family: 'Fraunces', serif; font-size: 20px; font-style: italic; color: #C25C2A; margin-top: 6px;">Tu perro en buenas manos.</div>
+        <div style="font-family: 'Fraunces', serif; font-size: 14px; color: #8B7355; margin-top: 12px; line-height: 1.6;">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>0123456789 Ü ü Á á</div>
+      </div>
+    </div>
+    <div class="type-card">
+      <div class="type-label">UI / Cuerpo / Botones</div>
+      <div class="type-specimen">
+        <div style="font-family: 'DM Sans', sans-serif; font-size: 36px; font-weight: 500; color: #1E1B16; line-height: 1;">DM Sans</div>
+        <div style="font-family: 'DM Sans', sans-serif; font-size: 15px; color: #5A4E3A; margin-top: 10px; line-height: 1.7;">Paseadora verificada · Palermo<br>★★★★★ 4.9 — 48 paseos</div>
+        <div style="font-family: 'DM Sans', sans-serif; font-size: 13px; color: #8B7355; margin-top: 12px;">Regular 400 — para cuerpo<br>Medium 500 — para UI / botones</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- LOGO CONCEPTS -->
+<div class="section">
+  <h2>Conceptos de logo — prompts para Midjourney</h2>
+  <div class="concepts">
+    <div class="concept">
+      <div class="concept-num">Opción A</div>
+      <div class="concept-name">"La Ü"</div>
+      <div class="concept-desc">Los dos puntos de la diéresis se convierten en ojos de perro. El nombre mismo es el logo. Solución tipográfica pura.</div>
+      <div class="mj-label">Prompt MJ</div>
+      <div class="mj-prompt">minimal logo, the letter "U" with two dots above functioning as cute dog eyes, warm terracotta orange #C25C2A on cream background, geometric sans-serif, flat design, negative space concept, Argentine startup brand, vector style --ar 1:1 --style raw</div>
+    </div>
+    <div class="concept">
+      <div class="concept-num">Opción B</div>
+      <div class="concept-name">"La Huella"</div>
+      <div class="concept-desc">Una huella de perro geométrica y abstracta. Reconocible como ícono de app, universal y escalable a cualquier tamaño.</div>
+      <div class="mj-label">Prompt MJ</div>
+      <div class="mj-prompt">minimal geometric dog paw print app icon, single color terracotta warm orange, rounded organic shapes, flat design, trustworthy marketplace brand, white/cream background, modern minimalist, vector --ar 1:1 --style raw</div>
+    </div>
+    <div class="concept">
+      <div class="concept-num">Opción C</div>
+      <div class="concept-name">"La Correa"</div>
+      <div class="concept-desc">Una correa que traza una ruta o forma una G. Evoca movimiento, libertad y el vínculo entre paseador y perro.</div>
+      <div class="mj-label">Prompt MJ</div>
+      <div class="mj-prompt">minimal logo design, dog leash forming a path/route that creates a circular G lettermark, warm terracotta color, movement and trust concept, flat vector, app icon, clean geometric, white background --ar 1:1 --style raw</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 16px; background: #FFF0E8; border-radius: 10px; padding: 16px;">
+    <p style="font-size: 13px; color: #5A4E3A; line-height: 1.7;"><strong>Recomendación:</strong> La Opción A (la Ü) tiene el mayor potencial diferencial porque el nombre Güau ya existe en el idioma — el logo que "juega" con eso comunica inteligencia y autenticidad de marca. Ideal para mostrar en el ícono de la PWA como home screen.</p>
+  </div>
+</div>
+
+<hr>
+
+<!-- UI DEMO -->
+<div class="section">
+  <h2>Muestra de componentes UI</h2>
+  <div class="ui-demo">
+    <div class="walker-card">
+      <div class="walker-top">
+        <div class="avatar">M</div>
+        <div class="walker-info">
+          <h4>Martina García</h4>
+          <p>Paseadora certificada · Palermo</p>
+        </div>
+        <div style="margin-left: auto; text-align: right;">
+          <div class="stars">★★★★★</div>
+          <div style="font-size: 11px; color: #8B7355;">48 paseos</div>
+        </div>
+      </div>
+      <div class="tags">
+        <span class="tag tag-terra">GPS en vivo</span>
+        <span class="tag tag-green">Verificada</span>
+        <span class="tag tag-green">Seguro incluido</span>
+        <span class="tag tag-sand">Máx. 4 perros</span>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn-primary" style="flex: 2;">Reservar paseo</button>
+        <button class="btn-secondary" style="flex: 1;">Ver perfil</button>
+      </div>
+    </div>
+
+    <div style="background: #FAF5EE; border-radius: 12px; padding: 16px; border: 1px solid #E8DDD0;">
+      <div style="font-family: 'Fraunces', serif; font-size: 18px; font-weight: 600; color: #1E1B16; margin-bottom: 6px;">¿Por qué Güau?</div>
+      <p style="font-size: 13px; color: #5A4E3A; line-height: 1.6;">Todos los paseadores pasan por verificación de identidad, referencias y entrenamiento. Tu perro está en buenas manos — siempre.</p>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- DO / DON'T -->
+<div class="section">
+  <h2>Directrices visuales</h2>
+  <div class="do-dont">
+    <div class="do">
+      <div class="do-label">✓ Hacer</div>
+      <ul>
+        <li>Usar la paleta cálida como base</li>
+        <li>Imágenes reales de perros y paseadores</li>
+        <li>Tipografía Fraunces para titulares emocionales</li>
+        <li>Corners redondeados (border-radius 12-16px)</li>
+        <li>Mucho espacio en blanco (crema)</li>
+        <li>Iconografía de línea, simple</li>
+        <li>Fotografía con tratamiento cálido / dorado</li>
+      </ul>
+    </div>
+    <div class="dont">
+      <div class="dont-label">✗ Evitar</div>
+      <ul>
+        <li>Azul corporativo genérico</li>
+        <li>Ilustraciones cartoon o infantiles</li>
+        <li>Fondos blancos puros (#FFF)</li>
+        <li>Más de 2 fuentes en pantalla</li>
+        <li>Sombras duras o efectos 3D</li>
+        <li>Lenguaje formal o técnico</li>
+        <li>Demasiada información en pantalla</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<div style="text-align: center; padding: 20px 0 40px;">
+  <div style="font-family: 'Fraunces', serif; font-size: 32px; font-weight: 600; color: #C25C2A; margin-bottom: 8px;">Güau</div>
+  <div style="font-size: 12px; color: #8B7355; letter-spacing: 0.1em; text-transform: uppercase;">Confianza, una correa a la vez.</div>
+</div>
+
+</body>
+</html>
