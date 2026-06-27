@@ -40,16 +40,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/sta
 COPY --from=builder /app/apps/web/public ./public
 
 # Paquetes que standalone no traza correctamente en monorepos
-COPY --from=builder /app/node_modules/next      ./node_modules/next
-COPY --from=builder /app/node_modules/react     ./node_modules/react
-COPY --from=builder /app/node_modules/react-dom ./node_modules/react-dom
-
-# require-hook.js hace require.resolve('styled-jsx/package.json') para encontrar el path,
-# luego registra aliases que redirigen require('styled-jsx') → next/dist/compiled/styled-jsx.
-# Solo necesitamos que exista el package.json; el runtime lo sirve Next.js internamente.
-RUN mkdir -p /app/node_modules/styled-jsx && \
-    printf '{"name":"styled-jsx","version":"5.1.6","main":"./index.js"}' \
-    > /app/node_modules/styled-jsx/package.json
+COPY --from=builder /app/node_modules/next        ./node_modules/next
+COPY --from=builder /app/node_modules/styled-jsx  ./node_modules/styled-jsx
+COPY --from=builder /app/node_modules/react       ./node_modules/react
+COPY --from=builder /app/node_modules/react-dom   ./node_modules/react-dom
 
 USER nextjs
 EXPOSE 3000
