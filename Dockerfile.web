@@ -20,8 +20,6 @@ COPY packages/shared ./packages/shared
 COPY apps/web ./apps/web
 COPY package.json ./
 RUN cd apps/web && npx next build
-# Prunar devDependencies para que el runner tenga solo lo necesario en prod
-RUN npm prune --omit=dev --legacy-peer-deps
 
 # -- Stage 3: runner ----------------------------------------------------------
 FROM node:20-alpine AS runner
@@ -32,17 +30,16 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 nextjs
 
-# Standalone: server.js + .next/server/ quedan en /app/
+# Standalone: server.js + node_modules tracados por Next.js
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 
-# Static en /app/.next/static/ — donde server.js los busca
+# Static y public donde server.js los espera
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./public
 
-# Public en /app/public/ — donde server.js los busca
-COPY --from=builder /app/apps/web/public ./public
-
-# node_modules ya prunados (sin devDeps) desde el builder
-COPY --from=builder /app/node_modules ./node_modules
+# El file tracer de Next.js no incluye el paquete 'next' en monorepos
+# porque server.js lo carga con require('next') en runtime, no en build time
+COPY --from=builder /app/node_modules/next ./node_modules/next
 
 USER nextjs
 EXPOSE 3000
