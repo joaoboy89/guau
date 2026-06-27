@@ -20,6 +20,8 @@ COPY packages/shared ./packages/shared
 COPY apps/web ./apps/web
 COPY package.json ./
 RUN cd apps/web && npx next build
+# Prunar devDependencies para que el runner tenga solo lo necesario en prod
+RUN npm prune --omit=dev --legacy-peer-deps
 
 # -- Stage 3: runner ----------------------------------------------------------
 FROM node:20-alpine AS runner
@@ -30,7 +32,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 nextjs
 
-# Standalone: pone server.js + .next/server/ en /app/
+# Standalone: server.js + .next/server/ quedan en /app/
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 
 # Static en /app/.next/static/ — donde server.js los busca
@@ -39,11 +41,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/sta
 # Public en /app/public/ — donde server.js los busca
 COPY --from=builder /app/apps/web/public ./public
 
-# Runtime minimo: next bundlea la mayoria de sus deps en dist/compiled/
-# Solo necesitamos estos 3 paquetes para que server.js arranque
-COPY --from=builder /app/node_modules/next   ./node_modules/next
-COPY --from=builder /app/node_modules/react  ./node_modules/react
-COPY --from=builder /app/node_modules/react-dom ./node_modules/react-dom
+# node_modules ya prunados (sin devDeps) desde el builder
+COPY --from=builder /app/node_modules ./node_modules
 
 USER nextjs
 EXPOSE 3000
