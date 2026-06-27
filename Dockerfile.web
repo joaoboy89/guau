@@ -30,16 +30,26 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 nextjs
 
-# Standalone: server.js + node_modules tracados por Next.js
+# Standalone: server.js + .next/server/ en /app/
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 
-# Static y public donde server.js los espera
+# Static en /app/.next/static/
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./public
 
-# El file tracer de Next.js no incluye el paquete 'next' en monorepos
-# porque server.js lo carga con require('next') en runtime, no en build time
-COPY --from=builder /app/node_modules/next ./node_modules/next
+# Public en /app/public/
+COPY --from=builder /app/apps/web/public ./public
+
+# Paquetes que standalone no traza correctamente en monorepos
+COPY --from=builder /app/node_modules/next      ./node_modules/next
+COPY --from=builder /app/node_modules/react     ./node_modules/react
+COPY --from=builder /app/node_modules/react-dom ./node_modules/react-dom
+
+# require-hook.js hace require.resolve('styled-jsx/package.json') para encontrar el path,
+# luego registra aliases que redirigen require('styled-jsx') → next/dist/compiled/styled-jsx.
+# Solo necesitamos que exista el package.json; el runtime lo sirve Next.js internamente.
+RUN mkdir -p /app/node_modules/styled-jsx && \
+    printf '{"name":"styled-jsx","version":"5.1.6","main":"./index.js"}' \
+    > /app/node_modules/styled-jsx/package.json
 
 USER nextjs
 EXPOSE 3000
