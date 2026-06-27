@@ -39,11 +39,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/sta
 # Public en /app/public/
 COPY --from=builder /app/apps/web/public ./public
 
-# Paquetes que standalone no traza correctamente en monorepos
-COPY --from=builder /app/node_modules/next        ./node_modules/next
-COPY --from=builder /app/node_modules/styled-jsx  ./node_modules/styled-jsx
-COPY --from=builder /app/node_modules/react       ./node_modules/react
-COPY --from=builder /app/node_modules/react-dom   ./node_modules/react-dom
+# Paquetes que standalone no traza automáticamente en monorepos
+# (styled-jsx se incluye via outputFileTracingIncludes en next.config.mjs)
+COPY --from=builder /app/node_modules/next      ./node_modules/next
+COPY --from=builder /app/node_modules/react     ./node_modules/react
+COPY --from=builder /app/node_modules/react-dom ./node_modules/react-dom
 
 USER nextjs
 EXPOSE 3000
