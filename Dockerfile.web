@@ -33,17 +33,17 @@ RUN addgroup --system --gid 1001 nodejs && \
 # Standalone: pone server.js + .next/server/ en /app/
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 
-# Static: server.js los busca en /app/.next/static/ (no en apps/web)
+# Static en /app/.next/static/ — donde server.js los busca
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/static
 
-# Public: server.js los busca en /app/public/
+# Public en /app/public/ — donde server.js los busca
 COPY --from=builder /app/apps/web/public ./public
 
-# Standalone no incluye node_modules en monorepos: instalar prod deps
-COPY package.json package-lock.json ./
-COPY apps/web/package.json ./apps/web/
-COPY packages/shared/package.json ./packages/shared/
-RUN npm ci --legacy-peer-deps --omit=dev && npm cache clean --force
+# Runtime minimo: next bundlea la mayoria de sus deps en dist/compiled/
+# Solo necesitamos estos 3 paquetes para que server.js arranque
+COPY --from=builder /app/node_modules/next   ./node_modules/next
+COPY --from=builder /app/node_modules/react  ./node_modules/react
+COPY --from=builder /app/node_modules/react-dom ./node_modules/react-dom
 
 USER nextjs
 EXPOSE 3000
