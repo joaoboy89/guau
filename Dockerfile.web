@@ -30,23 +30,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 nextjs
 
-# Standalone: server.js + .next/server/ en /app/
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+# El standalone YA trae un node_modules pruneado con TODO lo de runtime:
+# next, react, react-dom, @next/*, styled-jsx, etc. NO copiar paquetes a mano.
+# Con outputFileTracingRoot = raiz del monorepo, server.js vive en apps/web/server.js.
+COPY --from=builder /app/apps/web/.next/standalone ./
 
-# Static en /app/.next/static/
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/static
-
-# Public en /app/public/
-COPY --from=builder /app/apps/web/public ./public
-
-# Paquetes que standalone no traza automáticamente en monorepos
-# (styled-jsx se incluye via outputFileTracingIncludes en next.config.mjs)
-COPY --from=builder /app/node_modules/next      ./node_modules/next
-COPY --from=builder /app/node_modules/react     ./node_modules/react
-COPY --from=builder /app/node_modules/react-dom ./node_modules/react-dom
+# static y public van BAJO apps/web/ (al lado de server.js), no en la raiz.
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /app/apps/web/public       ./apps/web/public
 
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
-CMD ["node", "server.js"]
+CMD ["node", "apps/web/server.js"]
