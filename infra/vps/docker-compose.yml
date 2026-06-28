@@ -45,7 +45,10 @@ services:
   web:
     image: ghcr.io/joaoboy89/guau-web:latest
     container_name: guau_web
-    restart: unless-stopped
+    # Cap de reintentos durante estabilizacion: si crashea, Docker se rinde tras 3
+    # intentos en vez de loopear infinito y clavar el load del VPS.
+    # Volver a "unless-stopped" cuando el front este probado y estable.
+    restart: on-failure:3
     environment:
       NODE_ENV: production
       PORT: 3000
