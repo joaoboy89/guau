@@ -6,8 +6,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
-  // Monorepo root: necesario para que el file-tracing incluya node_modules del root
-  outputFileTracingRoot: path.join(__dirname, "../../"),
+  experimental: {
+    // En Next 14 esta clave va DENTRO de experimental; a nivel raiz es ignorada
+    // (warning "Unrecognized key") y el file-tracing colapsa la raiz a apps/web,
+    // dejando server.js mal ubicado y sin node_modules en el standalone.
+    outputFileTracingRoot: path.join(__dirname, "../../"),
+  },
   transpilePackages: ["@guau/shared"],
   images: {
     remotePatterns: [
