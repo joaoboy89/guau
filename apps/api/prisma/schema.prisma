@@ -149,7 +149,7 @@ model Dog {
 
 model WalkType {
   id                  String  @id @default(uuid())
-  durationMinutes     Int
+  durationMinutes     Int     @unique
   label               String
   basePrice           Float
   exclusiveMultiplier Float   @default(1.5)
