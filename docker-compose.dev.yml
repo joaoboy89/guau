@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────
+# Postgres LOCAL de desarrollo. NO es producción.
+# Sirve para generar y probar migraciones en tu PC sin tocar el VPS.
+#
+# Uso:
+#   docker compose -f docker-compose.dev.yml up -d     # levantar
+#   docker compose -f docker-compose.dev.yml down      # apagar
+#
+# DATABASE_URL para tu apps/api/.env (local):
+#   postgresql://guau:devpassword@localhost:5432/guau?schema=public
+# ─────────────────────────────────────────────────────────────
+services:
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: guau_postgres_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: guau
+      POSTGRES_USER: guau
+      POSTGRES_PASSWORD: devpassword
+    ports:
+      - "5433:5432"
+    volumes:
+      - guau_pgdata_dev:/var/lib/postgresql/data
+
+volumes:
+  guau_pgdata_dev:
+    name: guau_pgdata_dev
