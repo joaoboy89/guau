@@ -5,7 +5,7 @@
 
 import { io, Socket } from "socket.io-client";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://38.54.57.20:3001";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 let socket: Socket | null = null;
 
