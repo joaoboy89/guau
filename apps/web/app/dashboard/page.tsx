@@ -10,8 +10,7 @@ export default function DashboardPage() {
   if (!ready) return null;
 
   return (
-    <main className="min-h-dvh bg-brand-bg">
-      <div className="w-full max-w-md mx-auto px-6 py-6 flex flex-col gap-6 min-h-dvh">
+    <main className="min-h-dvh p-6 flex flex-col gap-6 bg-brand-bg">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Logo size={36} />
@@ -34,7 +33,6 @@ export default function DashboardPage() {
         <p className="text-sm text-brand-text-muted">
           Contenido del dashboard — próxima sesión
         </p>
-      </div>
       </div>
     </main>
   );
