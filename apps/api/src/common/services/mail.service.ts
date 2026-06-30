@@ -16,7 +16,7 @@ export class MailService {
     } else {
       this.resend = new Resend(apiKey);
     }
-    this.from = config.get<string>("EMAIL_FROM") ?? "noreply@guau.com.ar";
+    this.from = config.get<string>("EMAIL_FROM") ?? "Güau <noreply@resend.jbsaasapp.com>";
   }
 
   async sendVerificationEmail(to: string, firstName: string, token: string) {
