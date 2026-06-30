@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { authAPI } from "@/lib/api";
+import { Logo } from "@/components/Logo";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -29,33 +30,34 @@ const schema = z
 
 type FormData = z.infer<typeof schema>;
 
+const inputCls = (hasError: boolean) =>
+  `h-12 px-4 rounded-2xl border ${
+    hasError ? "border-red-400" : "border-brand-border"
+  } bg-brand-surface text-brand-text text-sm outline-none focus:ring-2 focus:ring-brand-primary/30 transition w-full`;
+
+const textareaCls =
+  "px-4 py-3 rounded-2xl border border-brand-border bg-brand-surface text-brand-text text-sm outline-none focus:ring-2 focus:ring-brand-primary/30 resize-none transition w-full";
+
 // ─── Success screen ───────────────────────────────────────────────────────────
 
 function SuccessScreen({ email }: { email: string }) {
   return (
-    <main className="min-h-dvh flex flex-col items-center justify-center px-6 text-center gap-6">
-      <div
-        className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl"
-        style={{ background: "linear-gradient(135deg, #00baad 0%, #4dd2c7 100%)" }}
-      >
+    <main className="min-h-dvh flex flex-col items-center justify-center px-6 text-center gap-6 bg-brand-bg">
+      <div className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl bg-brand-primary-soft">
         ✉️
       </div>
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-extrabold tracking-tight">Revisá tu email</h1>
-        <p className="text-sm max-w-xs" style={{ color: "#8888aa" }}>
+        <h1 className="text-2xl font-serif font-bold text-brand-text">Revisá tu email</h1>
+        <p className="text-sm max-w-xs text-brand-text-muted">
           Enviamos un enlace de verificación a{" "}
-          <span className="font-semibold" style={{ color: "#f0f0f8" }}>{email}</span>.
+          <span className="font-semibold text-brand-text-body">{email}</span>.
           Hacé clic en el enlace para activar tu cuenta.
         </p>
-        <p className="text-xs max-w-xs" style={{ color: "#8888aa" }}>
+        <p className="text-xs max-w-xs text-brand-text-muted">
           ¿No lo encontrás? Revisá tu carpeta de spam o correo no deseado.
         </p>
       </div>
-      <a
-        href="/login"
-        className="text-sm underline"
-        style={{ color: "#00a89c" }}
-      >
+      <a href="/login" className="text-sm underline text-brand-primary">
         Ya verifiqué → Ingresar
       </a>
     </main>
@@ -68,7 +70,7 @@ function RegisterForm() {
   const searchParams = useSearchParams();
   const isWalker     = searchParams.get("role") === "walker";
 
-  const [success, setSuccess]       = useState<string | null>(null);
+  const [success, setSuccess]         = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const {
@@ -111,26 +113,23 @@ function RegisterForm() {
 
   if (success) return <SuccessScreen email={success} />;
 
-  const inputStyle = (hasError: boolean) => ({
-    background:  "#1a1a2e",
-    borderColor: hasError ? "#f87171" : "#2e2e4a",
-    color:       "#f0f0f8",
-  });
-
   return (
-    <main className="min-h-dvh flex flex-col items-center justify-center px-6 py-12">
+    <main className="min-h-dvh flex flex-col items-center justify-center px-6 py-12 bg-brand-bg">
       <div className="w-full max-w-sm flex flex-col gap-6">
 
-        <div className="text-center">
-          <h1 className="text-2xl font-extrabold tracking-tight">
-            {isWalker ? "Ser paseador en Güau" : "Crear cuenta en Güau"}
-          </h1>
-          <p className="text-sm mt-1" style={{ color: "#8888aa" }}>
-            ¿Ya tenés cuenta?{" "}
-            <a href="/login" style={{ color: "#00a89c" }} className="underline">
-              Ingresá
-            </a>
-          </p>
+        <div className="flex flex-col items-center gap-3">
+          <Logo size={48} />
+          <div className="text-center">
+            <h1 className="text-2xl font-serif font-bold text-brand-text">
+              {isWalker ? "Ser paseador en Güau" : "Crear cuenta en Güau"}
+            </h1>
+            <p className="text-sm mt-1 text-brand-text-muted">
+              ¿Ya tenés cuenta?{" "}
+              <a href="/login" className="text-brand-primary underline">
+                Ingresá
+              </a>
+            </p>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
@@ -138,108 +137,101 @@ function RegisterForm() {
           {/* Nombre + Apellido */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Nombre</label>
+              <label className="text-sm font-medium text-brand-text-body">Nombre</label>
               <input
                 {...register("firstName")}
                 type="text"
                 placeholder="Juan"
-                className="h-12 px-4 rounded-2xl border text-sm outline-none"
-                style={inputStyle(!!errors.firstName)}
+                className={inputCls(!!errors.firstName)}
               />
               {errors.firstName && (
-                <span className="text-xs" style={{ color: "#f87171" }}>{errors.firstName.message}</span>
+                <span className="text-xs text-red-600">{errors.firstName.message}</span>
               )}
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Apellido</label>
+              <label className="text-sm font-medium text-brand-text-body">Apellido</label>
               <input
                 {...register("lastName")}
                 type="text"
                 placeholder="García"
-                className="h-12 px-4 rounded-2xl border text-sm outline-none"
-                style={inputStyle(!!errors.lastName)}
+                className={inputCls(!!errors.lastName)}
               />
               {errors.lastName && (
-                <span className="text-xs" style={{ color: "#f87171" }}>{errors.lastName.message}</span>
+                <span className="text-xs text-red-600">{errors.lastName.message}</span>
               )}
             </div>
           </div>
 
           {/* Email */}
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Email</label>
+            <label className="text-sm font-medium text-brand-text-body">Email</label>
             <input
               {...register("email")}
               type="email"
               autoComplete="email"
               placeholder="juan@email.com"
-              className="h-12 px-4 rounded-2xl border text-sm outline-none"
-              style={inputStyle(!!errors.email)}
+              className={inputCls(!!errors.email)}
             />
             {errors.email && (
-              <span className="text-xs" style={{ color: "#f87171" }}>{errors.email.message}</span>
+              <span className="text-xs text-red-600">{errors.email.message}</span>
             )}
           </div>
 
           {/* Teléfono */}
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">
-              Teléfono <span style={{ color: "#8888aa" }}>(opcional)</span>
+            <label className="text-sm font-medium text-brand-text-body">
+              Teléfono <span className="text-brand-text-muted">(opcional)</span>
             </label>
             <input
               {...register("phone")}
               type="tel"
               placeholder="+5491122334455"
-              className="h-12 px-4 rounded-2xl border text-sm outline-none"
-              style={inputStyle(false)}
+              className={inputCls(false)}
             />
           </div>
 
           {/* Bio — solo walker */}
           {isWalker && (
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">
-                Bio <span style={{ color: "#8888aa" }}>(opcional)</span>
+              <label className="text-sm font-medium text-brand-text-body">
+                Bio <span className="text-brand-text-muted">(opcional)</span>
               </label>
               <textarea
                 {...register("bio")}
                 rows={3}
                 placeholder="Contanos tu experiencia con perros…"
-                className="px-4 py-3 rounded-2xl border text-sm outline-none resize-none"
-                style={inputStyle(false)}
+                className={textareaCls}
               />
             </div>
           )}
 
           {/* Password */}
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Contraseña</label>
+            <label className="text-sm font-medium text-brand-text-body">Contraseña</label>
             <input
               {...register("password")}
               type="password"
               autoComplete="new-password"
               placeholder="Mínimo 8 caracteres"
-              className="h-12 px-4 rounded-2xl border text-sm outline-none"
-              style={inputStyle(!!errors.password)}
+              className={inputCls(!!errors.password)}
             />
             {errors.password && (
-              <span className="text-xs" style={{ color: "#f87171" }}>{errors.password.message}</span>
+              <span className="text-xs text-red-600">{errors.password.message}</span>
             )}
           </div>
 
           {/* Confirm password */}
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Repetir contraseña</label>
+            <label className="text-sm font-medium text-brand-text-body">Repetir contraseña</label>
             <input
               {...register("confirmPassword")}
               type="password"
               autoComplete="new-password"
               placeholder="••••••••"
-              className="h-12 px-4 rounded-2xl border text-sm outline-none"
-              style={inputStyle(!!errors.confirmPassword)}
+              className={inputCls(!!errors.confirmPassword)}
             />
             {errors.confirmPassword && (
-              <span className="text-xs" style={{ color: "#f87171" }}>{errors.confirmPassword.message}</span>
+              <span className="text-xs text-red-600">{errors.confirmPassword.message}</span>
             )}
           </div>
 
@@ -248,30 +240,25 @@ function RegisterForm() {
             <input
               {...register("terms")}
               type="checkbox"
-              className="mt-0.5 h-4 w-4 rounded accent-teal-500"
+              className="mt-0.5 h-4 w-4 rounded accent-brand-primary"
             />
-            <span className="text-sm" style={{ color: "#8888aa" }}>
+            <span className="text-sm text-brand-text-muted">
               Acepto los{" "}
-              <span style={{ color: "#00a89c" }} className="underline cursor-pointer">
+              <span className="text-brand-primary underline cursor-pointer">
                 términos y condiciones
               </span>
             </span>
           </label>
           {errors.terms && (
-            <span className="text-xs -mt-2" style={{ color: "#f87171" }}>{errors.terms.message}</span>
+            <span className="text-xs -mt-2 text-red-600">{errors.terms.message}</span>
           )}
 
           {/* Server error */}
           {serverError && (
-            <div
-              className="text-sm px-4 py-3 rounded-xl"
-              style={{ background: "#2a1a1a", color: "#f87171", border: "1px solid #f8717133" }}
-            >
+            <div className="text-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200">
               {serverError}{" "}
               {serverError.includes("registrado") && (
-                <a href="/login" style={{ color: "#f87171" }} className="underline font-semibold">
-                  Ingresar
-                </a>
+                <a href="/login" className="underline font-semibold">Ingresar</a>
               )}
             </div>
           )}
@@ -279,8 +266,7 @@ function RegisterForm() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="h-12 rounded-2xl font-semibold text-white transition-opacity disabled:opacity-50"
-            style={{ backgroundColor: "#00a89c" }}
+            className="h-12 rounded-2xl font-semibold text-white bg-brand-primary transition-opacity disabled:opacity-50"
           >
             {isSubmitting ? "Registrando…" : isWalker ? "Crear cuenta de paseador" : "Crear cuenta"}
           </button>

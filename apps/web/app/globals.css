@@ -3,14 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --bg:           #1a1a2e;
-  --surface:      #22223a;
-  --border:       #2e2e4a;
-  --accent:       #00a89c;
-  --accent-light: #4dd2c7;
-  --text:         #f0f0f8;
-  --muted:        #8888aa;
-  --safe-bottom:  env(safe-area-inset-bottom, 0px);
+  --bg:            #FAF5EE;
+  --surface:       #FFFFFF;
+  --surface-sand:  #F7F0E5;
+  --border:        #E8DDD0;
+  --text:          #1E1B16;
+  --text-body:     #3D3628;
+  --text-muted:    #8B7355;
+  --primary:       #C25C2A;
+  --primary-soft:  #FFF0E8;
+  --green:         #2D5A3D;
+  --green-soft:    #EBF3EE;
+  --sand:          #D4A96A;
+  --safe-bottom:   env(safe-area-inset-bottom, 0px);
 }
 
 * {
@@ -26,7 +31,7 @@ html {
 body {
   background-color: var(--bg);
   color: var(--text);
-  font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
   min-height: 100dvh;
   overflow-x: hidden;
 }
@@ -41,6 +46,6 @@ body {
 
 @layer utilities {
   .text-balance { text-wrap: balance; }
-  .gradient-brand  { background: linear-gradient(135deg, #1a1a2e 0%, #22223a 100%); }
-  .gradient-accent { background: linear-gradient(135deg, #00baad 0%, #4dd2c7 100%); }
+  .gradient-brand   { background: linear-gradient(135deg, #FAF5EE 0%, #F7F0E5 100%); }
+  .gradient-primary { background: linear-gradient(135deg, #C25C2A 0%, #D4A96A 100%); }
 }
