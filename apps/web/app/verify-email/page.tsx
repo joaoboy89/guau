@@ -40,8 +40,8 @@ function VerifyEmailContent() {
 
   if (status === "loading") {
     return (
-      <main className="min-h-dvh flex items-center justify-center">
-        <p className="text-sm animate-pulse" style={{ color: "#8888aa" }}>
+      <main className="min-h-dvh flex items-center justify-center bg-brand-bg">
+        <p className="text-sm animate-pulse text-brand-text-muted">
           Verificando tu cuenta…
         </p>
       </main>
@@ -49,39 +49,31 @@ function VerifyEmailContent() {
   }
 
   if (status === "success") {
-    const isWalker  = role === "WALKER";
-    const ctaLabel  = isWalker ? "Completar mi perfil" : "Buscar un paseador";
-    const ctaHref   = "/dashboard";
-    const subtitle  = isWalker
+    const isWalker = role === "WALKER";
+    const ctaLabel = isWalker ? "Completar mi perfil" : "Buscar un paseador";
+    const subtitle = isWalker
       ? "Completá tu perfil para empezar a recibir solicitudes de paseo."
       : "Ya podés buscar paseadores verificados cerca tuyo.";
 
     return (
-      <main className="min-h-dvh flex flex-col items-center justify-center px-6 text-center gap-6">
-        <div
-          className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl"
-          style={{ background: "linear-gradient(135deg, #00baad 0%, #4dd2c7 100%)" }}
-        >
+      <main className="min-h-dvh flex flex-col items-center justify-center px-6 text-center gap-6 bg-brand-bg">
+        <div className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl bg-brand-primary-soft">
           🐾
         </div>
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-extrabold tracking-tight">Cuenta verificada</h1>
-          <p className="text-sm max-w-xs" style={{ color: "#8888aa" }}>
-            {subtitle}
-          </p>
+          <h1 className="text-2xl font-serif font-bold text-brand-text">Cuenta verificada</h1>
+          <p className="text-sm max-w-xs text-brand-text-muted">{subtitle}</p>
         </div>
         <div className="flex flex-col gap-3 w-full max-w-xs">
           <a
             href="/login"
-            className="h-12 flex items-center justify-center rounded-2xl font-semibold text-white"
-            style={{ backgroundColor: "#00a89c" }}
+            className="h-12 flex items-center justify-center rounded-2xl font-semibold text-white bg-brand-primary"
           >
             Ingresar
           </a>
           <a
             href="/login"
-            className="h-12 flex items-center justify-center rounded-2xl font-semibold border"
-            style={{ borderColor: "#2e2e4a", color: "#f0f0f8", backgroundColor: "#22223a" }}
+            className="h-12 flex items-center justify-center rounded-2xl font-semibold border border-brand-border text-brand-text-body bg-brand-surface"
           >
             {ctaLabel}
           </a>
@@ -91,23 +83,17 @@ function VerifyEmailContent() {
   }
 
   return (
-    <main className="min-h-dvh flex flex-col items-center justify-center px-6 text-center gap-6">
-      <div
-        className="w-16 h-16 rounded-3xl flex items-center justify-center text-2xl"
-        style={{ background: "#2a1a1a" }}
-      >
+    <main className="min-h-dvh flex flex-col items-center justify-center px-6 text-center gap-6 bg-brand-bg">
+      <div className="w-16 h-16 rounded-3xl flex items-center justify-center text-2xl bg-red-50 text-red-400">
         ✕
       </div>
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-extrabold tracking-tight">Enlace inválido</h1>
-        <p className="text-sm max-w-xs" style={{ color: "#8888aa" }}>
-          {message}
-        </p>
+        <h1 className="text-2xl font-serif font-bold text-brand-text">Enlace inválido</h1>
+        <p className="text-sm max-w-xs text-brand-text-muted">{message}</p>
       </div>
       <a
         href="/register"
-        className="h-12 px-8 flex items-center justify-center rounded-2xl font-semibold text-white"
-        style={{ backgroundColor: "#00a89c" }}
+        className="h-12 px-8 flex items-center justify-center rounded-2xl font-semibold text-white bg-brand-primary"
       >
         Registrarme de nuevo
       </a>

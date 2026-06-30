@@ -1,53 +1,59 @@
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Fraunces, DM_Sans } from "next/font/google";
 import { AuthHydrator } from "@/components/AuthHydrator";
 import "./globals.css";
 
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  variable: "--font-plus-jakarta",
-  weight: ["300", "400", "500", "600", "700", "800"],
-  display: "swap",
+const fraunces = Fraunces({
+  subsets:  ["latin"],
+  variable: "--font-fraunces",
+  weight:   ["400", "700", "900"],
+  display:  "swap",
+});
+
+const dmSans = DM_Sans({
+  subsets:  ["latin"],
+  variable: "--font-dm-sans",
+  weight:   ["400", "500", "600", "700"],
+  display:  "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Güau — Paseo de perros en Buenos Aires",
-  description: "Encontrá el paseador ideal para tu perro. Verificados, confiables y cerca tuyo.",
-  manifest: "/manifest.json",
+  title:       "Güau — Paseo de perros",
+  description: "Encontrá el paseador ideal para tu perro en Buenos Aires.",
+  manifest:    "/manifest.json",
   appleWebApp: {
-    capable: true,
-    statusBarStyle: "black-translucent",
-    title: "Güau",
+    capable:         true,
+    statusBarStyle:  "default",
+    title:           "Güau",
   },
   openGraph: {
-    title: "Güau",
+    title:       "Güau",
     description: "Marketplace de paseo de perros para CABA y GBA",
-    type: "website",
-    locale: "es_AR",
+    type:        "website",
+    locale:      "es_AR",
   },
 };
 
 export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  themeColor: "#1a1a2e",
-  viewportFit: "cover",
+  width:          "device-width",
+  initialScale:   1,
+  maximumScale:   1,
+  userScalable:   false,
+  themeColor:     "#FAF5EE",
+  viewportFit:    "cover",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es-AR" className={plusJakarta.variable}>
+    <html lang="es-AR" className={`${fraunces.variable} ${dmSans.variable}`}>
       <head>
+        {/* TODO: generar íconos PNG de PWA 192/512 con el logo definitivo */}
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body className="antialiased font-sans" style={{ backgroundColor: "#1a1a2e", color: "#f0f0f8" }}>
+      <body className="antialiased font-sans bg-brand-bg text-brand-text">
         <AuthHydrator />
         {children}
       </body>

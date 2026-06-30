@@ -8,6 +8,7 @@ import { z } from "zod";
 import { authAPI } from "@/lib/api";
 import { useAuth } from "@/lib/store";
 import { decodeJwtPayload } from "@/lib/auth";
+import { Logo } from "@/components/Logo";
 
 const schema = z.object({
   email:    z.string().email("Email inválido"),
@@ -15,6 +16,11 @@ const schema = z.object({
 });
 
 type FormData = z.infer<typeof schema>;
+
+const inputCls = (hasError: boolean) =>
+  `h-12 px-4 rounded-2xl border ${
+    hasError ? "border-red-400" : "border-brand-border"
+  } bg-brand-surface text-brand-text text-sm outline-none focus:ring-2 focus:ring-brand-primary/30 transition w-full`;
 
 export default function LoginPage() {
   const router      = useRouter();
@@ -46,7 +52,9 @@ export default function LoginPage() {
         role:  role === "OWNER" ? "owner" : role === "WALKER" ? "walker" : "admin",
       });
 
-      router.push(role === "ADMIN" ? "/admin" : "/dashboard");
+      if (role === "ADMIN")        router.push("/admin");
+      else if (role === "WALKER") router.push("/walker/dashboard");
+      else                        router.push("/dashboard");
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 401) {
@@ -60,64 +68,54 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-dvh flex flex-col items-center justify-center px-6">
+    <main className="min-h-dvh flex flex-col items-center justify-center px-6 bg-brand-bg">
       <div className="w-full max-w-sm flex flex-col gap-6">
 
-        <div className="text-center">
-          <h1 className="text-2xl font-extrabold tracking-tight">Ingresar a Güau</h1>
-          <p className="text-sm mt-1" style={{ color: "#8888aa" }}>
-            ¿No tenés cuenta?{" "}
-            <a href="/register" style={{ color: "#00a89c" }} className="underline">
-              Registrate
-            </a>
-          </p>
+        <div className="flex flex-col items-center gap-3">
+          <Logo size={48} />
+          <div className="text-center">
+            <h1 className="text-2xl font-serif font-bold text-brand-text">Ingresar a Güau</h1>
+            <p className="text-sm mt-1 text-brand-text-muted">
+              ¿No tenés cuenta?{" "}
+              <a href="/register" className="text-brand-primary underline">
+                Registrate
+              </a>
+            </p>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Email</label>
+            <label className="text-sm font-medium text-brand-text-body">Email</label>
             <input
               {...register("email")}
               type="email"
               autoComplete="email"
               placeholder="juan@email.com"
-              className="h-12 px-4 rounded-2xl border text-sm outline-none focus:ring-2 transition"
-              style={{
-                background:  "#1a1a2e",
-                borderColor: errors.email ? "#f87171" : "#2e2e4a",
-                color:       "#f0f0f8",
-              }}
+              className={inputCls(!!errors.email)}
             />
             {errors.email && (
-              <span className="text-xs" style={{ color: "#f87171" }}>{errors.email.message}</span>
+              <span className="text-xs text-red-600">{errors.email.message}</span>
             )}
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Contraseña</label>
+            <label className="text-sm font-medium text-brand-text-body">Contraseña</label>
             <input
               {...register("password")}
               type="password"
               autoComplete="current-password"
               placeholder="••••••••"
-              className="h-12 px-4 rounded-2xl border text-sm outline-none focus:ring-2 transition"
-              style={{
-                background:  "#1a1a2e",
-                borderColor: errors.password ? "#f87171" : "#2e2e4a",
-                color:       "#f0f0f8",
-              }}
+              className={inputCls(!!errors.password)}
             />
             {errors.password && (
-              <span className="text-xs" style={{ color: "#f87171" }}>{errors.password.message}</span>
+              <span className="text-xs text-red-600">{errors.password.message}</span>
             )}
           </div>
 
           {serverError && (
-            <div
-              className="text-sm px-4 py-3 rounded-xl"
-              style={{ background: "#2a1a1a", color: "#f87171", border: "1px solid #f8717133" }}
-            >
+            <div className="text-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200">
               {serverError}
             </div>
           )}
@@ -125,8 +123,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="h-12 rounded-2xl font-semibold text-white transition-opacity disabled:opacity-50"
-            style={{ backgroundColor: "#00a89c" }}
+            className="h-12 rounded-2xl font-semibold text-white bg-brand-primary transition-opacity disabled:opacity-50"
           >
             {isSubmitting ? "Ingresando…" : "Ingresar"}
           </button>
