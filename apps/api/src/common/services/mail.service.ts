@@ -23,41 +23,142 @@ export class MailService {
     if (!this.resend) return;
     const url = `${this.config.get("FRONTEND_URL")}/verify-email?token=${token}`;
 
-    this.resend.emails.send({
-      from: this.from,
-      to,
-      subject: "Verificá tu cuenta en Güau 🐾",
-      html: `
-        <h2>Hola ${firstName}!</h2>
-        <p>Gracias por registrarte en Güau. Para activar tu cuenta, hacé clic en el siguiente enlace:</p>
-        <a href="${url}" style="background:#f97316;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;">
-          Verificar cuenta
-        </a>
-        <p>El enlace expira en 24 horas.</p>
-        <p>Si no creaste una cuenta, ignorá este email.</p>
-      `,
-    }).catch((err) => {
-      this.logger.warn(`No se pudo enviar email de verificación a ${to}: ${err}`);
-    });
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Verificá tu cuenta en Güau</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f0f4;font-family:Arial,Helvetica,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f0f0f4;padding:32px 0">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border-radius:8px;overflow:hidden;max-width:560px;width:100%">
+
+        <tr><td style="background-color:#1a1a2e;padding:24px 40px">
+          <span style="color:#00a89c;font-size:26px;font-weight:800;letter-spacing:-0.5px">Güau</span>
+        </td></tr>
+
+        <tr><td style="padding:32px 40px 24px;color:#333333">
+          <p style="margin:0 0 12px 0;font-size:16px;font-weight:600">Hola ${firstName},</p>
+          <p style="margin:0 0 24px 0;font-size:15px;line-height:1.6;color:#555555">
+            Gracias por registrarte en Güau. Para activar tu cuenta hacé clic en el botón:
+          </p>
+          <table cellpadding="0" cellspacing="0" role="presentation">
+            <tr>
+              <td style="background-color:#00a89c;border-radius:6px">
+                <a href="${url}"
+                   style="display:block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;white-space:nowrap">
+                  Verificar mi cuenta
+                </a>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:24px 0 4px 0;font-size:12px;color:#999999">Si el botón no funciona, copiá este enlace:</p>
+          <p style="margin:0 0 24px 0;font-size:12px;color:#999999;word-break:break-all">${url}</p>
+          <p style="margin:0;font-size:13px;color:#888888">El enlace expira en 24 horas.</p>
+        </td></tr>
+
+        <tr><td style="padding:16px 40px 24px;border-top:1px solid #eeeeee">
+          <p style="margin:0;font-size:12px;color:#aaaaaa;line-height:1.5">
+            Recibiste este mensaje porque te registraste en Güau con esta dirección de correo.<br>
+            Si no fuiste vos, podés ignorar este mensaje sin problema.
+          </p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const text = `Hola ${firstName},
+
+Para verificar tu cuenta en Güau ingresá al siguiente enlace:
+
+${url}
+
+El enlace expira en 24 horas.
+Si no te registraste en Güau, ignorá este mensaje.
+
+-- Güau, paseo de perros en Buenos Aires`;
+
+    this.resend.emails
+      .send({ from: this.from, to, subject: "Verificá tu cuenta en Güau", html, text })
+      .catch((err) => {
+        this.logger.warn(`No se pudo enviar email de verificación a ${to}: ${err}`);
+      });
   }
 
-  sendWelcomeEmail(to: string, firstName: string): void {
+  sendWelcomeEmail(to: string, firstName: string, role: string): void {
     if (!this.resend) return;
+    const frontendUrl = this.config.get<string>("FRONTEND_URL") ?? "";
 
-    this.resend.emails.send({
-      from: this.from,
-      to,
-      subject: "¡Bienvenido a Güau! 🐾",
-      html: `
-        <h2>¡Bienvenido, ${firstName}!</h2>
-        <p>Tu cuenta en Güau está verificada y lista para usar.</p>
-        <a href="${this.config.get("NEXT_PUBLIC_API_URL")?.replace("3001", "3000")}"
-           style="background:#f97316;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;">
-          Ir a Güau
-        </a>
-      `,
-    }).catch((err) => {
-      this.logger.warn(`No se pudo enviar email de bienvenida a ${to}: ${err}`);
-    });
+    const isWalker = role === "WALKER";
+
+    const headline = isWalker
+      ? "Ya podés empezar a ganar paseando perros"
+      : "Ya podés buscar un paseador para tu perro";
+
+    const body = isWalker
+      ? `Completá tu perfil de paseador para aparecer en los resultados y empezar a recibir solicitudes de paseo.`
+      : `Encontrá paseadores verificados cerca tuyo, reservá un paseo y seguí a tu perro en tiempo real.`;
+
+    const ctaLabel = isWalker ? "Completar mi perfil" : "Buscar un paseador";
+    const ctaUrl   = isWalker ? `${frontendUrl}/dashboard` : `${frontendUrl}/dashboard`;
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bienvenido a Güau</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f0f4;font-family:Arial,Helvetica,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f0f0f4;padding:32px 0">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border-radius:8px;overflow:hidden;max-width:560px;width:100%">
+
+        <tr><td style="background-color:#1a1a2e;padding:24px 40px">
+          <span style="color:#00a89c;font-size:26px;font-weight:800;letter-spacing:-0.5px">Güau</span>
+        </td></tr>
+
+        <tr><td style="padding:32px 40px 24px;color:#333333">
+          <p style="margin:0 0 12px 0;font-size:16px;font-weight:600">Hola ${firstName},</p>
+          <p style="margin:0 0 8px 0;font-size:18px;font-weight:700;color:#1a1a2e">${headline}</p>
+          <p style="margin:0 0 24px 0;font-size:15px;line-height:1.6;color:#555555">${body}</p>
+          <table cellpadding="0" cellspacing="0" role="presentation">
+            <tr>
+              <td style="background-color:#00a89c;border-radius:6px">
+                <a href="${ctaUrl}"
+                   style="display:block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;white-space:nowrap">
+                  ${ctaLabel}
+                </a>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+
+        <tr><td style="padding:16px 40px 24px;border-top:1px solid #eeeeee">
+          <p style="margin:0;font-size:12px;color:#aaaaaa;line-height:1.5">
+            Recibiste este mensaje porque te registraste en Güau con esta dirección de correo.
+          </p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const text = isWalker
+      ? `Hola ${firstName},\n\n${headline}\n\n${body}\n\nIngresá a tu perfil: ${ctaUrl}\n\n-- Güau`
+      : `Hola ${firstName},\n\n${headline}\n\n${body}\n\nIngresá a Güau: ${ctaUrl}\n\n-- Güau`;
+
+    this.resend.emails
+      .send({ from: this.from, to, subject: `Bienvenido a Güau, ${firstName}`, html, text })
+      .catch((err) => {
+        this.logger.warn(`No se pudo enviar email de bienvenida a ${to}: ${err}`);
+      });
   }
 }
