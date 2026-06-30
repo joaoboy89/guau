@@ -47,6 +47,9 @@ function SuccessScreen({ email }: { email: string }) {
           <span className="font-semibold" style={{ color: "#f0f0f8" }}>{email}</span>.
           Hacé clic en el enlace para activar tu cuenta.
         </p>
+        <p className="text-xs max-w-xs" style={{ color: "#8888aa" }}>
+          ¿No lo encontrás? Revisá tu carpeta de spam o correo no deseado.
+        </p>
       </div>
       <a
         href="/login"
