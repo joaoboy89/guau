@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { authAPI } from "@/lib/api";
 import { useAuth } from "@/lib/store";
+import { decodeJwtPayload } from "@/lib/auth";
 
 const schema = z.object({
   email:    z.string().email("Email inválido"),
@@ -14,15 +15,6 @@ const schema = z.object({
 });
 
 type FormData = z.infer<typeof schema>;
-
-function decodeJwtPayload(token: string): Record<string, unknown> {
-  try {
-    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(base64));
-  } catch {
-    return {};
-  }
-}
 
 export default function LoginPage() {
   const router      = useRouter();

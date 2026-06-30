@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import { AuthHydrator } from "@/components/AuthHydrator";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -47,6 +48,7 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className="antialiased font-sans" style={{ backgroundColor: "#1a1a2e", color: "#f0f0f8" }}>
+        <AuthHydrator />
         {children}
       </body>
     </html>
