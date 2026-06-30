@@ -130,12 +130,12 @@ export class AuthService {
 
     const user = await this.users.findById(payload.sub);
     if (!user) throw new BadRequestException("Usuario no encontrado");
-    if (user.emailVerifiedAt) return { message: "Email ya verificado previamente" };
+    if (user.emailVerifiedAt) return { message: "Email ya verificado previamente", role: user.role };
 
     await this.users.markEmailVerified(user.id);
-    this.mail.sendWelcomeEmail(user.email, user.firstName);
+    this.mail.sendWelcomeEmail(user.email, user.firstName, user.role);
 
-    return { message: "Email verificado. ¡Ya podés ingresar a Güau!" };
+    return { message: "Cuenta verificada. Ya podés ingresar a Güau.", role: user.role };
   }
 
   // ─── Helpers privados ────────────────────────────────────
