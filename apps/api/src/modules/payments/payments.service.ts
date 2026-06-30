@@ -53,12 +53,10 @@ export class PaymentsService {
     if (walk.mpPaymentId) {
       throw new BadRequestException("Este paseo ya tiene un pago iniciado");
     }
-    if (!walk.walker.mpAccessToken) {
-      throw new BadRequestException("El paseador no tiene su cuenta de MercadoPago conectada");
-    }
+    // TODO Fase 2: requerir walker.mpAccessToken cuando se implemente el split real
+    // (ver https://www.mercadopago.com.mx/developers/en/docs/split-payments/integration-configuration/integrate-marketplace)
 
-    const frontendUrl = this.config.get<string>("NEXT_PUBLIC_API_URL")
-      ?.replace("3001", "3000") ?? "http://localhost:3000";
+    const frontendUrl = this.config.get<string>("FRONTEND_URL") ?? "http://localhost:3000";
     const apiUrl = this.config.get<string>("API_URL") ?? "http://localhost:3001";
 
     const preferenceApi = new Preference(this.mpClient);
@@ -75,7 +73,8 @@ export class PaymentsService {
             currency_id: "ARS",
           },
         ],
-        marketplace_fee: walk.platformFee,
+        // TODO Fase 2: crear esta Preference con un client MercadoPago instanciado con
+        // walker.mpAccessToken (no this.mpClient) + marketplace_fee, según doc MP Marketplace.
         external_reference: `${walk.id}|${owner.id}`,
         notification_url: `${apiUrl}/payments/webhook`,
         back_urls: {
@@ -253,8 +252,7 @@ export class PaymentsService {
       },
     });
 
-    const frontendUrl = this.config.get<string>("NEXT_PUBLIC_API_URL")
-      ?.replace("3001", "3000") ?? "http://localhost:3000";
+    const frontendUrl = this.config.get<string>("FRONTEND_URL") ?? "http://localhost:3000";
 
     return { redirect: `${frontendUrl}/walker/profile?mp=connected` };
   }
