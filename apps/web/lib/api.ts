@@ -156,4 +156,5 @@ export const reviewsAPI = {
 export const paymentsAPI = {
   createPreference: (data: unknown) => api.post("/payments/create-preference", data),
   walkerBalance:    ()              => api.get("/payments/walker-balance"),
+  walkerConnect:    ()              => api.get<{ url: string }>("/payments/walker-connect"),
 };
