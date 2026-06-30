@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth as useAuthStore, useStore } from "./store";
+import { useAuth as useAuthStore } from "./store";
 import { authAPI } from "./api";
 
 export function decodeJwtPayload(token: string): Record<string, unknown> {
@@ -32,32 +32,30 @@ export function useLogout() {
 }
 
 export function useRequireAuth(requiredRole?: "admin") {
-  const { user, isLoggedIn } = useAuthStore();
-  const router = useRouter();
-
-  // Inicializar con el estado actual de hidratación (ya fue si el componente
-  // monta después de que persist terminó, e.g. navegación client-side).
-  const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
-  const [ready, setReady]       = useState(false);
-
-  // Suscribirse a la hidratación de persist; se dispara solo en recarga (F5).
-  useEffect(() => {
-    if (hydrated) return;
-    return useStore.persist.onFinishHydration(() => setHydrated(true));
-  }, [hydrated]);
+  const { user } = useAuthStore();
+  const router   = useRouter();
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!hydrated) return; // Esperar: aún no se leyó el localStorage
-    if (!isLoggedIn) {
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
       router.replace("/login");
       return;
     }
-    if (requiredRole === "admin" && user?.role !== "admin") {
-      router.replace("/dashboard");
-      return;
+
+    if (requiredRole === "admin") {
+      const payload = decodeJwtPayload(token);
+      const role    = (payload.role as string ?? "").toUpperCase();
+      if (role !== "ADMIN") {
+        router.replace("/dashboard");
+        return;
+      }
     }
+
     setReady(true);
-  }, [hydrated, isLoggedIn, user, router, requiredRole]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return { user, ready };
 }
