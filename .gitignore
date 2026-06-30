@@ -29,6 +29,9 @@ Thumbs.db
 .vscode
 .idea
 
+# Notas de desarrollo (no forman parte del deploy)
+/docs/
+
 # Claude Code
 .claude/settings.local.json
 
