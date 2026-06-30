@@ -19,11 +19,11 @@ export class MailService {
     this.from = config.get<string>("EMAIL_FROM") ?? "Güau <noreply@resend.jbsaasapp.com>";
   }
 
-  async sendVerificationEmail(to: string, firstName: string, token: string) {
+  sendVerificationEmail(to: string, firstName: string, token: string): void {
     if (!this.resend) return;
     const url = `${this.config.get("API_URL")}/auth/verify-email/${token}`;
 
-    await this.resend.emails.send({
+    this.resend.emails.send({
       from: this.from,
       to,
       subject: "Verificá tu cuenta en Güau 🐾",
@@ -41,9 +41,10 @@ export class MailService {
     });
   }
 
-  async sendWelcomeEmail(to: string, firstName: string) {
+  sendWelcomeEmail(to: string, firstName: string): void {
     if (!this.resend) return;
-    await this.resend.emails.send({
+
+    this.resend.emails.send({
       from: this.from,
       to,
       subject: "¡Bienvenido a Güau! 🐾",

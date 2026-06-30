@@ -47,7 +47,7 @@ export class AuthService {
     });
 
     const verificationToken = this.signEmailToken(user.id);
-    await this.mail.sendVerificationEmail(user.email, user.firstName, verificationToken);
+    this.mail.sendVerificationEmail(user.email, user.firstName, verificationToken);
 
     return { message: "Registro exitoso. Revisá tu email para verificar la cuenta." };
   }
@@ -75,7 +75,7 @@ export class AuthService {
     });
 
     const verificationToken = this.signEmailToken(user.id);
-    await this.mail.sendVerificationEmail(user.email, user.firstName, verificationToken);
+    this.mail.sendVerificationEmail(user.email, user.firstName, verificationToken);
 
     return { message: "Registro exitoso. Revisá tu email para verificar la cuenta." };
   }
@@ -133,7 +133,7 @@ export class AuthService {
     if (user.emailVerifiedAt) return { message: "Email ya verificado previamente" };
 
     await this.users.markEmailVerified(user.id);
-    await this.mail.sendWelcomeEmail(user.email, user.firstName);
+    this.mail.sendWelcomeEmail(user.email, user.firstName);
 
     return { message: "Email verificado. ¡Ya podés ingresar a Güau!" };
   }
