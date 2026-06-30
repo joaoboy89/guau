@@ -1,0 +1,52 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth as useAuthStore } from "./store";
+import { authAPI } from "./api";
+
+export function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(base64));
+  } catch {
+    return {};
+  }
+}
+
+export function useLogout() {
+  const { logout } = useAuthStore();
+  const router = useRouter();
+
+  return async () => {
+    try {
+      await authAPI.logout();
+    } catch {
+      // Siempre limpiar estado local aunque el API falle
+    }
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    logout();
+    router.push("/login");
+  };
+}
+
+export function useRequireAuth(requiredRole?: "admin") {
+  const { user, isLoggedIn } = useAuthStore();
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      router.replace("/login");
+      return;
+    }
+    if (requiredRole === "admin" && user?.role !== "admin") {
+      router.replace("/dashboard");
+      return;
+    }
+    setReady(true);
+  }, [isLoggedIn, user, router, requiredRole]);
+
+  return { user, ready };
+}
