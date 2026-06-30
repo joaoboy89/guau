@@ -80,8 +80,7 @@ export default function WalkerDashboardPage() {
   const fullName = `${profile.user.firstName} ${profile.user.lastName}`;
 
   return (
-    <main className="min-h-dvh bg-brand-bg">
-      <div className="w-full max-w-md mx-auto px-6 py-6 flex flex-col gap-6 min-h-dvh">
+    <main className="min-h-dvh p-6 flex flex-col gap-6 bg-brand-bg">
 
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -147,7 +146,7 @@ export default function WalkerDashboardPage() {
       <button
         onClick={connectMercadoPago}
         disabled={connectLoading}
-        className="h-12 rounded-2xl font-semibold text-white transition-opacity disabled:opacity-50"
+        className="w-full sm:w-auto h-12 px-8 rounded-2xl font-semibold text-white transition-opacity disabled:opacity-50"
         style={{ backgroundColor: "#009ee3" }}
       >
         {connectLoading ? "Redirigiendo…" : "Conectar MercadoPago"}
@@ -160,7 +159,6 @@ export default function WalkerDashboardPage() {
         </p>
       </div>
 
-      </div>
     </main>
   );
 }
