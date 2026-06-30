@@ -123,14 +123,15 @@ export default function WalkerDashboardPage() {
         <button
           onClick={toggleAvailability}
           disabled={toggling}
-          className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 ${
+          className={`relative w-11 h-6 rounded-full overflow-hidden transition-colors disabled:opacity-50 ${
             available ? "bg-brand-primary" : "bg-brand-border"
           }`}
           aria-label="Cambiar disponibilidad"
         >
           <span
-            className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform"
-            style={{ transform: available ? "translateX(26px)" : "translateX(2px)" }}
+            className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+              available ? "translate-x-5" : "translate-x-0"
+            }`}
           />
         </button>
       </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth as useAuthStore } from "./store";
+import { useAuth as useAuthStore, useStore } from "./store";
 import { authAPI } from "./api";
 
 export function decodeJwtPayload(token: string): Record<string, unknown> {
@@ -34,9 +34,20 @@ export function useLogout() {
 export function useRequireAuth(requiredRole?: "admin") {
   const { user, isLoggedIn } = useAuthStore();
   const router = useRouter();
-  const [ready, setReady] = useState(false);
+
+  // Inicializar con el estado actual de hidratación (ya fue si el componente
+  // monta después de que persist terminó, e.g. navegación client-side).
+  const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
+  const [ready, setReady]       = useState(false);
+
+  // Suscribirse a la hidratación de persist; se dispara solo en recarga (F5).
+  useEffect(() => {
+    if (hydrated) return;
+    return useStore.persist.onFinishHydration(() => setHydrated(true));
+  }, [hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return; // Esperar: aún no se leyó el localStorage
     if (!isLoggedIn) {
       router.replace("/login");
       return;
@@ -46,7 +57,7 @@ export function useRequireAuth(requiredRole?: "admin") {
       return;
     }
     setReady(true);
-  }, [isLoggedIn, user, router, requiredRole]);
+  }, [hydrated, isLoggedIn, user, router, requiredRole]);
 
   return { user, ready };
 }
