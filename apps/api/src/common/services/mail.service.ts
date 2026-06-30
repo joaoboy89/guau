@@ -21,7 +21,7 @@ export class MailService {
 
   sendVerificationEmail(to: string, firstName: string, token: string): void {
     if (!this.resend) return;
-    const url = `${this.config.get("API_URL")}/auth/verify-email/${token}`;
+    const url = `${this.config.get("FRONTEND_URL")}/verify-email?token=${token}`;
 
     this.resend.emails.send({
       from: this.from,
