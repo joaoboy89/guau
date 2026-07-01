@@ -133,7 +133,20 @@ export class WalkersService {
       // Dejamos el array sin filtrar por walkTypeId para no ocultar paseadores.
     }
 
-    return filtered;
+    return filtered.map((w) => ({
+      id: w.id,
+      bio: w.bio,
+      rating: w.rating,
+      totalReviews: w.totalReviews,
+      isAvailable: w.isAvailable,
+      maxDogsPerWalk: w.maxDogsPerWalk,
+      distanceKm: w.distanceKm,
+      user: {
+        firstName: w.firstName,
+        lastName: w.lastName,
+        avatarUrl: w.avatarUrl,
+      },
+    }));
   }
 
   // ─── Perfil público ──────────────────────────────────────
