@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRequireAuth, useLogout } from "@/lib/auth";
-import { walkersAPI, paymentsAPI } from "@/lib/api";
+import { walkersAPI, paymentsAPI, walksAPI } from "@/lib/api";
 import { Logo } from "@/components/Logo";
+import { STATUS_LABEL } from "@/lib/walk-status";
+import { AxiosError } from "axios";
 
 interface WalkerProfile {
   id:                 string;
@@ -15,6 +17,17 @@ interface WalkerProfile {
     lastName:  string;
     email:     string;
   };
+}
+
+interface WalkItem {
+  id: string;
+  status: string;
+  scheduledAt: string;
+  walkType: { label: string };
+  participants: Array<{
+    dog:   { name: string };
+    owner: { user: { firstName: string; lastName: string } };
+  }>;
 }
 
 const BADGE: Record<
@@ -35,6 +48,10 @@ export default function WalkerDashboardPage() {
   const [availError, setAvailError] = useState<string | null>(null);
   const [connectLoading, setConnectLoading] = useState(false);
 
+  const [walks, setWalks]           = useState<WalkItem[]>([]);
+  const [actioning, setActioning]   = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!ready) return;
     walkersAPI.myProfile().then((res) => {
@@ -42,6 +59,7 @@ export default function WalkerDashboardPage() {
       setProfile(p);
       setAvailable(p.isAvailable);
     });
+    walksAPI.list().then((res) => setWalks(res.data));
   }, [ready]);
 
   const toggleAvailability = async () => {
@@ -74,10 +92,47 @@ export default function WalkerDashboardPage() {
     }
   };
 
+  const handleConfirm = async (walkId: string) => {
+    if (actioning) return;
+    setActioning(walkId);
+    setActionError(null);
+    try {
+      await walksAPI.confirm(walkId);
+      setWalks((prev) =>
+        prev.map((w) => (w.id === walkId ? { ...w, status: "CONFIRMED" } : w))
+      );
+    } catch (err: unknown) {
+      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
+      setActionError(msg ?? "No se pudo confirmar el paseo. Intentá de nuevo.");
+    } finally {
+      setActioning(null);
+    }
+  };
+
+  const handleReject = async (walkId: string) => {
+    if (actioning) return;
+    setActioning(walkId);
+    setActionError(null);
+    try {
+      await walksAPI.reject(walkId);
+      setWalks((prev) =>
+        prev.map((w) => (w.id === walkId ? { ...w, status: "CANCELLED_WALKER" } : w))
+      );
+    } catch (err: unknown) {
+      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
+      setActionError(msg ?? "No se pudo rechazar el paseo. Intentá de nuevo.");
+    } finally {
+      setActioning(null);
+    }
+  };
+
   if (!ready || !profile) return null;
 
   const badge    = BADGE[profile.verificationStatus];
   const fullName = `${profile.user.firstName} ${profile.user.lastName}`;
+
+  const pendingWalks = walks.filter((w) => w.status === "PENDING");
+  const otherWalks   = walks.filter((w) => w.status !== "PENDING");
 
   return (
     <main className="min-h-dvh p-6 flex flex-col gap-6 bg-brand-bg">
@@ -152,11 +207,119 @@ export default function WalkerDashboardPage() {
         {connectLoading ? "Redirigiendo…" : "Conectar MercadoPago"}
       </button>
 
-      {/* Placeholder paseos */}
-      <div className="flex-1 flex items-center justify-center rounded-3xl border border-dashed border-brand-border min-h-40">
-        <p className="text-sm text-brand-text-muted">
-          Tus paseos aparecerán acá — próxima sesión
-        </p>
+      {/* Paseos */}
+      <div className="flex flex-col gap-4">
+        <h2 className="text-base font-serif font-bold text-brand-text">Mis paseos</h2>
+
+        {actionError && (
+          <div className="text-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200">
+            {actionError}
+          </div>
+        )}
+
+        {/* Pendientes — acción requerida */}
+        {pendingWalks.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs font-semibold text-brand-text-muted uppercase tracking-wide">
+              Requieren confirmación
+            </p>
+            {pendingWalks.map((walk) => {
+              const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
+                dateStyle: "long",
+                timeStyle: "short",
+              });
+              const first = walk.participants[0];
+              const dogName   = first?.dog.name ?? "—";
+              const ownerName = first
+                ? `${first.owner.user.firstName} ${first.owner.user.lastName}`
+                : "—";
+              const isActioning = actioning === walk.id;
+
+              return (
+                <div
+                  key={walk.id}
+                  className="bg-brand-surface rounded-2xl p-4 shadow-card border border-brand-primary/30 flex flex-col gap-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-semibold text-brand-text-body">
+                        {walk.walkType.label}
+                      </span>
+                      <span className="text-xs text-brand-text-muted">{dateStr}</span>
+                    </div>
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 shrink-0">
+                      Pendiente
+                    </span>
+                  </div>
+                  <div className="text-xs text-brand-text-muted flex gap-4">
+                    <span>Perro: <strong className="text-brand-text-body">{dogName}</strong></span>
+                    <span>Dueño: <strong className="text-brand-text-body">{ownerName}</strong></span>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => handleConfirm(walk.id)}
+                      disabled={!!actioning}
+                      className="flex-1 h-9 rounded-xl bg-brand-primary text-white text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                    >
+                      {isActioning ? "…" : "Confirmar"}
+                    </button>
+                    <button
+                      onClick={() => handleReject(walk.id)}
+                      disabled={!!actioning}
+                      className="flex-1 h-9 rounded-xl border border-brand-border text-brand-text-muted text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-70"
+                    >
+                      {isActioning ? "…" : "Rechazar"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Resto de paseos */}
+        {otherWalks.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {pendingWalks.length > 0 && (
+              <p className="text-xs font-semibold text-brand-text-muted uppercase tracking-wide">
+                Historial
+              </p>
+            )}
+            {otherWalks.map((walk) => {
+              const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
+                dateStyle: "long",
+                timeStyle: "short",
+              });
+              const first = walk.participants[0];
+              const dogName = first?.dog.name ?? "—";
+              return (
+                <div
+                  key={walk.id}
+                  className="bg-brand-surface rounded-2xl p-4 border border-brand-border flex flex-col gap-1"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-sm font-semibold text-brand-text-body">
+                      {walk.walkType.label}
+                    </span>
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-brand-primary-soft text-brand-primary shrink-0">
+                      {STATUS_LABEL[walk.status] ?? walk.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-brand-text-muted">{dateStr}</p>
+                  <p className="text-xs text-brand-text-muted">Perro: {dogName}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {walks.length === 0 && (
+          <div className="flex items-center justify-center rounded-3xl border border-dashed border-brand-border min-h-40">
+            <p className="text-sm text-brand-text-muted">
+              Todavía no tenés paseos asignados.
+            </p>
+          </div>
+        )}
       </div>
 
     </main>
