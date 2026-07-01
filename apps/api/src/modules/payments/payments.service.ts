@@ -53,13 +53,15 @@ export class PaymentsService {
     if (walk.mpPaymentId) {
       throw new BadRequestException("Este paseo ya tiene un pago iniciado");
     }
-    // TODO Fase 2: requerir walker.mpAccessToken cuando se implemente el split real
-    // (ver https://www.mercadopago.com.mx/developers/en/docs/split-payments/integration-configuration/integrate-marketplace)
+    if (!walk.walker.mpAccessToken) {
+      throw new BadRequestException("El paseador todavía no conectó su cuenta de MercadoPago");
+    }
 
     const frontendUrl = this.config.get<string>("FRONTEND_URL") ?? "http://localhost:3000";
     const apiUrl = this.config.get<string>("API_URL") ?? "http://localhost:3001";
 
-    const preferenceApi = new Preference(this.mpClient);
+    const walkerClient = new MercadoPago({ accessToken: walk.walker.mpAccessToken });
+    const preferenceApi = new Preference(walkerClient);
 
     const preference = await preferenceApi.create({
       body: {
@@ -73,8 +75,7 @@ export class PaymentsService {
             currency_id: "ARS",
           },
         ],
-        // TODO Fase 2: crear esta Preference con un client MercadoPago instanciado con
-        // walker.mpAccessToken (no this.mpClient) + marketplace_fee, según doc MP Marketplace.
+        marketplace_fee: walk.platformFee,
         external_reference: `${walk.id}|${owner.id}`,
         notification_url: `${apiUrl}/payments/webhook`,
         back_urls: {
@@ -133,7 +134,7 @@ export class PaymentsService {
 
       const walk = await this.prisma.walk.findUnique({
         where: { id: walkId },
-        include: { walker: true },
+        select: { id: true, walkerAmount: true, walkerId: true, platformFee: true },
       });
       if (!walk) return { status: "walk_not_found" };
 
@@ -287,14 +288,31 @@ export class PaymentsService {
   }
 
   private async handleApprovedPayment(
-    walk: { id: string; walkerAmount: number; walkerId: string },
+    walk: { id: string; walkerAmount: number; walkerId: string; platformFee: number },
     ownerId: string,
-    payment: { id?: number | null },
+    payment: {
+      id?: number | null;
+      net_amount?: number | null;
+      transaction_details?: { net_received_amount?: number | null } | null;
+    },
   ) {
-    // Actualizar mpPaymentId con el ID real del pago (no el de preferencia)
+    // TODO: sacar este log después de confirmar con el primer pago real de Fase 2
+    // cuál de los dos campos es el correcto para el split de marketplace
+    this.logger.log(
+      `Split check — net_amount: ${payment.net_amount}, ` +
+      `transaction_details.net_received_amount: ${payment.transaction_details?.net_received_amount}, ` +
+      `marketplace_fee esperado: ${walk.platformFee}`
+    );
+
+    const realWalkerAmount = payment.net_amount ?? walk.walkerAmount;
+
+    // Actualizar mpPaymentId y walkerAmount real en el paseo
     await this.prisma.walk.update({
       where: { id: walk.id },
-      data: { mpPaymentId: String(payment.id) },
+      data: {
+        mpPaymentId: String(payment.id),
+        walkerAmount: realWalkerAmount,
+      },
     });
 
     // Registrar el cobro pendiente para el paseador
@@ -308,17 +326,15 @@ export class PaymentsService {
 
     await this.prisma.payout.upsert({
       where: {
-        // Usar un identificador compuesto del walker + período
-        // Como no tenemos @@unique en el schema para esto, creamos uno nuevo
         id: `${walk.walkerId}-${weekStart.toISOString().slice(0, 10)}`,
       },
       update: {
-        amount: { increment: walk.walkerAmount },
+        amount: { increment: realWalkerAmount },
       },
       create: {
         id: `${walk.walkerId}-${weekStart.toISOString().slice(0, 10)}`,
         walkerId: walk.walkerId,
-        amount: walk.walkerAmount,
+        amount: realWalkerAmount,
         periodStart: weekStart,
         periodEnd: weekEnd,
         status: PayoutStatus.PENDING,
@@ -326,7 +342,7 @@ export class PaymentsService {
     });
 
     this.logger.log(
-      `Pago aprobado para walk ${walk.id} — $ ${walk.walkerAmount} acreditado al paseador`
+      `Pago aprobado para walk ${walk.id} — $ ${realWalkerAmount} acreditado al paseador`
     );
   }
 }
