@@ -62,6 +62,16 @@ export default function WalkerDashboardPage() {
     walksAPI.list().then((res) => setWalks(res.data));
   }, [ready]);
 
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        setConnectLoading(false);
+      }
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, []);
+
   const toggleAvailability = async () => {
     if (!profile || toggling) return;
     setToggling(true);
