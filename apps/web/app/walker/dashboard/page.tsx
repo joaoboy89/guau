@@ -12,6 +12,9 @@ interface WalkerProfile {
   bio:                string | null;
   isAvailable:        boolean;
   verificationStatus: "PENDING" | "VERIFIED" | "REJECTED";
+  centerLat:          number | null;
+  centerLng:          number | null;
+  radiusKm:           number | null;
   user: {
     firstName: string;
     lastName:  string;
@@ -52,6 +55,10 @@ export default function WalkerDashboardPage() {
   const [actioning, setActioning]   = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [zoneSaving, setZoneSaving] = useState(false);
+  const [zoneError, setZoneError]   = useState<string | null>(null);
+  const [radiusInput, setRadiusInput] = useState(20);
+
   useEffect(() => {
     if (!ready) return;
     walkersAPI.myProfile().then((res) => {
@@ -90,6 +97,41 @@ export default function WalkerDashboardPage() {
     } finally {
       setToggling(false);
     }
+  };
+
+  const getLocationAndSave = () => {
+    setZoneSaving(true);
+    setZoneError(null);
+    if (!navigator.geolocation) {
+      setZoneError("Tu dispositivo no soporta geolocalización.");
+      setZoneSaving(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          await walkersAPI.setZone({
+            centerLat: pos.coords.latitude,
+            centerLng: pos.coords.longitude,
+            radiusKm:  radiusInput,
+          });
+          setProfile((prev) =>
+            prev
+              ? { ...prev, centerLat: pos.coords.latitude, centerLng: pos.coords.longitude, radiusKm: radiusInput }
+              : prev
+          );
+        } catch (err: unknown) {
+          const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
+          setZoneError(msg ?? "No se pudo guardar la zona. Intentá de nuevo.");
+        } finally {
+          setZoneSaving(false);
+        }
+      },
+      () => {
+        setZoneError("Permiso de ubicación denegado. Habilitalo en tu navegador e intentá de nuevo.");
+        setZoneSaving(false);
+      }
+    );
   };
 
   const connectMercadoPago = async () => {
@@ -206,6 +248,54 @@ export default function WalkerDashboardPage() {
           {availError}
         </div>
       )}
+
+      {/* Zona de trabajo */}
+      <div className="flex flex-col gap-3 px-4 py-4 rounded-2xl bg-brand-surface border border-brand-border">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-brand-text-body">Zona de trabajo</span>
+            {profile.centerLat && profile.radiusKm ? (
+              <span className="text-xs text-brand-text-muted">
+                Zona activa: radio de {profile.radiusKm} km
+              </span>
+            ) : (
+              <span className="text-xs text-amber-700">
+                Todavía no configuraste tu zona de trabajo — no vas a aparecer en búsquedas hasta que lo hagas
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-brand-text-body">
+            <span className="shrink-0">Radio (km):</span>
+            <input
+              type="number"
+              min={0.5}
+              max={20}
+              step={0.5}
+              value={radiusInput}
+              onChange={(e) => setRadiusInput(Number(e.target.value))}
+              className="w-20 h-9 px-3 rounded-xl border border-brand-border bg-brand-bg text-sm text-brand-text focus:outline-none focus:border-brand-primary"
+            />
+          </label>
+          <button
+            onClick={getLocationAndSave}
+            disabled={zoneSaving}
+            className="flex-1 h-9 rounded-xl bg-brand-primary text-white text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+          >
+            {zoneSaving
+              ? "Guardando…"
+              : profile.centerLat
+              ? "Actualizar zona"
+              : "Usar mi ubicación actual y guardar zona"}
+          </button>
+        </div>
+
+        {zoneError && (
+          <p className="text-xs text-red-700">{zoneError}</p>
+        )}
+      </div>
 
       {/* Conectar MercadoPago — color oficial de MercadoPago */}
       <button
