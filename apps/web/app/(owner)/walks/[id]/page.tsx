@@ -6,6 +6,7 @@ import { useRequireAuth } from "@/lib/auth";
 import { walksAPI, paymentsAPI } from "@/lib/api";
 import { Logo } from "@/components/Logo";
 import { AxiosError } from "axios";
+import { STATUS_LABEL } from "@/lib/walk-status";
 
 interface WalkDetail {
   id: string;
@@ -22,16 +23,6 @@ interface WalkDetail {
     dog: { name: string; size: string };
   }>;
 }
-
-const STATUS_LABEL: Record<string, string> = {
-  PENDING:           "Pendiente de confirmación",
-  CONFIRMED:         "Confirmado",
-  WALKER_ON_WAY:     "Paseador en camino",
-  IN_PROGRESS:       "Paseo en curso",
-  COMPLETED:         "Completado",
-  CANCELLED_OWNER:   "Cancelado por el dueño",
-  CANCELLED_WALKER:  "Cancelado por el paseador",
-};
 
 export default function WalkDetailPage() {
   const { ready } = useRequireAuth();
