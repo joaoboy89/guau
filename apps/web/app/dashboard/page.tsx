@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRequireAuth, useLogout } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 
@@ -29,11 +30,19 @@ export default function DashboardPage() {
         </button>
       </header>
 
-      <div className="flex-1 flex items-center justify-center rounded-3xl border border-dashed border-brand-border min-h-40">
-        <p className="text-sm text-brand-text-muted">
-          Contenido del dashboard — próxima sesión
-        </p>
-      </div>
+      <Link
+        href="/walks/new"
+        className="h-12 flex items-center justify-center rounded-2xl bg-brand-primary text-white font-semibold text-sm hover:opacity-90 transition-opacity shadow-float"
+      >
+        Reservar paseo
+      </Link>
+
+      <Link
+        href="/walks"
+        className="h-12 flex items-center justify-center rounded-2xl border border-brand-border bg-brand-surface text-brand-text-body font-semibold text-sm hover:shadow-card transition-shadow"
+      >
+        Mis paseos
+      </Link>
     </main>
   );
 }
