@@ -255,7 +255,7 @@ export class PaymentsService {
 
     const frontendUrl = this.config.get<string>("FRONTEND_URL") ?? "http://localhost:3000";
 
-    return { redirect: `${frontendUrl}/walker/profile?mp=connected` };
+    return { redirect: `${frontendUrl}/walker/dashboard?mp=connected` };
   }
 
   // ─── Helpers privados ────────────────────────────────────
