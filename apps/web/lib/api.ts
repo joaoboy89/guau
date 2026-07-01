@@ -153,6 +153,10 @@ export const reviewsAPI = {
   byWalker: (id: string)    => api.get(`/reviews/walker/${id}`),
 };
 
+export const walkTypesAPI = {
+  list: () => api.get("/walk-types"),
+};
+
 export const paymentsAPI = {
   createPreference: (data: unknown) => api.post("/payments/create-preference", data),
   walkerBalance:    ()              => api.get("/payments/walker-balance"),
