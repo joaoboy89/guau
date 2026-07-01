@@ -75,7 +75,7 @@ export class WalkersService {
       JOIN "User" u ON wp."userId" = u.id
       WHERE
         wp."isAvailable" = true
-        AND wp."verificationStatus" = ${VerificationStatus.VERIFIED}
+        AND wp."verificationStatus" = ${VerificationStatus.VERIFIED}::"VerificationStatus"
         AND wp."centerLat" IS NOT NULL
         AND wp."centerLng" IS NOT NULL
         AND wp."radiusKm" IS NOT NULL
