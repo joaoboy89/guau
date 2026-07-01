@@ -127,6 +127,8 @@ export const walkersAPI = {
   myProfile:          ()             => api.get("/walkers/me/profile"),
   updateProfile:      (data: unknown) => api.put("/walkers/me/profile", data),
   updateAvailability: (data: unknown) => api.put("/walkers/me/availability", data),
+  setZone:            (data: { centerLat: number; centerLng: number; radiusKm: number }) =>
+                        api.post("/walkers/me/zone", data),
 };
 
 export const dogsAPI = {
