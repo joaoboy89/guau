@@ -4,6 +4,10 @@ on:
   push:
     branches: [master]
 
+concurrency:
+  group: guau-deploy
+  cancel-in-progress: false
+
 jobs:
   # -- 1. Build & push imagen API -----------------------------------------------
   build-api:
