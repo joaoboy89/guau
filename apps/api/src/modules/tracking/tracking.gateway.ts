@@ -49,8 +49,12 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   async handleConnection(client: AuthSocket) {
     try {
-      const raw = client.handshake.auth?.token as string | undefined;
-      const token = raw?.startsWith("Bearer ") ? raw.slice(7) : raw;
+      const cookieHeader = client.handshake.headers.cookie ?? "";
+      const token = cookieHeader
+        .split(";")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("access_token="))
+        ?.slice("access_token=".length);
 
       if (!token) {
         client.disconnect();

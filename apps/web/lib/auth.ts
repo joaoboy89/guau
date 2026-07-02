@@ -5,13 +5,22 @@ import { useRouter } from "next/navigation";
 import { useAuth as useAuthStore } from "./store";
 import { authAPI } from "./api";
 
-export function decodeJwtPayload(token: string): Record<string, unknown> {
-  try {
-    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(base64));
-  } catch {
-    return {};
-  }
+interface MeResponse {
+  id:        string;
+  email:     string;
+  firstName: string;
+  lastName:  string;
+  role:      string;
+}
+
+function toStoreUser(u: MeResponse) {
+  const role = u.role.toUpperCase();
+  return {
+    id:    u.id,
+    email: u.email,
+    name:  `${u.firstName} ${u.lastName}`,
+    role:  (role === "OWNER" ? "owner" : role === "WALKER" ? "walker" : "admin") as "owner" | "walker" | "admin",
+  };
 }
 
 export function useLogout() {
@@ -22,38 +31,34 @@ export function useLogout() {
     try {
       await authAPI.logout();
     } catch {
-      // Siempre limpiar estado local aunque el API falle
+      // El backend limpia las cookies; limpiamos store pase lo que pase
     }
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
     logout();
     router.push("/login");
   };
 }
 
 export function useRequireAuth(requiredRole?: "admin") {
-  const { user } = useAuthStore();
-  const router   = useRouter();
+  const { user, setUser } = useAuthStore();
+  const router = useRouter();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
+    authAPI.me()
+      .then((res) => {
+        const u = res.data as MeResponse;
 
-    if (!token) {
-      router.replace("/login");
-      return;
-    }
+        if (requiredRole === "admin" && u.role.toUpperCase() !== "ADMIN") {
+          router.replace("/dashboard");
+          return;
+        }
 
-    if (requiredRole === "admin") {
-      const payload = decodeJwtPayload(token);
-      const role    = (payload.role as string ?? "").toUpperCase();
-      if (role !== "ADMIN") {
-        router.replace("/dashboard");
-        return;
-      }
-    }
-
-    setReady(true);
+        setUser(toStoreUser(u));
+        setReady(true);
+      })
+      .catch(() => {
+        router.replace("/login");
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

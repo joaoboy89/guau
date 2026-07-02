@@ -85,10 +85,6 @@ export const useStore = create<AppStore>()(
       setUser: (user) => set({ user, isLoggedIn: !!user }),
 
       logout: () => {
-        if (typeof window !== "undefined") {
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
-        }
         set({ user: null, isLoggedIn: false, activeWalk: null, walks: [] });
       },
 

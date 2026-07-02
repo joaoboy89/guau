@@ -1,41 +1,25 @@
-/**
- * Axios instance con JWT refresh automático.
- * - Interceptor de request: adjunta access_token del localStorage
- * - Interceptor de response: si 401, intenta refresh y reintenta la request original
- */
-
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosError } from "axios";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 const api: AxiosInstance = axios.create({
-  baseURL: API_URL,
-  timeout: 30_000,
-  headers: { "Content-Type": "application/json" },
+  baseURL:         API_URL,
+  timeout:         30_000,
+  headers:         { "Content-Type": "application/json" },
+  withCredentials: true,
 });
 
-// ─── Request interceptor ──────────────────────────────────────────────────────
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("access_token");
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
-  return config;
-});
-
-// ─── Response interceptor (auto-refresh con cola) ────────────────────────────
+// ─── Response interceptor (401 → refresh con cookie) ─────────────────────────
 let isRefreshing = false;
 let failedQueue: Array<{
-  resolve: (token: string) => void;
-  reject: (err: unknown) => void;
+  resolve: () => void;
+  reject:  (err: unknown) => void;
 }> = [];
 
-function processQueue(error: unknown, token: string | null = null) {
+function processQueue(error: unknown) {
   failedQueue.forEach((p) => {
     if (error) p.reject(error);
-    else p.resolve(token!);
+    else       p.resolve();
   });
   failedQueue = [];
 }
@@ -47,52 +31,24 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
-        return new Promise((resolve, reject) => {
+        return new Promise<void>((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
-          .then((token) => {
-            originalRequest.headers!.Authorization = `Bearer ${token}`;
-            return api(originalRequest);
-          })
+          .then(() => api(originalRequest))
           .catch((err) => Promise.reject(err));
       }
 
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken =
-        typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null;
-
-      if (!refreshToken) {
-        isRefreshing = false;
-        processQueue(error, null);
-        if (typeof window !== "undefined") {
-          localStorage.clear();
-          window.location.href = "/login";
-        }
-        return Promise.reject(error);
-      }
-
       try {
-        const { data } = await axios.post(`${API_URL}/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-
-        const newToken: string = data.access_token;
-        localStorage.setItem("access_token", newToken);
-        if (data.refresh_token) {
-          localStorage.setItem("refresh_token", data.refresh_token);
-        }
-
-        api.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
-        processQueue(null, newToken);
-
-        originalRequest.headers!.Authorization = `Bearer ${newToken}`;
+        // Cookie de refresh viaja sola con withCredentials
+        await axios.post(`${API_URL}/auth/refresh`, {}, { withCredentials: true });
+        processQueue(null);
         return api(originalRequest);
       } catch (refreshError) {
-        processQueue(refreshError, null);
+        processQueue(refreshError);
         if (typeof window !== "undefined") {
-          localStorage.clear();
           window.location.href = "/login";
         }
         return Promise.reject(refreshError);
@@ -109,6 +65,7 @@ export default api;
 
 // ─── Typed API helpers ────────────────────────────────────────────────────────
 export const authAPI = {
+  me:             ()              => api.get("/auth/me"),
   loginOwner:     (data: { email: string; password: string }) =>
     api.post("/auth/login", data),
   registerOwner:  (data: unknown) => api.post("/auth/register/owner", data),

@@ -11,13 +11,10 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const token =
-      typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-
     socket = io(API_URL, {
-      autoConnect: false,
-      transports: ["websocket"],
-      auth: token ? { token } : undefined,
+      autoConnect:     false,
+      transports:      ["websocket"],
+      withCredentials: true,
     });
   }
   return socket;

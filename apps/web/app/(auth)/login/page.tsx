@@ -7,7 +7,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { authAPI } from "@/lib/api";
 import { useAuth } from "@/lib/store";
-import { decodeJwtPayload } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 
 const schema = z.object({
@@ -37,18 +36,15 @@ export default function LoginPage() {
     setServerError(null);
     try {
       const res = await authAPI.loginOwner(data);
-      const { accessToken, refreshToken } = res.data as { accessToken: string; refreshToken: string };
-
-      localStorage.setItem("access_token",  accessToken);
-      localStorage.setItem("refresh_token", refreshToken);
-
-      const payload = decodeJwtPayload(accessToken);
-      const role    = (payload.role as string ?? "").toUpperCase();
+      const u   = res.data as {
+        id: string; email: string; firstName: string; lastName: string; role: string;
+      };
+      const role = u.role.toUpperCase();
 
       setUser({
-        id:    payload.sub as string,
-        email: payload.email as string,
-        name:  "",
+        id:    u.id,
+        email: u.email,
+        name:  `${u.firstName} ${u.lastName}`,
         role:  role === "OWNER" ? "owner" : role === "WALKER" ? "walker" : "admin",
       });
 
