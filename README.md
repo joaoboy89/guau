@@ -16,16 +16,19 @@ Marketplace de paseo de perros para Capital Federal y Gran Buenos Aires, Argenti
 | Real-time | Socket.io |
 | Pagos | MercadoPago (Checkout Pro) |
 | Email | Resend |
-| Auth | JWT + Refresh Tokens |
+| Auth | JWT + Refresh Tokens, en cookies `httpOnly` (no accesibles desde JS) |
+| Testing | Jest (backend: 132 tests en los módulos de mayor riesgo — pagos, auth, búsqueda, reservas, admin; frontend: en progreso) |
 | Deploy | VPS propio + Docker Compose + Cloudflare Tunnel |
 | CI/CD | GitHub Actions (push a `master` → build → deploy automático) |
 | Monorepo | npm workspaces + Turborepo |
 
 ## Estado actual
 
-Implementado y funcionando: registro y auth completos, perfil de dueño y paseador, búsqueda de paseadores por cercanía, flujo de reserva (crear → confirmar/rechazar) y pago del paseo vía MercadoPago (Fase 1, sin split automático — validado end-to-end en sandbox).
+Implementado y funcionando: registro y auth completos (cookies httpOnly, sin tokens accesibles desde JavaScript), perfil de dueño y paseador (incluida carga de zona de trabajo por geolocalización), búsqueda de paseadores por cercanía, flujo completo de reserva (crear → confirmar/rechazar → en curso → completado), y 132 tests automatizados de backend cubriendo los módulos de mayor riesgo (pagos, auth, búsqueda, reservas, administración).
 
-Pendiente: integración de mapas (Mapbox ya está instalado, falta conectarlo), split automático de pago al paseador (Fase 2 de MercadoPago Marketplace), upload de fotos (Cloudflare R2), pantallas de paseo en curso para el paseador, notificaciones push de navegador.
+Pago vía MercadoPago: Fase 1 (checkout simple) validada end-to-end en sandbox. Fase 2 (split real de marketplace vía OAuth Connect del paseador + `marketplace_fee`) tiene el código implementado y deployado, pendiente de una prueba end-to-end completa con un pago real de sandbox.
+
+Pendiente: integración de mapas (Mapbox ya está instalado, falta conectarlo), upload de fotos (Cloudflare R2), tracking GPS en vivo del lado del dueño, notificaciones push de navegador, ampliar cobertura de tests de frontend.
 
 ## Estructura del monorepo
 
@@ -72,6 +75,18 @@ npm run dev   # corre web (puerto 3000) y api (puerto 3001) en paralelo, vía Tu
 
 Backend disponible en `http://localhost:3001`, con Swagger en `http://localhost:3001/docs` (sin Basic Auth en desarrollo — la protección solo aplica cuando `NODE_ENV=production`). Frontend en `http://localhost:3000`.
 
+## Tests
+
+```bash
+# Backend — 132 tests (Jest)
+cd apps/api && npm test
+
+# Frontend — Jest vía next/jest
+cd apps/web && npm test
+```
+
+Cobertura enfocada en los módulos de mayor riesgo (pagos, autenticación, búsqueda de paseadores, ciclo de vida de una reserva, panel de administración) en vez de perseguir 100% de líneas — CRUD simple sin lógica de negocio queda sin cubrir a propósito.
+
 ## Variables de entorno
 
 Nombres reales en uso (los valores no se documentan acá — pedir por canal privado):
@@ -81,6 +96,7 @@ DATABASE_URL
 JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN, JWT_EMAIL_SECRET
 MP_ACCESS_TOKEN, MP_CLIENT_ID, MP_CLIENT_SECRET, MP_MARKETPLACE_FEE, MP_WEBHOOK_SECRET
 SWAGGER_USER, SWAGGER_PASSWORD          # solo se usan si NODE_ENV=production
+COOKIE_DOMAIN                            # dominio compartido para las cookies httpOnly (ej: .midominio.com)
 NEXT_PUBLIC_MAPBOX_TOKEN
 RESEND_API_KEY, EMAIL_FROM
 API_URL, FRONTEND_URL, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_WS_URL
@@ -90,9 +106,9 @@ API_URL, FRONTEND_URL, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_WS_URL
 
 Cada `push` a `master` dispara `.github/workflows/docker.yml`: construye las imágenes de `api` y `web`, las publica en GitHub Container Registry, y se conecta por SSH al VPS de producción para bajarlas y levantar los contenedores con Docker Compose. Sin ambiente de staging — lo que se pushea a `master` queda en producción en 2-3 minutos.
 
-Importante: el pipeline de CI/CD **no ejecuta migraciones de Prisma automáticamente**. Si un cambio incluye una migración nueva, hay que correrla a mano en el VPS (o vía `infra/vps/deploy.sh`, que sí las corre) antes o después del deploy, según el caso.
+Importante: el pipeline de CI/CD **no ejecuta migraciones de Prisma automáticamente**, y tampoco corre la suite de tests antes de deployar — un test roto no frena el deploy hoy (mejora pendiente). Si un cambio incluye una migración nueva, hay que correrla a mano en el VPS (o vía `infra/vps/deploy.sh`, que sí las corre) antes o después del deploy, según el caso.
 
-La conexión al VPS público es únicamente a través de un túnel de Cloudflare — no hay puertos abiertos directos por diseño (aunque la exposición directa del puerto de Docker sigue sin verificarse).
+La conexión al VPS público es únicamente a través de un túnel de Cloudflare. Los puertos de los contenedores están atados a `127.0.0.1` (no accesibles desde la IP pública), y el firewall del proveedor solo permite entrada por SSH — verificado con pruebas reales de conexión externa, no asumido. Acceso SSH solo por clave (autenticación por contraseña deshabilitada), con `fail2ban` activo.
 
 ## Documentación adicional
 
@@ -100,4 +116,4 @@ Existe una carpeta `docs/` con notas de arquitectura, modelo de datos y decision
 
 ---
 
-Proyecto privado. No licenciado para uso externo.
+Proyecto privado — ver [`LICENSE`](./LICENSE). Código visible con fines de portfolio y evaluación técnica; no licenciado para uso comercial o redistribución.
