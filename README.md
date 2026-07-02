@@ -56,10 +56,11 @@ npm install
 docker compose -f docker-compose.dev.yml up -d
 
 # 3. Configurar variables de entorno
-# apps/web/ tiene .env.example — copiarlo y completar.
-# apps/api/ todavía NO tiene .env.example (pendiente crearlo) — armar apps/api/.env
-# a mano con las claves listadas en la sección "Variables de entorno" más abajo.
-# DATABASE_URL local: postgresql://guau:devpassword@localhost:5433/guau?schema=public
+# Cada app tiene su .env.example con todos los placeholders necesarios.
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env.local
+# Completar con los valores reales en cada archivo (claves JWT, tokens de MercadoPago,
+# Mapbox, Resend, etc.). El DATABASE_URL ya viene listo para el contenedor local.
 #   (el contenedor publica 5432 interno en el puerto 5433 del host — usá 5433, no 5432,
 #   desde una app corriendo fuera de Docker. El comentario dentro de docker-compose.dev.yml
 #   dice 5432 por error; es un detalle a corregir, ver docs/guau-pendientes.md)
@@ -89,18 +90,12 @@ Cobertura enfocada en los módulos de mayor riesgo (pagos, autenticación, búsq
 
 ## Variables de entorno
 
-Nombres reales en uso (los valores no se documentan acá — pedir por canal privado):
+Cada app tiene un `.env.example` con el formato esperado y placeholders para todos los valores:
 
-```
-DATABASE_URL
-JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN, JWT_EMAIL_SECRET
-MP_ACCESS_TOKEN, MP_CLIENT_ID, MP_CLIENT_SECRET, MP_MARKETPLACE_FEE, MP_WEBHOOK_SECRET
-SWAGGER_USER, SWAGGER_PASSWORD          # solo se usan si NODE_ENV=production
-COOKIE_DOMAIN                            # dominio compartido para las cookies httpOnly (ej: .midominio.com)
-NEXT_PUBLIC_MAPBOX_TOKEN
-RESEND_API_KEY, EMAIL_FROM
-API_URL, FRONTEND_URL, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_WS_URL
-```
+- `apps/api/.env.example` → copiar a `apps/api/.env`
+- `apps/web/.env.example` → copiar a `apps/web/.env.local`
+
+Los valores reales (tokens de MercadoPago, claves JWT, API keys de Resend, etc.) no se versionan — pedir por canal privado.
 
 ## Deploy y CI/CD
 
