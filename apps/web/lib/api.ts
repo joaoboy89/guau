@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosError } from "axios";
+import { navigateTo } from "./navigate";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -53,7 +54,7 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError);
         if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-          window.location.href = "/login";
+          navigateTo("/login");
         }
         return Promise.reject(refreshError);
       } finally {
