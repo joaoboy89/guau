@@ -7,16 +7,25 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Res,
 } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
+import { Response } from "express";
 import { AuthService } from "./auth.service";
 import { RegisterOwnerDto } from "./dto/register-owner.dto";
 import { RegisterWalkerDto } from "./dto/register-walker.dto";
 import { LoginDto } from "./dto/login.dto";
-import { RefreshTokenDto } from "./dto/refresh-token.dto";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import { JwtRefreshGuard } from "./guards/jwt-refresh.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
+
+const COOKIE_BASE = {
+  httpOnly: true,
+  secure:   process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  domain:   process.env.COOKIE_DOMAIN || undefined,
+  path:     "/",
+};
 
 @ApiTags("Auth")
 @Controller("auth")
@@ -37,20 +46,29 @@ export class AuthController {
 
   @Post("login")
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Login — retorna JWT + refresh token" })
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto);
+  @ApiOperation({ summary: "Login — setea cookies httpOnly y retorna perfil básico" })
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, refreshToken, user } = await this.auth.login(dto);
+    res.cookie("access_token",  accessToken,  { ...COOKIE_BASE, maxAge: 15 * 60 * 1000 });
+    res.cookie("refresh_token", refreshToken, { ...COOKIE_BASE, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    return user;
   }
 
   @Post("refresh")
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtRefreshGuard)
-  @ApiOperation({ summary: "Renovar access token con refresh token" })
-  refresh(
+  @ApiOperation({ summary: "Renovar tokens usando cookie de refresh" })
+  async refresh(
     @CurrentUser() user: { sub: string; refreshToken: string },
-    @Body() _dto: RefreshTokenDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.auth.refreshTokens(user.sub, user.refreshToken);
+    const { accessToken, refreshToken } = await this.auth.refreshTokens(user.sub, user.refreshToken);
+    res.cookie("access_token",  accessToken,  { ...COOKIE_BASE, maxAge: 15 * 60 * 1000 });
+    res.cookie("refresh_token", refreshToken, { ...COOKIE_BASE, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    return { message: "ok" };
   }
 
   @Post("logout")
@@ -58,8 +76,23 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Cerrar sesión e invalidar refresh token" })
-  logout(@CurrentUser() user: { id: string }) {
-    return this.auth.logout(user.id);
+  async logout(
+    @CurrentUser() user: { id: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.auth.logout(user.id);
+    const clearOpts = { path: "/", domain: process.env.COOKIE_DOMAIN || undefined };
+    res.clearCookie("access_token",  clearOpts);
+    res.clearCookie("refresh_token", clearOpts);
+    return { message: "Sesión cerrada" };
+  }
+
+  @Get("me")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Perfil básico del usuario autenticado (vía cookie)" })
+  me(@CurrentUser() user: { id: string }) {
+    return this.auth.getMe(user.id);
   }
 
   @Get("verify-email/:token")

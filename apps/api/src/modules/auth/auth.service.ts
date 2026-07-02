@@ -94,7 +94,27 @@ export class AuthService {
     }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
-    return tokens;
+    return {
+      ...tokens,
+      user: {
+        id:        user.id,
+        email:     user.email,
+        firstName: user.firstName,
+        lastName:  user.lastName,
+        role:      user.role,
+      },
+    };
+  }
+
+  // ─── Perfil básico del usuario autenticado ───────────────
+
+  async getMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where:  { id: userId },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true },
+    });
+    if (!user) throw new UnauthorizedException();
+    return user;
   }
 
   // ─── Refresh ─────────────────────────────────────────────

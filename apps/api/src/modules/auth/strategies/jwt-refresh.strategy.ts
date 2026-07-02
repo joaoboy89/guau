@@ -15,14 +15,16 @@ export interface JwtRefreshPayload {
 export class JwtRefreshStrategy extends PassportStrategy(Strategy, "jwt-refresh") {
   constructor(config: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromBodyField("refreshToken"),
-      secretOrKey: config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (req: Request) => req?.cookies?.refresh_token ?? null,
+      ]),
+      secretOrKey:       config.getOrThrow<string>("JWT_REFRESH_SECRET"),
       passReqToCallback: true,
     });
   }
 
   validate(req: Request, payload: Omit<JwtRefreshPayload, "refreshToken">) {
-    const refreshToken = req.body?.refreshToken as string | undefined;
+    const refreshToken = req.cookies?.refresh_token as string | undefined;
     if (!refreshToken) throw new UnauthorizedException();
     return { ...payload, refreshToken };
   }

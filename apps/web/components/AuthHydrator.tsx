@@ -2,36 +2,28 @@
 
 import { useEffect } from "react";
 import { useStore } from "@/lib/store";
-import { decodeJwtPayload } from "@/lib/auth";
+import { authAPI } from "@/lib/api";
 
 export function AuthHydrator() {
-  const { user, isLoggedIn, setUser, logout } = useStore();
+  const { isLoggedIn, setUser, logout } = useStore();
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-
-    // Token ausente pero store dice logueado → sesión inválida, limpiar
-    if (!token && isLoggedIn) {
-      logout();
-      return;
-    }
-
-    // Token presente pero store vacío → rehidratar (Zustand perdió estado)
-    if (token && !user) {
-      const payload = decodeJwtPayload(token);
-      if (!payload.sub) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        return;
-      }
-      const role = ((payload.role as string) ?? "").toUpperCase();
-      setUser({
-        id:    payload.sub as string,
-        email: payload.email as string,
-        name:  "",
-        role:  role === "OWNER" ? "owner" : role === "WALKER" ? "walker" : "admin",
+    authAPI.me()
+      .then((res) => {
+        const u = res.data as {
+          id: string; email: string; firstName: string; lastName: string; role: string;
+        };
+        const role = u.role.toUpperCase();
+        setUser({
+          id:    u.id,
+          email: u.email,
+          name:  `${u.firstName} ${u.lastName}`,
+          role:  role === "OWNER" ? "owner" : role === "WALKER" ? "walker" : "admin",
+        });
+      })
+      .catch(() => {
+        if (isLoggedIn) logout();
       });
-    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
