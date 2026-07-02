@@ -9,9 +9,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # -- 0. Correr tests (gate del pipeline) --------------------------------------
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --legacy-peer-deps
+
+      - name: Generar cliente de Prisma (necesario para compilar, aunque los tests mockeen PrismaService)
+        run: npm run prisma:generate --workspace=apps/api
+
+      - name: Tests backend (apps/api)
+        run: npm test --workspace=apps/api
+
+      - name: Tests frontend (apps/web)
+        run: npm test --workspace=apps/web
+
   # -- 1. Build & push imagen API -----------------------------------------------
   build-api:
     name: Build API image
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,6 +65,7 @@ jobs:
   # -- 2. Build & push imagen Web -----------------------------------------------
   build-web:
     name: Build Web image
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
