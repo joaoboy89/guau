@@ -21,7 +21,7 @@ jest.mock('mercadopago', () => ({
 }));
 
 // Import AFTER jest.mock so we get the mocked versions
-import { Preference, Payment } from 'mercadopago';
+import MercadoPago, { Preference, Payment } from 'mercadopago';
 
 // ─── Shared fixtures ──────────────────────────────────────────────────────────
 
@@ -45,25 +45,41 @@ const MP_PREFERENCE = {
   sandbox_init_point: 'https://sandbox.mercadopago.com/pref-abc',
 };
 
+// Base walk row used in webhook tests (fallback path, no walker nested)
+const WALK_ROW = {
+  id:           'walk-1',
+  walkerAmount: 1350,
+  walkerId:     'walker-1',
+  platformFee:  150,
+  mpPaymentId:  null as string | null,
+};
+
+// Walk row with nested walker — used in walkId path tests
+const WALK_ROW_WITH_WALKER = {
+  ...WALK_ROW,
+  mpPaymentId: 'pref-abc',
+  walker: { mpAccessToken: 'walker-token-xyz' },
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function buildPrismaMock() {
   return {
     ownerProfile:    { findUnique: jest.fn() },
     walkParticipant: { findFirst: jest.fn() },
-    walk:            { findUnique: jest.fn(), update: jest.fn() },
+    walk:            { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     payout:          { upsert: jest.fn() },
   };
 }
 
 function buildConfigMock() {
   const values: Record<string, string> = {
-    MP_ACCESS_TOKEN: 'platform-mp-token',
-    FRONTEND_URL:    'http://localhost:3000',
-    API_URL:         'http://localhost:3001',
-    MP_WEBHOOK_SECRET: '',      // empty → skip signature verification in tests
-    MP_CLIENT_ID:    'client-id',
-    MP_CLIENT_SECRET: 'client-secret',
+    MP_ACCESS_TOKEN:   'platform-mp-token',
+    FRONTEND_URL:      'http://localhost:3000',
+    API_URL:           'http://localhost:3001',
+    MP_WEBHOOK_SECRET: '',       // empty → skip signature verification in tests
+    MP_CLIENT_ID:      'client-id',
+    MP_CLIENT_SECRET:  'client-secret',
   };
   return {
     get: jest.fn((key: string) => values[key] ?? null),
@@ -71,6 +87,21 @@ function buildConfigMock() {
       if (!values[key]) throw new Error(`Missing config: ${key}`);
       return values[key];
     }),
+  };
+}
+
+function approvedPayment(overrides: Partial<{
+  id: number;
+  net_amount: number | null;
+  external_reference: string;
+}> = {}) {
+  return {
+    id:                   99999,
+    status:               'approved',
+    external_reference:   'walk-1|owner-1',
+    net_amount:           1350,
+    transaction_details:  { net_received_amount: 1320 },
+    ...overrides,
   };
 }
 
@@ -174,6 +205,14 @@ describe('PaymentsService', () => {
       expect(callBody.marketplace_fee).toBe(WALK_BASE.platformFee);
     });
 
+    it('camino feliz: notification_url incluye walkId como query param', async () => {
+      setupHappyPath();
+      await service.createPreference('user-1', DTO);
+
+      const callBody = mockPreferenceCreate.mock.calls[0][0].body;
+      expect(callBody.notification_url).toBe('http://localhost:3001/payments/webhook?walkId=walk-1');
+    });
+
     it('camino feliz: devuelve preferenceId e initPoint correctamente', async () => {
       setupHappyPath();
       const result = await service.createPreference('user-1', DTO);
@@ -198,30 +237,9 @@ describe('PaymentsService', () => {
     });
   });
 
-  // ─── handleWebhook ────────────────────────────────────────────────────────
+  // ─── handleWebhook — caminos compartidos ──────────────────────────────────
 
   describe('handleWebhook()', () => {
-    const WALK_ROW = {
-      id:           'walk-1',
-      walkerAmount: 1350,
-      walkerId:     'walker-1',
-      platformFee:  150,
-    };
-
-    function approvedPayment(overrides: Partial<{
-      net_amount: number | null;
-      external_reference: string;
-    }> = {}) {
-      return {
-        id:                   99999,
-        status:               'approved',
-        external_reference:   'walk-1|owner-1',
-        net_amount:           1350,
-        transaction_details:  { net_received_amount: 1320 },
-        ...overrides,
-      };
-    }
-
     it('devuelve { status: "ignored" } si el type no es "payment"', async () => {
       const result = await service.handleWebhook(
         { type: 'merchant_order', data: { id: '1' } },
@@ -238,84 +256,256 @@ describe('PaymentsService', () => {
       expect(result).toEqual({ status: 'ignored' });
     });
 
-    it('devuelve { status: "walk_not_found" } si no existe el walk', async () => {
+    // ─── Sin walkId (fallback con token de plataforma) ─────────────────────
+
+    describe('sin walkId (fallback)', () => {
+      it('devuelve { status: "walk_not_found" } si no existe el walk', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment());
+        prisma.walk.findUnique.mockResolvedValue(null);
+
+        const result = await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined,
+        );
+        expect(result).toEqual({ status: 'walk_not_found' });
+      });
+
+      it('pago aprobado: llama a walk.update con net_amount como walkerAmount', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: 1350 }));
+        prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
+        prisma.walk.update.mockResolvedValue({});
+        prisma.payout.upsert.mockResolvedValue({});
+
+        await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined,
+        );
+
+        expect(prisma.walk.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 'walk-1' },
+            data:  expect.objectContaining({ walkerAmount: 1350 }),
+          }),
+        );
+      });
+
+      it('pago aprobado: usa walk.walkerAmount si net_amount es null', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: null }));
+        prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
+        prisma.walk.update.mockResolvedValue({});
+        prisma.payout.upsert.mockResolvedValue({});
+
+        await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined,
+        );
+
+        expect(prisma.walk.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ walkerAmount: WALK_ROW.walkerAmount }),
+          }),
+        );
+      });
+
+      it('pago aprobado: llama a payout.upsert con walkerId y monto correcto', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: 1350 }));
+        prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
+        prisma.walk.update.mockResolvedValue({});
+        prisma.payout.upsert.mockResolvedValue({});
+
+        await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined,
+        );
+
+        expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
+        const upsertCall = prisma.payout.upsert.mock.calls[0][0];
+        expect(upsertCall.create.walkerId).toBe('walker-1');
+        expect(upsertCall.create.amount).toBe(1350);
+        expect(upsertCall.create.status).toBe(PayoutStatus.PENDING);
+        expect(upsertCall.update.amount).toEqual({ increment: 1350 });
+      });
+
+      it('devuelve { status: "processed" } en el camino feliz', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment());
+        prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
+        prisma.walk.update.mockResolvedValue({});
+        prisma.payout.upsert.mockResolvedValue({});
+
+        const result = await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined,
+        );
+        expect(result).toEqual({ status: 'processed' });
+      });
+    });
+
+    // ─── Con walkId (token del walker) ─────────────────────────────────────
+
+    describe('con walkId', () => {
+      it('(a) usa el token del walker, no el de plataforma, para consultar el pago', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment());
+        prisma.walk.findUnique.mockResolvedValue(WALK_ROW_WITH_WALKER);
+        prisma.walk.update.mockResolvedValue({});
+        prisma.payout.upsert.mockResolvedValue({});
+
+        await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined, 'walk-1',
+        );
+
+        // MercadoPago debe haber sido instanciado con el token del walker
+        expect(MercadoPago as jest.Mock).toHaveBeenCalledWith(
+          expect.objectContaining({ accessToken: 'walker-token-xyz' }),
+        );
+        expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
+      });
+
+      it('(d) devuelve { status: "reference_mismatch" } si external_reference no empieza con walkId', async () => {
+        mockPaymentGet.mockResolvedValue(
+          approvedPayment({ external_reference: 'walk-OTRO|owner-1' }),
+        );
+        prisma.walk.findUnique.mockResolvedValue(WALK_ROW_WITH_WALKER);
+
+        const result = await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined, 'walk-1',
+        );
+
+        expect(result).toEqual({ status: 'reference_mismatch' });
+        expect(prisma.payout.upsert).not.toHaveBeenCalled();
+      });
+
+      it('devuelve { status: "walk_not_found" } si el walk no existe', async () => {
+        prisma.walk.findUnique.mockResolvedValue(null);
+
+        const result = await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined, 'walk-inexistente',
+        );
+        expect(result).toEqual({ status: 'walk_not_found' });
+      });
+    });
+
+    // ─── Idempotencia ──────────────────────────────────────────────────────
+
+    describe('idempotencia', () => {
+      it('(b) si walk.mpPaymentId ya es el mismo payment.id, no llama a payout.upsert ni walk.update', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment()); // payment.id = 99999
+        prisma.walk.findUnique.mockResolvedValue({
+          ...WALK_ROW,
+          mpPaymentId: '99999', // ya procesado
+        });
+
+        await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined,
+        );
+
+        expect(prisma.payout.upsert).not.toHaveBeenCalled();
+        expect(prisma.walk.update).not.toHaveBeenCalled();
+      });
+
+      it('procesa normalmente si mpPaymentId es diferente (preference ID aún sin resolver)', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment());
+        prisma.walk.findUnique.mockResolvedValue({
+          ...WALK_ROW,
+          mpPaymentId: 'pref-abc', // preference ID, no es el payment.id
+        });
+        prisma.walk.update.mockResolvedValue({});
+        prisma.payout.upsert.mockResolvedValue({});
+
+        await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined,
+        );
+
+        expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
+  // ─── reconcilePendingPayments ─────────────────────────────────────────────
+
+  describe('reconcilePendingPayments()', () => {
+    const WALK_UNRESOLVED = {
+      id:           'walk-1',
+      walkerAmount: 1350,
+      walkerId:     'walker-1',
+      platformFee:  150,
+      mpPaymentId:  'pref-abc',   // no numérico = todavía preference ID
+      walker:       { mpAccessToken: 'walker-token-xyz' },
+      participants: [{ ownerId: 'owner-1' }],
+    };
+
+    beforeEach(() => {
+      // Reemplazar global.fetch en cada test de este bloque
+      global.fetch = jest.fn();
+    });
+
+    it('(c) reconcilia un walk con pago approved: llama a walk.update y payout.upsert', async () => {
+      prisma.walk.findMany.mockResolvedValue([WALK_UNRESOLVED]);
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok:   true,
+        json: async () => ({ results: [{ id: 99999, status: 'approved' }] }),
+      });
       mockPaymentGet.mockResolvedValue(approvedPayment());
-      prisma.walk.findUnique.mockResolvedValue(null);
-
-      const result = await service.handleWebhook(
-        { type: 'payment', data: { id: '99999' } },
-        undefined, undefined,
-      );
-      expect(result).toEqual({ status: 'walk_not_found' });
-    });
-
-    it('pago aprobado: llama a walk.update con net_amount como walkerAmount', async () => {
-      mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: 1350 }));
-      prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
       prisma.walk.update.mockResolvedValue({});
       prisma.payout.upsert.mockResolvedValue({});
 
-      await service.handleWebhook(
-        { type: 'payment', data: { id: '99999' } },
-        undefined, undefined,
-      );
+      await service.reconcilePendingPayments();
 
       expect(prisma.walk.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'walk-1' },
-          data:  expect.objectContaining({ walkerAmount: 1350 }),
-        }),
+        expect.objectContaining({ where: { id: 'walk-1' } }),
       );
-    });
-
-    it('pago aprobado: usa walk.walkerAmount si net_amount es null', async () => {
-      mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: null }));
-      prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
-      prisma.walk.update.mockResolvedValue({});
-      prisma.payout.upsert.mockResolvedValue({});
-
-      await service.handleWebhook(
-        { type: 'payment', data: { id: '99999' } },
-        undefined, undefined,
-      );
-
-      expect(prisma.walk.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ walkerAmount: WALK_ROW.walkerAmount }),
-        }),
-      );
-    });
-
-    it('pago aprobado: llama a payout.upsert con walkerId y monto correcto', async () => {
-      mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: 1350 }));
-      prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
-      prisma.walk.update.mockResolvedValue({});
-      prisma.payout.upsert.mockResolvedValue({});
-
-      await service.handleWebhook(
-        { type: 'payment', data: { id: '99999' } },
-        undefined, undefined,
-      );
-
       expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
-      const upsertCall = prisma.payout.upsert.mock.calls[0][0];
-      expect(upsertCall.create.walkerId).toBe('walker-1');
-      expect(upsertCall.create.amount).toBe(1350);
-      expect(upsertCall.create.status).toBe(PayoutStatus.PENDING);
-      expect(upsertCall.update.amount).toEqual({ increment: 1350 });
     });
 
-    it('devuelve { status: "processed" } en el camino feliz', async () => {
-      mockPaymentGet.mockResolvedValue(approvedPayment());
-      prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
+    it('omite walks con mpPaymentId numérico (ya procesados como payment ID)', async () => {
+      prisma.walk.findMany.mockResolvedValue([
+        { ...WALK_UNRESOLVED, mpPaymentId: '99999' }, // numérico = ya procesado
+      ]);
+
+      await service.reconcilePendingPayments();
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('no reconcilia si la búsqueda en MP no devuelve pagos approved', async () => {
+      prisma.walk.findMany.mockResolvedValue([WALK_UNRESOLVED]);
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok:   true,
+        json: async () => ({ results: [] }),
+      });
+
+      await service.reconcilePendingPayments();
+
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('un error en un walk no detiene el procesamiento del siguiente', async () => {
+      const WALK_2 = { ...WALK_UNRESOLVED, id: 'walk-2', mpPaymentId: 'pref-def' };
+      prisma.walk.findMany.mockResolvedValue([WALK_UNRESOLVED, WALK_2]);
+
+      (global.fetch as jest.Mock)
+        .mockRejectedValueOnce(new Error('network error'))
+        .mockResolvedValueOnce({
+          ok:   true,
+          json: async () => ({ results: [{ id: 99999, status: 'approved' }] }),
+        });
+      mockPaymentGet.mockResolvedValue(
+        approvedPayment({ external_reference: 'walk-2|owner-1' }),
+      );
       prisma.walk.update.mockResolvedValue({});
       prisma.payout.upsert.mockResolvedValue({});
 
-      const result = await service.handleWebhook(
-        { type: 'payment', data: { id: '99999' } },
-        undefined, undefined,
+      await service.reconcilePendingPayments();
+
+      // walk-2 debe haberse procesado aunque walk-1 haya fallado
+      expect(prisma.walk.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'walk-2' } }),
       );
-      expect(result).toEqual({ status: 'processed' });
     });
   });
 });

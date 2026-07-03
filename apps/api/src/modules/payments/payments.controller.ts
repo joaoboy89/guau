@@ -52,8 +52,9 @@ export class PaymentsController {
     @Body() body: Record<string, unknown>,
     @Headers("x-signature") xSignature: string,
     @Headers("x-request-id") xRequestId: string,
+    @Query("walkId") walkId?: string,
   ) {
-    return this.payments.handleWebhook(body, xSignature, xRequestId);
+    return this.payments.handleWebhook(body, xSignature, xRequestId, walkId);
   }
 
   // ─── Balance del paseador ────────────────────────────────

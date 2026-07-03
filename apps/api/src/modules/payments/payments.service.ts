@@ -7,6 +7,7 @@ import {
   Logger,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Cron } from "@nestjs/schedule";
 import MercadoPago, { Preference, Payment } from "mercadopago";
 import * as crypto from "crypto";
 import { PrismaService } from "../../database/prisma.service";
@@ -30,7 +31,6 @@ export class PaymentsService {
   // ─── Crear preferencia de pago ───────────────────────────
 
   async createPreference(userId: string, dto: CreatePreferenceDto) {
-    // Validar que el dueño tiene perfil y participó del paseo
     const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
     if (!owner) throw new NotFoundException("Perfil de dueño no encontrado");
 
@@ -77,7 +77,7 @@ export class PaymentsService {
         ],
         marketplace_fee: walk.platformFee,
         external_reference: `${walk.id}|${owner.id}`,
-        notification_url: `${apiUrl}/payments/webhook`,
+        notification_url: `${apiUrl}/payments/webhook?walkId=${walk.id}`,
         back_urls: {
           success: `${frontendUrl}/walks/${walk.id}?payment=success`,
           failure: `${frontendUrl}/walks/${walk.id}?payment=failure`,
@@ -88,7 +88,6 @@ export class PaymentsService {
       },
     });
 
-    // Guardar el ID de preferencia en el paseo
     await this.prisma.walk.update({
       where: { id: walk.id },
       data: { mpPaymentId: preference.id },
@@ -96,7 +95,7 @@ export class PaymentsService {
 
     return {
       preferenceId: preference.id,
-      initPoint: preference.init_point,       // URL para redirect a MP Checkout
+      initPoint: preference.init_point,
       sandboxInitPoint: preference.sandbox_init_point,
     };
   }
@@ -107,8 +106,8 @@ export class PaymentsService {
     body: Record<string, unknown>,
     xSignature: string | undefined,
     xRequestId: string | undefined,
+    walkId?: string,
   ) {
-    // Verificar firma del webhook
     if (xSignature && xRequestId) {
       this.verifyWebhookSignature(body, xSignature, xRequestId);
     }
@@ -116,7 +115,6 @@ export class PaymentsService {
     const type = body.type as string;
     const dataId = (body.data as Record<string, string>)?.id;
 
-    // Solo procesamos notificaciones de pago
     if (type !== "payment" || !dataId) {
       return { status: "ignored" };
     }
@@ -124,24 +122,64 @@ export class PaymentsService {
     this.logger.log(`Webhook MP recibido: payment ${dataId}`);
 
     try {
-      const paymentApi = new Payment(this.mpClient);
-      const payment = await paymentApi.get({ id: Number(dataId) });
+      if (walkId) {
+        // Camino correcto: cargar walk con token del walker para consultar el pago
+        const walk = await this.prisma.walk.findUnique({
+          where: { id: walkId },
+          select: {
+            id: true,
+            walkerAmount: true,
+            walkerId: true,
+            platformFee: true,
+            mpPaymentId: true,
+            walker: { select: { mpAccessToken: true } },
+          },
+        });
+        if (!walk) return { status: "walk_not_found" };
 
-      const externalRef = payment.external_reference as string | undefined;
-      if (!externalRef) return { status: "no_reference" };
+        const walkerClient = new MercadoPago({ accessToken: walk.walker.mpAccessToken ?? "" });
+        const paymentApi = new Payment(walkerClient);
+        const payment = await paymentApi.get({ id: Number(dataId) });
 
-      const [walkId, ownerId] = externalRef.split("|");
+        // Defensa anti-spoofing: el external_reference debe empezar con el walkId de la URL
+        const externalRef = payment.external_reference as string | undefined;
+        if (!externalRef || !externalRef.startsWith(`${walkId}|`)) {
+          this.logger.warn(
+            `Webhook: external_reference "${externalRef}" no coincide con walkId "${walkId}" — posible spoofing`,
+          );
+          return { status: "reference_mismatch" };
+        }
 
-      const walk = await this.prisma.walk.findUnique({
-        where: { id: walkId },
-        select: { id: true, walkerAmount: true, walkerId: true, platformFee: true },
-      });
-      if (!walk) return { status: "walk_not_found" };
+        const ownerId = externalRef.split("|")[1];
 
-      if (payment.status === "approved") {
-        await this.handleApprovedPayment(walk, ownerId, payment);
-      } else if (payment.status === "rejected" || payment.status === "cancelled") {
-        this.logger.warn(`Pago ${dataId} rechazado/cancelado para walk ${walkId}`);
+        if (payment.status === "approved") {
+          await this.handleApprovedPayment(walk, ownerId, payment);
+        } else if (payment.status === "rejected" || payment.status === "cancelled") {
+          this.logger.warn(`Pago ${dataId} rechazado/cancelado para walk ${walkId}`);
+        }
+      } else {
+        // Fallback sin walkId: usa token de plataforma (webhooks legacy / re-envíos sin query param)
+        this.logger.warn(`Webhook sin walkId en la URL — usando token de plataforma como fallback`);
+
+        const paymentApi = new Payment(this.mpClient);
+        const payment = await paymentApi.get({ id: Number(dataId) });
+
+        const externalRef = payment.external_reference as string | undefined;
+        if (!externalRef) return { status: "no_reference" };
+
+        const [walkIdFromRef, ownerId] = externalRef.split("|");
+
+        const walk = await this.prisma.walk.findUnique({
+          where: { id: walkIdFromRef },
+          select: { id: true, walkerAmount: true, walkerId: true, platformFee: true, mpPaymentId: true },
+        });
+        if (!walk) return { status: "walk_not_found" };
+
+        if (payment.status === "approved") {
+          await this.handleApprovedPayment(walk, ownerId, payment);
+        } else if (payment.status === "rejected" || payment.status === "cancelled") {
+          this.logger.warn(`Pago ${dataId} rechazado/cancelado para walk ${walkIdFromRef}`);
+        }
       }
     } catch (err) {
       this.logger.error(`Error procesando webhook ${dataId}: ${err}`);
@@ -150,13 +188,73 @@ export class PaymentsService {
     return { status: "processed" };
   }
 
+  // ─── Job de reconciliación (respaldo al webhook) ─────────
+
+  @Cron("0 */15 * * * *")
+  async reconcilePendingPayments() {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const walks = await this.prisma.walk.findMany({
+      where: {
+        status: WalkStatus.CONFIRMED,
+        mpPaymentId: { not: null },
+        updatedAt: { gte: sevenDaysAgo },
+      },
+      select: {
+        id: true,
+        walkerAmount: true,
+        walkerId: true,
+        platformFee: true,
+        mpPaymentId: true,
+        walker: { select: { mpAccessToken: true } },
+        participants: { select: { ownerId: true }, take: 1 },
+      },
+    });
+
+    // Solo los que todavía tienen preference ID (no numérico = no resuelto como payment ID)
+    const unresolved = walks.filter(w => w.mpPaymentId && !/^\d+$/.test(w.mpPaymentId));
+
+    let reviewed = 0;
+    let reconciled = 0;
+
+    for (const walk of unresolved) {
+      reviewed++;
+      try {
+        if (!walk.walker.mpAccessToken) continue;
+
+        const ownerId = walk.participants[0]?.ownerId;
+        if (!ownerId) continue;
+
+        const searchRes = await fetch(
+          `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(`${walk.id}|${ownerId}`)}`,
+          { headers: { Authorization: `Bearer ${walk.walker.mpAccessToken}` } },
+        );
+        if (!searchRes.ok) continue;
+
+        const data = await searchRes.json() as { results?: Array<{ id: number; status: string }> };
+        const approved = data.results?.find(p => p.status === "approved");
+        if (!approved) continue;
+
+        const walkerClient = new MercadoPago({ accessToken: walk.walker.mpAccessToken });
+        const paymentApi = new Payment(walkerClient);
+        const payment = await paymentApi.get({ id: approved.id });
+
+        await this.handleApprovedPayment(walk, ownerId, payment);
+        reconciled++;
+      } catch (err) {
+        this.logger.error(`reconcile: error procesando walk ${walk.id}: ${err}`);
+      }
+    }
+
+    this.logger.log(`Reconciliación: ${reviewed} revisados, ${reconciled} reconciliados`);
+  }
+
   // ─── Balance del paseador ────────────────────────────────
 
   async getWalkerBalance(userId: string) {
     const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
     if (!walker) throw new NotFoundException("Perfil de paseador no encontrado");
 
-    // Walks completados en los que el paseador participó
     const completedWalks = await this.prisma.walk.findMany({
       where: { walkerId: walker.id, status: WalkStatus.COMPLETED },
       select: {
@@ -170,7 +268,6 @@ export class PaymentsService {
       orderBy: { scheduledAt: "desc" },
     });
 
-    // Historial de pagos procesados
     const payouts = await this.prisma.payout.findMany({
       where: { walkerId: walker.id },
       orderBy: { createdAt: "desc" },
@@ -217,7 +314,6 @@ export class PaymentsService {
     const clientSecret = this.config.getOrThrow<string>("MP_CLIENT_SECRET");
     const redirectUri = `${this.config.getOrThrow<string>("API_URL")}/payments/walker-connect/callback`;
 
-    // Intercambiar el code por access_token
     const response = await fetch("https://api.mercadopago.com/oauth/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -239,7 +335,6 @@ export class PaymentsService {
       user_id: number;
     };
 
-    // Guardar tokens en el perfil del paseador (state = userId)
     const walker = await this.prisma.walkerProfile.findUnique({
       where: { userId: state },
     });
@@ -266,7 +361,7 @@ export class PaymentsService {
     xRequestId: string,
   ) {
     const webhookSecret = this.config.get<string>("MP_WEBHOOK_SECRET");
-    if (!webhookSecret) return; // Sin secret configurado, saltear verificación
+    if (!webhookSecret) return;
 
     const parts = Object.fromEntries(
       xSignature.split(",").map((p) => p.split("=") as [string, string])
@@ -288,7 +383,7 @@ export class PaymentsService {
   }
 
   private async handleApprovedPayment(
-    walk: { id: string; walkerAmount: number; walkerId: string; platformFee: number },
+    walk: { id: string; walkerAmount: number; walkerId: string; platformFee: number; mpPaymentId: string | null },
     ownerId: string,
     payment: {
       id?: number | null;
@@ -296,6 +391,12 @@ export class PaymentsService {
       transaction_details?: { net_received_amount?: number | null } | null;
     },
   ) {
+    // Idempotencia: si ya procesamos este pago exacto, no hacer nada
+    if (walk.mpPaymentId === String(payment.id)) {
+      this.logger.debug(`Pago ${payment.id} ya procesado para walk ${walk.id} — ignorando`);
+      return;
+    }
+
     // TODO: sacar este log después de confirmar con el primer pago real de Fase 2
     // cuál de los dos campos es el correcto para el split de marketplace
     this.logger.log(
@@ -306,7 +407,6 @@ export class PaymentsService {
 
     const realWalkerAmount = payment.net_amount ?? walk.walkerAmount;
 
-    // Actualizar mpPaymentId y walkerAmount real en el paseo
     await this.prisma.walk.update({
       where: { id: walk.id },
       data: {
@@ -315,10 +415,9 @@ export class PaymentsService {
       },
     });
 
-    // Registrar el cobro pendiente para el paseador
     const now = new Date();
     const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay()); // domingo anterior
+    weekStart.setDate(now.getDate() - now.getDay());
     weekStart.setHours(0, 0, 0, 0);
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekStart.getDate() + 6);
