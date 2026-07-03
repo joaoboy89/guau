@@ -99,9 +99,21 @@ Los valores reales (tokens de MercadoPago, claves JWT, API keys de Resend, etc.)
 
 ## Deploy y CI/CD
 
+```mermaid
+flowchart TD
+    A[git push a master] --> B["Run tests\n142 backend + 4 frontend"]
+    B -->|falla| C[Pipeline se corta acá]
+    B -->|pasa| D[Build API image]
+    B -->|pasa| E[Build Web image]
+    D & E --> F["Deploy to VPS vía SSH\ndocker compose up -d"]
+    F --> G[api — 127.0.0.1:3001]
+    F --> H[web — 127.0.0.1:3000]
+    G & H --> I[cloudflared → dominios públicos]
+```
+
 Cada `push` a `master` dispara `.github/workflows/docker.yml`: construye las imágenes de `api` y `web`, las publica en GitHub Container Registry, y se conecta por SSH al VPS de producción para bajarlas y levantar los contenedores con Docker Compose. Sin ambiente de staging — lo que se pushea a `master` queda en producción en 2-3 minutos.
 
-Importante: el pipeline de CI/CD **no ejecuta migraciones de Prisma automáticamente**, y tampoco corre la suite de tests antes de deployar — un test roto no frena el deploy hoy (mejora pendiente). Si un cambio incluye una migración nueva, hay que correrla a mano en el VPS (o vía `infra/vps/deploy.sh`, que sí las corre) antes o después del deploy, según el caso.
+El pipeline corre los tests (backend + frontend) antes de buildear — si algo falla, el deploy no se ejecuta. Importante: el pipeline de CI/CD **no ejecuta migraciones de Prisma automáticamente**. Si un cambio incluye una migración nueva, hay que correrla a mano en el VPS (o vía `infra/vps/deploy.sh`, que sí las corre) antes o después del deploy, según el caso.
 
 La conexión al VPS público es únicamente a través de un túnel de Cloudflare. Los puertos de los contenedores están atados a `127.0.0.1` (no accesibles desde la IP pública), y el firewall del proveedor solo permite entrada por SSH — verificado con pruebas reales de conexión externa, no asumido. Acceso SSH solo por clave (autenticación por contraseña deshabilitada), con `fail2ban` activo.
 
