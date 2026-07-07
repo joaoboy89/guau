@@ -7,7 +7,7 @@
 #   docker compose -f docker-compose.dev.yml down      # apagar
 #
 # DATABASE_URL para tu apps/api/.env (local):
-#   postgresql://guau:devpassword@localhost:5432/guau?schema=public
+#   postgresql://guau:devpassword@localhost:5433/guau?schema=public
 # ─────────────────────────────────────────────────────────────
 services:
   postgres-dev:
