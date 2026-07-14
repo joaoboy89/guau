@@ -226,7 +226,7 @@ describe('WalkersService', () => {
       await expect(service.getMyProfile(USER_ID)).rejects.toThrow(NotFoundException);
     });
 
-    it('camino feliz: devuelve el perfil con user y schedules incluidos', async () => {
+    it('camino feliz: devuelve el perfil con mpConnected y SIN mpAccessToken', async () => {
       const fullProfile = {
         ...BASE_PROFILE,
         user: {
@@ -239,10 +239,27 @@ describe('WalkersService', () => {
 
       const result = await service.getMyProfile(USER_ID);
 
-      expect(result).toEqual(fullProfile);
+      expect(result).not.toHaveProperty('mpAccessToken');
+      expect(result.mpConnected).toBe(true);
+      expect(result.mpUserId).toBe('mp-user-id');
       expect(prisma.walkerProfile.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { userId: USER_ID } }),
       );
+    });
+
+    it('mpConnected es false si mpAccessToken es null', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_PROFILE,
+        mpAccessToken: null,
+        user: { id: USER_ID, email: 'w@guau.com', firstName: 'J', lastName: 'P',
+                avatarUrl: null, phone: null, emailVerifiedAt: new Date(), createdAt: new Date() },
+        schedules: [],
+      });
+
+      const result = await service.getMyProfile(USER_ID);
+
+      expect(result.mpConnected).toBe(false);
+      expect(result).not.toHaveProperty('mpAccessToken');
     });
   });
 
