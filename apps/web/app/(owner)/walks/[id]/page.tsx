@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useRequireAuth } from "@/lib/auth";
 import { walksAPI, paymentsAPI } from "@/lib/api";
 import { Logo } from "@/components/Logo";
@@ -28,13 +29,25 @@ export default function WalkDetailPage() {
   const { ready } = useRequireAuth();
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const [walk, setWalk] = useState<WalkDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [payError, setPayError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
+  const [paymentResult, setPaymentResult] = useState<string | null>(null);
 
-  const paymentParam = searchParams.get("payment");
+  // Capturar el resultado de pago en estado y limpiar la URL para que:
+  // (a) el banner no re-aparezca al refrescar
+  // (b) "Atrás" no quede apuntando a esta URL con query param
+  useEffect(() => {
+    const result = searchParams.get("payment");
+    if (result) {
+      setPaymentResult(result);
+      router.replace(`/walks/${params.id}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!ready || !params.id) return;
@@ -84,19 +97,43 @@ export default function WalkDetailPage() {
       </header>
 
       {/* Banner de resultado de pago */}
-      {paymentParam === "success" && (
-        <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
-          Pago aprobado. ¡Gracias!
+      {paymentResult === "success" && (
+        <div className="flex flex-col gap-2">
+          <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
+            Pago aprobado. ¡Gracias!
+          </div>
+          <Link
+            href="/walks"
+            className="text-sm text-center text-brand-primary font-semibold py-2 hover:opacity-80 transition-opacity"
+          >
+            ← Volver a Mis paseos
+          </Link>
         </div>
       )}
-      {paymentParam === "failure" && (
-        <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm font-semibold text-red-700">
-          El pago fue rechazado. Podés intentarlo de nuevo.
+      {paymentResult === "failure" && (
+        <div className="flex flex-col gap-2">
+          <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm font-semibold text-red-700">
+            El pago fue rechazado. Podés intentarlo de nuevo.
+          </div>
+          <Link
+            href="/walks"
+            className="text-sm text-center text-brand-text-muted py-2 hover:opacity-80 transition-opacity"
+          >
+            ← Volver a Mis paseos
+          </Link>
         </div>
       )}
-      {paymentParam === "pending" && (
-        <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm font-semibold text-amber-700">
-          Pago pendiente de acreditación.
+      {paymentResult === "pending" && (
+        <div className="flex flex-col gap-2">
+          <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm font-semibold text-amber-700">
+            Pago pendiente de acreditación.
+          </div>
+          <Link
+            href="/walks"
+            className="text-sm text-center text-brand-text-muted py-2 hover:opacity-80 transition-opacity"
+          >
+            ← Volver a Mis paseos
+          </Link>
         </div>
       )}
 

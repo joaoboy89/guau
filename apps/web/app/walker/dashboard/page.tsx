@@ -15,6 +15,8 @@ interface WalkerProfile {
   centerLat:          number | null;
   centerLng:          number | null;
   radiusKm:           number | null;
+  mpConnected:        boolean;
+  mpUserId:           string | null;
   user: {
     firstName: string;
     lastName:  string;
@@ -297,15 +299,35 @@ export default function WalkerDashboardPage() {
         )}
       </div>
 
-      {/* Conectar MercadoPago — color oficial de MercadoPago */}
-      <button
-        onClick={connectMercadoPago}
-        disabled={connectLoading}
-        className="w-full sm:w-auto h-12 px-8 rounded-2xl font-semibold text-white transition-opacity disabled:opacity-50"
-        style={{ backgroundColor: "#009ee3" }}
-      >
-        {connectLoading ? "Redirigiendo…" : "Conectar MercadoPago"}
-      </button>
+      {/* MercadoPago */}
+      {profile.mpConnected ? (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-brand-surface border border-brand-border">
+          <span className="flex-1 flex items-center gap-2 text-sm font-semibold text-brand-green">
+            <span>MercadoPago conectado ✓</span>
+            {profile.mpUserId && (
+              <span className="font-normal text-xs text-brand-text-muted">
+                (ID {profile.mpUserId})
+              </span>
+            )}
+          </span>
+          <button
+            onClick={connectMercadoPago}
+            disabled={connectLoading}
+            className="text-xs text-brand-text-muted underline underline-offset-2 transition-opacity hover:opacity-70 disabled:opacity-40"
+          >
+            {connectLoading ? "Redirigiendo…" : "Reconectar"}
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={connectMercadoPago}
+          disabled={connectLoading}
+          className="w-full sm:w-auto h-12 px-8 rounded-2xl font-semibold text-white transition-opacity disabled:opacity-50"
+          style={{ backgroundColor: "#009ee3" }}
+        >
+          {connectLoading ? "Redirigiendo…" : "Conectar MercadoPago"}
+        </button>
+      )}
 
       {/* Paseos */}
       <div className="flex flex-col gap-4">

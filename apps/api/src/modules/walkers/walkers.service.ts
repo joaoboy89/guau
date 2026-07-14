@@ -202,7 +202,9 @@ export class WalkersService {
     });
 
     if (!profile) throw new NotFoundException("Perfil de paseador no encontrado");
-    return profile;
+
+    const { mpAccessToken, ...safeProfile } = profile;
+    return { ...safeProfile, mpConnected: !!mpAccessToken };
   }
 
   // ─── Actualizar perfil ───────────────────────────────────
