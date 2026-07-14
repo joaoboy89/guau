@@ -14,7 +14,7 @@ interface WalkDetail {
   scheduledAt: string;
   pickupAddress: string;
   totalAmount: number;
-  mpPaymentId: string | null;
+  isPaid: boolean;
   walkType: { label: string; durationMinutes: number };
   walker: {
     user: { firstName: string; lastName: string };
@@ -149,9 +149,9 @@ export default function WalkDetailPage() {
 
       {walk.status === "CONFIRMED" && (
         <div className="flex flex-col gap-3">
-          {walk.mpPaymentId ? (
+          {walk.isPaid ? (
             <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
-              Pago iniciado
+              Pago completado
             </div>
           ) : (
             <>

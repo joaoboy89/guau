@@ -50,8 +50,8 @@ export class PaymentsService {
     if (walk.status !== WalkStatus.CONFIRMED) {
       throw new BadRequestException("Solo podés pagar un paseo confirmado");
     }
-    if (walk.mpPaymentId) {
-      throw new BadRequestException("Este paseo ya tiene un pago iniciado");
+    if (walk.mpPaymentId && /^\d+$/.test(walk.mpPaymentId)) {
+      throw new BadRequestException("Este paseo ya fue pagado");
     }
     if (!walk.walker.mpAccessToken) {
       throw new BadRequestException("El paseador todavía no conectó su cuenta de MercadoPago");
@@ -397,15 +397,7 @@ export class PaymentsService {
       return;
     }
 
-    // TODO: sacar este log después de confirmar con el primer pago real de Fase 2
-    // cuál de los dos campos es el correcto para el split de marketplace
-    this.logger.log(
-      `Split check — net_amount: ${payment.net_amount}, ` +
-      `transaction_details.net_received_amount: ${payment.transaction_details?.net_received_amount}, ` +
-      `marketplace_fee esperado: ${walk.platformFee}`
-    );
-
-    const realWalkerAmount = payment.net_amount ?? walk.walkerAmount;
+    const realWalkerAmount = payment.transaction_details?.net_received_amount ?? walk.walkerAmount;
 
     await this.prisma.walk.update({
       where: { id: walk.id },

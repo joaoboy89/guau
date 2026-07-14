@@ -207,7 +207,7 @@ export class WalksService {
     if (!walk) throw new NotFoundException("Paseo no encontrado");
 
     await this.assertWalkAccess(userId, role, walk);
-    return walk;
+    return { ...walk, isPaid: /^\d+$/.test(walk.mpPaymentId ?? "") };
   }
 
   // ─── Confirmar (paseador) ────────────────────────────────
