@@ -391,12 +391,11 @@ describe('WalksService', () => {
     });
 
     it('camino feliz WALKER: el paseador del walk puede verlo', async () => {
-      // walkerId del walk coincide con BASE_WALKER.id
       prisma.walk.findUnique.mockResolvedValue(WALK_FULL);
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
 
       const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
-      expect(result).toEqual(WALK_FULL);
+      expect(result).toEqual({ ...WALK_FULL, isPaid: false });
     });
 
     it('camino feliz OWNER: un participante puede ver el walk', async () => {
@@ -407,7 +406,23 @@ describe('WalksService', () => {
       });
 
       const result = await service.findById(OWNER_USER_ID, UserRole.OWNER, WALK_ID);
-      expect(result).toEqual(WALK_FULL);
+      expect(result).toEqual({ ...WALK_FULL, isPaid: false });
+    });
+
+    it('isPaid es true cuando mpPaymentId es numérico (pago real confirmado)', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...WALK_FULL, mpPaymentId: '99999' });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+      expect(result.isPaid).toBe(true);
+    });
+
+    it('isPaid es false cuando mpPaymentId es un preference id (no numérico)', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...WALK_FULL, mpPaymentId: '3541787996-9905f4f5-abc' });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+      expect(result.isPaid).toBe(false);
     });
   });
 

@@ -94,6 +94,7 @@ function approvedPayment(overrides: Partial<{
   id: number;
   net_amount: number | null;
   external_reference: string;
+  transaction_details: { net_received_amount?: number | null } | null;
 }> = {}) {
   return {
     id:                   99999,
@@ -177,12 +178,24 @@ describe('PaymentsService', () => {
         .rejects.toThrow(BadRequestException);
     });
 
-    it('lanza BadRequestException si el walk ya tiene mpPaymentId', async () => {
+    it('lanza BadRequestException si el walk ya tiene un payment id NUMÉRICO (pago real)', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
       prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
-      prisma.walk.findUnique.mockResolvedValue({ ...WALK_BASE, mpPaymentId: 'existing-123' });
+      prisma.walk.findUnique.mockResolvedValue({ ...WALK_BASE, mpPaymentId: '99999' });
       await expect(service.createPreference('user-1', DTO))
         .rejects.toThrow(BadRequestException);
+    });
+
+    it('permite re-crear la preferencia si mpPaymentId es no numérico (pago no completado)', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
+      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walk.findUnique.mockResolvedValue({
+        ...WALK_BASE,
+        mpPaymentId: '3541787996-9905f4f5-abc', // preference id anterior, no es pago real
+      });
+      prisma.walk.update.mockResolvedValue({});
+      const result = await service.createPreference('user-1', DTO);
+      expect(result.preferenceId).toBe(MP_PREFERENCE.id);
     });
 
     it('lanza BadRequestException si el walker no tiene mpAccessToken', async () => {
@@ -270,8 +283,8 @@ describe('PaymentsService', () => {
         expect(result).toEqual({ status: 'walk_not_found' });
       });
 
-      it('pago aprobado: llama a walk.update con net_amount como walkerAmount', async () => {
-        mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: 1350 }));
+      it('pago aprobado: usa transaction_details.net_received_amount como walkerAmount', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment()); // net_received_amount: 1320
         prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
         prisma.walk.update.mockResolvedValue({});
         prisma.payout.upsert.mockResolvedValue({});
@@ -284,13 +297,13 @@ describe('PaymentsService', () => {
         expect(prisma.walk.update).toHaveBeenCalledWith(
           expect.objectContaining({
             where: { id: 'walk-1' },
-            data:  expect.objectContaining({ walkerAmount: 1350 }),
+            data:  expect.objectContaining({ walkerAmount: 1320 }),
           }),
         );
       });
 
-      it('pago aprobado: usa walk.walkerAmount si net_amount es null', async () => {
-        mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: null }));
+      it('pago aprobado: usa walk.walkerAmount como fallback si transaction_details es null', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment({ transaction_details: null }));
         prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
         prisma.walk.update.mockResolvedValue({});
         prisma.payout.upsert.mockResolvedValue({});
@@ -307,8 +320,8 @@ describe('PaymentsService', () => {
         );
       });
 
-      it('pago aprobado: llama a payout.upsert con walkerId y monto correcto', async () => {
-        mockPaymentGet.mockResolvedValue(approvedPayment({ net_amount: 1350 }));
+      it('pago aprobado: llama a payout.upsert con walkerId y net_received_amount', async () => {
+        mockPaymentGet.mockResolvedValue(approvedPayment()); // net_received_amount: 1320
         prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
         prisma.walk.update.mockResolvedValue({});
         prisma.payout.upsert.mockResolvedValue({});
@@ -321,9 +334,9 @@ describe('PaymentsService', () => {
         expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
         const upsertCall = prisma.payout.upsert.mock.calls[0][0];
         expect(upsertCall.create.walkerId).toBe('walker-1');
-        expect(upsertCall.create.amount).toBe(1350);
+        expect(upsertCall.create.amount).toBe(1320);
         expect(upsertCall.create.status).toBe(PayoutStatus.PENDING);
-        expect(upsertCall.update.amount).toEqual({ increment: 1350 });
+        expect(upsertCall.update.amount).toEqual({ increment: 1320 });
       });
 
       it('devuelve { status: "processed" } en el camino feliz', async () => {
