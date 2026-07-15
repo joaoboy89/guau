@@ -8,6 +8,7 @@ import {
 import { WalkStatus, PayoutStatus } from '@prisma/client';
 import { PaymentsService } from './payments.service';
 import { PrismaService } from '../../database/prisma.service';
+import { CryptoService } from '../../common/crypto/crypto.service';
 
 // Mocks for MP SDK instances — assigned fresh in beforeEach
 let mockPreferenceCreate: jest.Mock;
@@ -124,11 +125,17 @@ describe('PaymentsService', () => {
     (Preference as jest.Mock).mockImplementation(() => ({ create: mockPreferenceCreate }));
     (Payment as jest.Mock).mockImplementation(() => ({ get: mockPaymentGet }));
 
+    const cryptoMock = {
+      encrypt: jest.fn((s: string) => s),
+      decrypt: jest.fn((s: string) => s),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
         { provide: PrismaService,  useValue: prisma },
         { provide: ConfigService,  useValue: config },
+        { provide: CryptoService,  useValue: cryptoMock },
       ],
     }).compile();
 

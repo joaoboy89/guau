@@ -11,6 +11,7 @@ import { Cron } from "@nestjs/schedule";
 import MercadoPago, { Preference, Payment } from "mercadopago";
 import * as crypto from "crypto";
 import { PrismaService } from "../../database/prisma.service";
+import { CryptoService } from "../../common/crypto/crypto.service";
 import { WalkStatus, PayoutStatus } from "@prisma/client";
 import { CreatePreferenceDto } from "./dto/create-preference.dto";
 
@@ -22,6 +23,7 @@ export class PaymentsService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private cryptoService: CryptoService,
   ) {
     this.mpClient = new MercadoPago({
       accessToken: this.config.get<string>("MP_ACCESS_TOKEN") ?? "no_configurado",
@@ -56,11 +58,15 @@ export class PaymentsService {
     if (!walk.walker.mpAccessToken) {
       throw new BadRequestException("El paseador todavía no conectó su cuenta de MercadoPago");
     }
+    const walkerToken = this.cryptoService.decrypt(walk.walker.mpAccessToken);
+    if (!walkerToken) {
+      throw new BadRequestException("El paseador todavía no conectó su cuenta de MercadoPago");
+    }
 
     const frontendUrl = this.config.get<string>("FRONTEND_URL") ?? "http://localhost:3000";
     const apiUrl = this.config.get<string>("API_URL") ?? "http://localhost:3001";
 
-    const walkerClient = new MercadoPago({ accessToken: walk.walker.mpAccessToken });
+    const walkerClient = new MercadoPago({ accessToken: walkerToken });
     const preferenceApi = new Preference(walkerClient);
 
     const preference = await preferenceApi.create({
@@ -137,7 +143,9 @@ export class PaymentsService {
         });
         if (!walk) return { status: "walk_not_found" };
 
-        const walkerClient = new MercadoPago({ accessToken: walk.walker.mpAccessToken ?? "" });
+        const rawToken = walk.walker.mpAccessToken ?? "";
+        const walkerToken = rawToken ? this.cryptoService.decrypt(rawToken) : "";
+        const walkerClient = new MercadoPago({ accessToken: walkerToken });
         const paymentApi = new Payment(walkerClient);
         const payment = await paymentApi.get({ id: Number(dataId) });
 
@@ -221,13 +229,15 @@ export class PaymentsService {
       reviewed++;
       try {
         if (!walk.walker.mpAccessToken) continue;
+        const walkerToken = this.cryptoService.decrypt(walk.walker.mpAccessToken);
+        if (!walkerToken) continue;
 
         const ownerId = walk.participants[0]?.ownerId;
         if (!ownerId) continue;
 
         const searchRes = await fetch(
           `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(`${walk.id}|${ownerId}`)}`,
-          { headers: { Authorization: `Bearer ${walk.walker.mpAccessToken}` } },
+          { headers: { Authorization: `Bearer ${walkerToken}` } },
         );
         if (!searchRes.ok) continue;
 
@@ -235,7 +245,7 @@ export class PaymentsService {
         const approved = data.results?.find(p => p.status === "approved");
         if (!approved) continue;
 
-        const walkerClient = new MercadoPago({ accessToken: walk.walker.mpAccessToken });
+        const walkerClient = new MercadoPago({ accessToken: walkerToken });
         const paymentApi = new Payment(walkerClient);
         const payment = await paymentApi.get({ id: approved.id });
 
@@ -343,7 +353,7 @@ export class PaymentsService {
     await this.prisma.walkerProfile.update({
       where: { userId: state },
       data: {
-        mpAccessToken: data.access_token,
+        mpAccessToken: this.cryptoService.encrypt(data.access_token),
         mpUserId: String(data.user_id),
       },
     });
