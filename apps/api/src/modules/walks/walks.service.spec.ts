@@ -390,12 +390,14 @@ describe('WalksService', () => {
         .rejects.toThrow(ForbiddenException);
     });
 
-    it('camino feliz WALKER: el paseador del walk puede verlo', async () => {
+    it('camino feliz WALKER: el paseador del walk puede verlo y walker no expone mpAccessToken', async () => {
       prisma.walk.findUnique.mockResolvedValue(WALK_FULL);
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
 
       const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
       expect(result).toEqual({ ...WALK_FULL, isPaid: false });
+      expect(result.walker).not.toHaveProperty('mpAccessToken');
+      expect(result.walker).not.toHaveProperty('mpUserId');
     });
 
     it('camino feliz OWNER: un participante puede ver el walk', async () => {

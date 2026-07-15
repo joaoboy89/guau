@@ -172,7 +172,8 @@ export class ChatService {
         },
       },
       walker: {
-        include: {
+        select: {
+          id: true,
           user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
         },
       },

@@ -18,7 +18,22 @@ export class AdminService {
   async getPendingWalkers() {
     return this.prisma.walkerProfile.findMany({
       where: { verificationStatus: VerificationStatus.PENDING },
-      include: {
+      select: {
+        id: true,
+        userId: true,
+        bio: true,
+        dniNumber: true,
+        dniPhotoUrl: true,
+        selfieUrl: true,
+        rating: true,
+        totalReviews: true,
+        isAvailable: true,
+        maxDogsPerWalk: true,
+        centerLat: true,
+        centerLng: true,
+        radiusKm: true,
+        verificationStatus: true,
+        verificationNotes: true,
         user: {
           select: {
             id: true,
@@ -59,6 +74,11 @@ export class AdminService {
       data: {
         verificationStatus: newStatus,
         verificationNotes: dto.notes ?? null,
+      },
+      select: {
+        id: true,
+        verificationStatus: true,
+        verificationNotes: true,
       },
     });
 
@@ -101,7 +121,9 @@ export class AdminService {
         include: {
           walkType: true,
           walker: {
-            include: {
+            select: {
+              id: true,
+              rating: true,
               user: { select: { firstName: true, lastName: true, email: true } },
             },
           },
@@ -242,7 +264,7 @@ export class AdminService {
       },
       include: {
         walker: {
-          include: { user: { select: { id: true, firstName: true } } },
+          select: { user: { select: { id: true, firstName: true } } },
         },
       },
     });
