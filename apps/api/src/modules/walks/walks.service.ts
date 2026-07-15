@@ -20,7 +20,14 @@ import { NotificationsService } from "../notifications/notifications.service";
 const WALK_INCLUDE = {
   walkType: true,
   walker: {
-    include: {
+    select: {
+      id: true,
+      bio: true,
+      rating: true,
+      totalReviews: true,
+      isAvailable: true,
+      verificationStatus: true,
+      maxDogsPerWalk: true,
       user: { select: { firstName: true, lastName: true, avatarUrl: true, phone: true } },
     },
   },

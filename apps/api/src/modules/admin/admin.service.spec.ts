@@ -78,7 +78,7 @@ describe('AdminService', () => {
   // ─── getPendingWalkers() ──────────────────────────────────────────────────
 
   describe('getPendingWalkers()', () => {
-    it('camino feliz: llama a walkerProfile.findMany con filtro PENDING e include de user', async () => {
+    it('camino feliz: llama a walkerProfile.findMany con filtro PENDING y select explícito (sin mpAccessToken)', async () => {
       const profiles = [BASE_WALKER_PROFILE];
       prisma.walkerProfile.findMany.mockResolvedValue(profiles);
 
@@ -86,10 +86,14 @@ describe('AdminService', () => {
 
       expect(prisma.walkerProfile.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where:   { verificationStatus: VerificationStatus.PENDING },
-          include: expect.objectContaining({ user: expect.anything() }),
+          where:  { verificationStatus: VerificationStatus.PENDING },
+          select: expect.objectContaining({ user: expect.anything() }),
         }),
       );
+      // El select no debe incluir campos sensibles de OAuth
+      const callArg = prisma.walkerProfile.findMany.mock.calls[0][0];
+      expect(callArg.select).not.toHaveProperty('mpAccessToken');
+      expect(callArg.select).not.toHaveProperty('mpUserId');
       expect(result).toEqual(profiles);
     });
   });
@@ -130,6 +134,8 @@ describe('AdminService', () => {
         }),
       );
       expect(result).toEqual(updated);
+      expect(result).not.toHaveProperty('mpAccessToken');
+      expect(result).not.toHaveProperty('mpUserId');
     });
 
     it('action "reject" con notes: actualiza a REJECTED con verificationNotes y notifica con WALK_REJECTED', async () => {
@@ -161,6 +167,8 @@ describe('AdminService', () => {
         }),
       );
       expect(result).toEqual(updated);
+      expect(result).not.toHaveProperty('mpAccessToken');
+      expect(result).not.toHaveProperty('mpUserId');
     });
   });
 
