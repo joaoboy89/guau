@@ -15,6 +15,7 @@ export const SOCKET_EVENTS = {
 } as const;
 
 export const NOTIFICATION_TYPES = {
+  WALK_REQUESTED:         "walk_requested",
   WALK_CONFIRMED:         "walk_confirmed",
   WALK_REJECTED:          "walk_rejected",
   WALK_CANCELLED_WALKER:  "walk_cancelled_walker",

@@ -5,7 +5,6 @@ import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useRequireAuth } from "@/lib/auth";
 import { walksAPI, paymentsAPI } from "@/lib/api";
-import { Logo } from "@/components/Logo";
 import { AxiosError } from "axios";
 import { STATUS_LABEL } from "@/lib/walk-status";
 
@@ -76,8 +75,11 @@ export default function WalkDetailPage() {
 
   if (!walk) {
     return (
-      <main className="min-h-dvh bg-brand-bg p-6 flex items-center justify-center">
+      <main className="flex-1 p-6 flex flex-col items-center justify-center gap-4">
         <p className="text-sm text-brand-text-muted">Paseo no encontrado.</p>
+        <Link href="/walks" className="text-sm text-brand-primary font-semibold hover:opacity-80 transition-opacity">
+          ← Mis paseos
+        </Link>
       </main>
     );
   }
@@ -90,9 +92,14 @@ export default function WalkDetailPage() {
   });
 
   return (
-    <main className="min-h-dvh bg-brand-bg p-6 flex flex-col gap-5 max-w-lg mx-auto">
-      <header className="flex items-center gap-3">
-        <Logo size={32} />
+    <main className="flex-1 p-6 flex flex-col gap-5 max-w-lg mx-auto w-full">
+      <header className="flex flex-col gap-1">
+        <Link
+          href="/walks"
+          className="text-sm text-brand-primary font-semibold hover:opacity-80 transition-opacity w-fit"
+        >
+          ← Mis paseos
+        </Link>
         <h1 className="text-xl font-serif font-bold text-brand-text">Detalle del paseo</h1>
       </header>
 

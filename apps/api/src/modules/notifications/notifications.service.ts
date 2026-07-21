@@ -122,6 +122,37 @@ export class NotificationsService {
     return notification;
   }
 
+  // ─── Notificar nueva solicitud de paseo ──────────────────
+  // Llamado desde WalksService.create() tras commitear la transacción.
+  // La notificación de mayor valor del negocio: cuanto más rápido responde
+  // el paseador, menos probable que el dueño se vaya a otro lado.
+
+  async notifyNewWalkRequest(walkId: string) {
+    const walk = await this.prisma.walk.findUnique({
+      where: { id: walkId },
+      select: {
+        scheduledAt: true,
+        walkType: { select: { label: true } },
+        walker: { select: { user: { select: { id: true } } } },
+      },
+    });
+    if (!walk) return;
+
+    const dateStr = walk.scheduledAt.toLocaleString("es-AR", {
+      dateStyle: "long",
+      timeStyle: "short",
+      timeZone: "America/Argentina/Buenos_Aires",
+    });
+
+    await this.create({
+      userId: walk.walker.user.id,
+      title:  "¡Nueva solicitud de paseo! 🐾",
+      body:   `${walk.walkType.label} — ${dateStr}. Respondé pronto para no perder la reserva.`,
+      type:   NOTIFICATION_TYPES.WALK_REQUESTED,
+      data:   { walkId },
+    });
+  }
+
   // ─── Notificar cambio de estado de un paseo ─────────────
   // Llamado desde WalksService tras cada transición.
 
