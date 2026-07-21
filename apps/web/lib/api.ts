@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosError } from "axios";
 import { navigateTo } from "./navigate";
+import type { Notification } from "./store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -125,4 +126,9 @@ export const paymentsAPI = {
   createPreference: (data: unknown) => api.post("/payments/create-preference", data),
   walkerBalance:    ()              => api.get("/payments/walker-balance"),
   walkerConnect:    ()              => api.get<{ url: string }>("/payments/walker-connect"),
+};
+
+export const notificationsAPI = {
+  list:     ()           => api.get<Notification[]>("/notifications"),
+  markRead: (id: string) => api.put<Notification>(`/notifications/${id}/read`),
 };

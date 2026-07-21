@@ -39,8 +39,10 @@ export interface Walk {
 
 export interface Notification {
   id:        string;
-  message:   string;
-  read:      boolean;
+  title:     string;
+  body:      string;
+  type:      string;
+  isRead:    boolean;
   createdAt: string;
 }
 
@@ -65,10 +67,11 @@ interface WalksSlice {
 // ─── Notifications slice ──────────────────────────────────────────────────────
 
 interface NotificationsSlice {
-  notifications:    Notification[];
-  unreadCount:      number;
-  setNotifications: (n: Notification[]) => void;
-  markAllRead:      () => void;
+  notifications:        Notification[];
+  unreadCount:          number;
+  setNotifications:     (n: Notification[]) => void;
+  addNotification:      (n: Notification) => void;
+  markNotificationRead: (id: string) => void;
 }
 
 // ─── Combined store ───────────────────────────────────────────────────────────
@@ -77,7 +80,7 @@ type AppStore = AuthSlice & WalksSlice & NotificationsSlice;
 
 export const useStore = create<AppStore>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       // ── Auth ──
       user:       null,
       isLoggedIn: false,
@@ -102,13 +105,32 @@ export const useStore = create<AppStore>()(
       setNotifications: (notifications) =>
         set({
           notifications,
-          unreadCount: notifications.filter((n) => !n.read).length,
+          unreadCount: notifications.filter((n) => !n.isRead).length,
         }),
 
-      markAllRead: () =>
-        set({
-          notifications: get().notifications.map((n) => ({ ...n, read: true })),
-          unreadCount: 0,
+      addNotification: (notification) =>
+        set((state) => {
+          if (state.notifications.some((n) => n.id === notification.id)) return state;
+          return {
+            notifications: [notification, ...state.notifications],
+            unreadCount:   state.unreadCount + (notification.isRead ? 0 : 1),
+          };
+        }),
+
+      markNotificationRead: (id) =>
+        set((state) => {
+          let wasUnread = false;
+          const notifications = state.notifications.map((n) => {
+            if (n.id === id && !n.isRead) {
+              wasUnread = true;
+              return { ...n, isRead: true };
+            }
+            return n;
+          });
+          return {
+            notifications,
+            unreadCount: wasUnread ? Math.max(0, state.unreadCount - 1) : state.unreadCount,
+          };
         }),
     }),
     {
@@ -128,4 +150,10 @@ export const useStore = create<AppStore>()(
 // ─── Selectores ───────────────────────────────────────────────────────────────
 export const useAuth   = () => useStore((s) => ({ user: s.user, isLoggedIn: s.isLoggedIn, setUser: s.setUser, logout: s.logout }));
 export const useWalks  = () => useStore((s) => ({ activeWalk: s.activeWalk, walks: s.walks, setActiveWalk: s.setActiveWalk, setWalks: s.setWalks }));
-export const useNotifs = () => useStore((s) => ({ notifications: s.notifications, unreadCount: s.unreadCount, setNotifications: s.setNotifications, markAllRead: s.markAllRead }));
+export const useNotifs = () => useStore((s) => ({
+  notifications:        s.notifications,
+  unreadCount:          s.unreadCount,
+  setNotifications:     s.setNotifications,
+  addNotification:      s.addNotification,
+  markNotificationRead: s.markNotificationRead,
+}));

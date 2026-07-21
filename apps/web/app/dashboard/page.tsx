@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRequireAuth, useLogout } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
+import { NotificationsBell } from "@/components/NotificationsBell";
 
 export default function DashboardPage() {
   const { user, ready } = useRequireAuth();
@@ -22,12 +23,15 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={logout}
-          className="text-sm px-4 py-2 rounded-xl border border-brand-border text-brand-text-muted transition-opacity hover:opacity-70"
-        >
-          Salir
-        </button>
+        <div className="flex items-center gap-2">
+          <NotificationsBell />
+          <button
+            onClick={logout}
+            className="text-sm px-4 py-2 rounded-xl border border-brand-border text-brand-text-muted transition-opacity hover:opacity-70"
+          >
+            Salir
+          </button>
+        </div>
       </header>
 
       <Link

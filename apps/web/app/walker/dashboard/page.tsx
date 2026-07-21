@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRequireAuth, useLogout } from "@/lib/auth";
 import { walkersAPI, paymentsAPI, walksAPI } from "@/lib/api";
 import { Logo } from "@/components/Logo";
+import { NotificationsBell } from "@/components/NotificationsBell";
 import { STATUS_LABEL } from "@/lib/walk-status";
 import { AxiosError } from "axios";
 
@@ -199,12 +200,15 @@ export default function WalkerDashboardPage() {
             <p className="text-xs text-brand-text-muted">{fullName} · {user?.email}</p>
           </div>
         </div>
-        <button
-          onClick={logout}
-          className="text-sm px-4 py-2 rounded-xl border border-brand-border text-brand-text-muted transition-opacity hover:opacity-70"
-        >
-          Salir
-        </button>
+        <div className="flex items-center gap-2">
+          <NotificationsBell />
+          <button
+            onClick={logout}
+            className="text-sm px-4 py-2 rounded-xl border border-brand-border text-brand-text-muted transition-opacity hover:opacity-70"
+          >
+            Salir
+          </button>
+        </div>
       </header>
 
       {/* Estado de verificación */}
