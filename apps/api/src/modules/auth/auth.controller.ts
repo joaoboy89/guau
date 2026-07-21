@@ -10,6 +10,7 @@ import {
   Res,
 } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import { Response } from "express";
 import { AuthService } from "./auth.service";
 import { RegisterOwnerDto } from "./dto/register-owner.dto";
@@ -18,6 +19,9 @@ import { LoginDto } from "./dto/login.dto";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import { JwtRefreshGuard } from "./guards/jwt-refresh.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
+
+// Throttle estricto para endpoints sensibles a fuerza bruta / abuso de registro
+const AUTH_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 
 const COOKIE_BASE = {
   httpOnly: true,
@@ -33,18 +37,21 @@ export class AuthController {
   constructor(private auth: AuthService) {}
 
   @Post("register/owner")
+  @Throttle(AUTH_THROTTLE)
   @ApiOperation({ summary: "Registro de dueño" })
   registerOwner(@Body() dto: RegisterOwnerDto) {
     return this.auth.registerOwner(dto);
   }
 
   @Post("register/walker")
+  @Throttle(AUTH_THROTTLE)
   @ApiOperation({ summary: "Registro de paseador" })
   registerWalker(@Body() dto: RegisterWalkerDto) {
     return this.auth.registerWalker(dto);
   }
 
   @Post("login")
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Login — setea cookies httpOnly y retorna perfil básico" })
   async login(

@@ -43,15 +43,42 @@ const WALK_INCLUDE = {
   },
 } as const;
 
+const DEFAULT_COMMISSION_RATE = 0.15;
+
 @Injectable()
 export class WalksService {
+  // Validada una sola vez al arrancar — ver validateCommissionRate()
+  private readonly commissionRate: number;
+
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
     @Optional() private trackingGateway?: TrackingGateway,
     @Optional() private chatService?: ChatService,
     @Optional() private notificationsService?: NotificationsService,
-  ) {}
+  ) {
+    this.commissionRate = this.validateCommissionRate();
+  }
+
+  // MP_MARKETPLACE_FEE es una FRACCIÓN (0.15 = 15%), no un porcentaje — si
+  // alguien la setea a "15" pensando en 15%, platformFee termina siendo 15x
+  // el precio y walkerAmount negativo. Mejor que la API no arranque a que
+  // calcule comisiones absurdas en producción.
+  private validateCommissionRate(): number {
+    const raw = this.config.get<string>("MP_MARKETPLACE_FEE");
+    if (raw === undefined || raw === null || raw === "") {
+      return DEFAULT_COMMISSION_RATE;
+    }
+
+    const fee = parseFloat(raw);
+    if (Number.isNaN(fee) || fee <= 0 || fee >= 1) {
+      throw new Error(
+        `MP_MARKETPLACE_FEE inválida: "${raw}". Debe ser una FRACCIÓN entre 0 y 1 ` +
+        `(ej. 0.15 = 15%), no un porcentaje.`
+      );
+    }
+    return fee;
+  }
 
   // ─── Crear reserva ───────────────────────────────────────
 
@@ -131,8 +158,7 @@ export class WalksService {
     }
 
     // 7. Calcular montos
-    const commissionRate =
-      parseFloat(this.config.get<string>("MP_MARKETPLACE_FEE") ?? "0.15");
+    const commissionRate = this.commissionRate;
     const amountPaid =
       mode === WalkMode.EXCLUSIVO
         ? walkType.basePrice * walkType.exclusiveMultiplier
@@ -357,7 +383,14 @@ export class WalksService {
         where: { walkId: walk.id, ownerId: owner.id },
       });
       if (!participant) throw new ForbiddenException("No tenés acceso a este paseo");
+      return;
     }
+
+    // Default-deny: ADMIN tiene acceso explícito; cualquier otro rol
+    // (presente o futuro) queda afuera salvo que se agregue acá a propósito.
+    if (role === UserRole.ADMIN) return;
+
+    throw new ForbiddenException("No tenés acceso a este paseo");
   }
 
   private assertStatus(

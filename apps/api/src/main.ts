@@ -9,6 +9,10 @@ import { Request, Response, NextFunction } from "express";
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Detrás de Cloudflare Tunnel, confiar en el primer proxy para que
+  // req.ip refleje la IP real del cliente (relevante para rate limiting).
+  app.getHttpAdapter().getInstance().set("trust proxy", 1);
+
   app.use(cookieParser());
 
   app.enableCors({
