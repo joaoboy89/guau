@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useRequireAuth } from "@/lib/auth";
 import { dogsAPI, walkTypesAPI, walkersAPI, walksAPI } from "@/lib/api";
 import { Logo } from "@/components/Logo";
+import { toDatetimeLocalValue } from "@/lib/datetime";
 import { AxiosError } from "axios";
 
 // TODO: reemplazar por geolocalización real del dueño cuando se integre Mapbox
@@ -59,6 +60,13 @@ export default function NewWalkPage() {
   // ── Detalles ──
   const [scheduledAt, setScheduledAt] = useState("");
   const [pickupAddress, setPickupAddress] = useState("");
+  // Se calcula en un efecto (no en el render) para no hornear la hora del build
+  // en el HTML estático y quedar desactualizado — siempre refleja el "ahora" real.
+  const [minScheduledAt, setMinScheduledAt] = useState("");
+
+  useEffect(() => {
+    setMinScheduledAt(toDatetimeLocalValue(new Date()));
+  }, []);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -267,6 +275,7 @@ export default function NewWalkPage() {
             <input
               type="datetime-local"
               value={scheduledAt}
+              min={minScheduledAt}
               onChange={(e) => setScheduledAt(e.target.value)}
               className="h-11 px-4 rounded-xl border border-brand-border bg-brand-bg text-sm text-brand-text focus:outline-none focus:border-brand-primary"
             />

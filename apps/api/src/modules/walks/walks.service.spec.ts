@@ -71,11 +71,15 @@ const WALK_FULL = {
   participants: [],
 };
 
+// Siempre en el futuro relativo a "ahora" — evita que la suite se rompa con el
+// paso del tiempo una vez que create() valida que scheduledAt sea futuro.
+const FUTURE_SCHEDULED_AT = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
 const CREATE_DTO = {
   walkerId:       WALKER_PROFILE_ID,
   walkTypeId:     WALK_TYPE_ID,
   dogIds:         [DOG_ID],
-  scheduledAt:    '2026-07-06T12:00:00.000Z',
+  scheduledAt:    FUTURE_SCHEDULED_AT,
   pickupLat:      -34.5885,
   pickupLng:      -58.4233,
   pickupAddress:  'Av. Santa Fe 1234, Palermo',
@@ -181,6 +185,18 @@ describe('WalksService', () => {
   // ─── create() ─────────────────────────────────────────────────────────────
 
   describe('create()', () => {
+    it('lanza BadRequestException si scheduledAt está en el pasado', async () => {
+      const pastDto = { ...CREATE_DTO, scheduledAt: new Date(Date.now() - 60_000).toISOString() };
+      await expect(service.create(OWNER_USER_ID, pastDto)).rejects.toThrow(BadRequestException);
+      // Falla antes de tocar la DB
+      expect(prisma.ownerProfile.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequestException si scheduledAt es exactamente ahora (no estrictamente futuro)', async () => {
+      const nowDto = { ...CREATE_DTO, scheduledAt: new Date().toISOString() };
+      await expect(service.create(OWNER_USER_ID, nowDto)).rejects.toThrow(BadRequestException);
+    });
+
     it('lanza NotFoundException si no existe el ownerProfile', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(null);
       await expect(service.create(OWNER_USER_ID, CREATE_DTO)).rejects.toThrow(NotFoundException);

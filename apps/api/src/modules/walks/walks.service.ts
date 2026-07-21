@@ -59,6 +59,10 @@ export class WalksService {
     const mode = dto.mode ?? WalkMode.GRUPAL;
     const scheduledAt = new Date(dto.scheduledAt);
 
+    if (scheduledAt.getTime() <= Date.now()) {
+      throw new BadRequestException("La fecha y hora del paseo deben ser en el futuro");
+    }
+
     // 1. Validar que el dueño tiene perfil
     const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
     if (!owner) throw new NotFoundException("Perfil de dueño no encontrado");
