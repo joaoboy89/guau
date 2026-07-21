@@ -13,7 +13,9 @@ import MercadoPago, { Preference, Payment } from "mercadopago";
 import * as crypto from "crypto";
 import { PrismaService } from "../../database/prisma.service";
 import { CryptoService } from "../../common/crypto/crypto.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import { WalkStatus, PayoutStatus } from "@prisma/client";
+import { NOTIFICATION_TYPES } from "@guau/shared";
 import { CreatePreferenceDto } from "./dto/create-preference.dto";
 
 const MP_CONNECT_STATE_PURPOSE = "mp-connect";
@@ -28,6 +30,7 @@ export class PaymentsService {
     private config: ConfigService,
     private cryptoService: CryptoService,
     private jwt: JwtService,
+    private notificationsService: NotificationsService,
   ) {
     this.mpClient = new MercadoPago({
       accessToken: this.config.get<string>("MP_ACCESS_TOKEN") ?? "no_configurado",
@@ -108,6 +111,88 @@ export class PaymentsService {
       initPoint: preference.init_point,
       sandboxInitPoint: preference.sandbox_init_point,
     };
+  }
+
+  // ─── Reembolso (admin) ────────────────────────────────────
+  // Protección anti no-show: "reembolso rápido, no prevención". Ejecuta el
+  // refund con el token OAuth del propio walker (vendedor) — Güau puede
+  // dispararlo sin que el paseador haga nada. Solo refund TOTAL en MVP.
+
+  async refundWalkPayment(walkId: string) {
+    const walk = await this.prisma.walk.findUnique({
+      where: { id: walkId },
+      include: { walker: true },
+    });
+    if (!walk) throw new NotFoundException("Paseo no encontrado");
+
+    if (!walk.mpPaymentId || !/^\d+$/.test(walk.mpPaymentId)) {
+      throw new BadRequestException("Este paseo no tiene un pago para reembolsar");
+    }
+    if (walk.mpRefundId) {
+      throw new BadRequestException("Este paseo ya fue reembolsado");
+    }
+
+    const rawToken = walk.walker.mpAccessToken;
+    const walkerToken = rawToken ? this.cryptoService.decrypt(rawToken) : "";
+    if (!walkerToken) {
+      throw new BadRequestException("El paseador no tiene una cuenta de MercadoPago conectada");
+    }
+
+    // X-Idempotency-Key derivado del walkId: un doble-click reintenta la
+    // misma operación en vez de generar un segundo refund.
+    const response = await fetch(
+      `https://api.mercadopago.com/v1/payments/${walk.mpPaymentId}/refunds`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${walkerToken}`,
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": `refund-${walkId}`,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      this.logger.error(
+        `Refund falló para walk ${walkId}: ${response.status} ${errorText}`,
+      );
+      throw new BadRequestException("No se pudo procesar el reembolso en MercadoPago");
+    }
+
+    const refund = await response.json() as { id?: number | string };
+    const refundId = refund.id != null ? String(refund.id) : "sin-id";
+
+    const alreadyCancelled =
+      walk.status === WalkStatus.CANCELLED_WALKER || walk.status === WalkStatus.CANCELLED_OWNER;
+
+    const updated = await this.prisma.walk.update({
+      where: { id: walkId },
+      data: {
+        mpRefundId: refundId,
+        refundedAt: new Date(),
+        ...(alreadyCancelled ? {} : { status: WalkStatus.CANCELLED_WALKER }),
+      },
+    });
+
+    // Notificar al dueño — no bloquea la respuesta si el walk no tiene participantes cargados
+    const participant = await this.prisma.walkParticipant.findFirst({
+      where: { walkId },
+      include: { owner: { include: { user: { select: { id: true } } } } },
+    });
+    if (participant) {
+      await this.notificationsService.create({
+        userId: participant.owner.user.id,
+        title: "Te devolvimos el dinero del paseo",
+        body: `El paseo no se realizó — reembolsamos $${walk.totalAmount.toLocaleString("es-AR")} a tu cuenta de MercadoPago.`,
+        type: NOTIFICATION_TYPES.WALK_CANCELLED_WALKER,
+        data: { walkId, refundId },
+      });
+    }
+
+    this.logger.log(`Reembolso ${refundId} procesado para walk ${walkId}`);
+
+    return updated;
   }
 
   // ─── Webhook de MercadoPago ──────────────────────────────

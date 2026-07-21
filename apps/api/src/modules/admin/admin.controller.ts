@@ -1,6 +1,7 @@
 import { Controller, Get, Put, Post, Param, Body, Query, UseGuards } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { AdminService } from "./admin.service";
+import { PaymentsService } from "../payments/payments.service";
 import { VerifyWalkerDto } from "./dto/verify-walker.dto";
 import { QueryAdminWalksDto } from "./dto/query-admin-walks.dto";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
@@ -14,7 +15,10 @@ import { UserRole } from "@prisma/client";
 @Roles(UserRole.ADMIN)
 @Controller("admin")
 export class AdminController {
-  constructor(private admin: AdminService) {}
+  constructor(
+    private admin: AdminService,
+    private payments: PaymentsService,
+  ) {}
 
   @Get("walkers/pending")
   @ApiOperation({ summary: "Paseadores pendientes de verificación de identidad" })
@@ -44,5 +48,13 @@ export class AdminController {
   @ApiOperation({ summary: "Procesar cobros semanales pendientes a paseadores" })
   processPayouts() {
     return this.admin.processPayouts();
+  }
+
+  @Post("walks/:id/refund")
+  @ApiOperation({
+    summary: "Reembolso total del pago de un paseo (ej. no-show del paseador) — sin acción del vendedor",
+  })
+  refundWalk(@Param("id") id: string) {
+    return this.payments.refundWalkPayment(id);
   }
 }
