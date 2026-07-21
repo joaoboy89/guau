@@ -1,9 +1,11 @@
+import * as crypto from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { WalkStatus, PayoutStatus } from '@prisma/client';
 import { PaymentsService } from './payments.service';
@@ -526,6 +528,131 @@ describe('PaymentsService', () => {
       expect(prisma.walk.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'walk-2' } }),
       );
+    });
+  });
+
+  // ─── Verificación de firma HMAC ───────────────────────────────────────────
+
+  describe('handleWebhook() — firma HMAC con MP_WEBHOOK_SECRET configurado', () => {
+    const WEBHOOK_SECRET = 'clave-de-prueba-para-hmac-tests';
+    const DATA_ID        = '77777';
+    const X_REQUEST_ID   = 'req-test-001';
+    const TS             = '1700000000';
+
+    let signedService: PaymentsService;
+    let signedPrisma:  ReturnType<typeof buildPrismaMock>;
+
+    // Construye el HMAC exactamente como lo hace verifyWebhookSignature en producción
+    function computeHmac(dataId: string, requestId: string, ts: string): string {
+      const manifest = `id:${dataId};request-id:${requestId};ts:${ts};`;
+      return crypto.createHmac('sha256', WEBHOOK_SECRET).update(manifest).digest('hex');
+    }
+
+    beforeEach(async () => {
+      signedPrisma = buildPrismaMock();
+
+      const configWithSecret = {
+        get: jest.fn((key: string) => {
+          const values: Record<string, string> = {
+            MP_ACCESS_TOKEN:   'platform-mp-token',
+            FRONTEND_URL:      'http://localhost:3000',
+            API_URL:           'http://localhost:3001',
+            MP_WEBHOOK_SECRET: WEBHOOK_SECRET,
+            MP_CLIENT_ID:      'client-id',
+            MP_CLIENT_SECRET:  'client-secret',
+          };
+          return values[key] ?? null;
+        }),
+        getOrThrow: jest.fn((key: string) => {
+          const values: Record<string, string> = {
+            MP_CLIENT_ID:    'client-id',
+            MP_CLIENT_SECRET: 'client-secret',
+            API_URL:         'http://localhost:3001',
+          };
+          if (!values[key]) throw new Error(`Missing config: ${key}`);
+          return values[key];
+        }),
+      };
+      const cryptoMock = {
+        encrypt: jest.fn((s: string) => s),
+        decrypt: jest.fn((s: string) => s),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PaymentsService,
+          { provide: PrismaService, useValue: signedPrisma },
+          { provide: ConfigService, useValue: configWithSecret },
+          { provide: CryptoService, useValue: cryptoMock },
+        ],
+      }).compile();
+
+      signedService = module.get<PaymentsService>(PaymentsService);
+    });
+
+    it('firma inválida → lanza UnauthorizedException y NO toca ninguna tabla de DB', async () => {
+      const badSig = `ts=${TS},v1=${'0'.repeat(64)}`; // 64 ceros ≠ HMAC real
+
+      await expect(
+        signedService.handleWebhook(
+          { type: 'payment', data: { id: DATA_ID } },
+          badSig,
+          X_REQUEST_ID,
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(signedPrisma.walk.findUnique).not.toHaveBeenCalled();
+      expect(signedPrisma.walk.update).not.toHaveBeenCalled();
+      expect(signedPrisma.payout.upsert).not.toHaveBeenCalled();
+    });
+
+    it('firma válida (HMAC correcto) → no lanza UnauthorizedException', async () => {
+      const validV1  = computeHmac(DATA_ID, X_REQUEST_ID, TS);
+      const validSig = `ts=${TS},v1=${validV1}`;
+
+      // Tipo no 'payment' para confirmar que la firma pasó sin procesar nada más
+      const result = await signedService.handleWebhook(
+        { type: 'merchant_order', data: { id: DATA_ID } },
+        validSig,
+        X_REQUEST_ID,
+      );
+
+      expect(result).toEqual({ status: 'ignored' });
+    });
+
+    it('firma válida + pago aprobado → pasa verificación y procesa el pago', async () => {
+      const validV1  = computeHmac(DATA_ID, X_REQUEST_ID, TS);
+      const validSig = `ts=${TS},v1=${validV1}`;
+
+      mockPaymentGet.mockResolvedValue(
+        approvedPayment({ id: Number(DATA_ID), external_reference: 'walk-1|owner-1' }),
+      );
+      signedPrisma.walk.findUnique.mockResolvedValue(WALK_ROW);
+      signedPrisma.walk.update.mockResolvedValue({});
+      signedPrisma.payout.upsert.mockResolvedValue({});
+
+      const result = await signedService.handleWebhook(
+        { type: 'payment', data: { id: DATA_ID } },
+        validSig,
+        X_REQUEST_ID,
+      );
+
+      expect(result).toEqual({ status: 'processed' });
+      expect(signedPrisma.walk.update).toHaveBeenCalledTimes(1);
+      expect(signedPrisma.payout.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('firma con ts alterado → lanza UnauthorizedException (HMAC no coincide)', async () => {
+      const validV1     = computeHmac(DATA_ID, X_REQUEST_ID, TS);
+      const tamperedSig = `ts=9999999999,v1=${validV1}`; // ts cambiado → manifest distinto
+
+      await expect(
+        signedService.handleWebhook(
+          { type: 'payment', data: { id: DATA_ID } },
+          tamperedSig,
+          X_REQUEST_ID,
+        ),
+      ).rejects.toThrow(UnauthorizedException);
     });
   });
 });

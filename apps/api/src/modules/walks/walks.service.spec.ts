@@ -436,6 +436,12 @@ describe('WalksService', () => {
       await expect(service.confirm(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
     });
 
+    it('IDOR: ForbiddenException si el walkerProfile existe pero NO es el asignado al walk', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER); // id = WALKER_PROFILE_ID
+      prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, walkerId: 'wp-otro-paseador' });
+      await expect(service.confirm(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
     it('NotFoundException si el walk no existe', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
       prisma.walk.findUnique.mockResolvedValue(null);
@@ -478,6 +484,12 @@ describe('WalksService', () => {
       await expect(service.reject(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
     });
 
+    it('IDOR: ForbiddenException si el walkerProfile existe pero NO es el asignado al walk', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, walkerId: 'wp-otro-paseador' });
+      await expect(service.reject(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
     it('NotFoundException si el walk no existe', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
       prisma.walk.findUnique.mockResolvedValue(null);
@@ -509,6 +521,12 @@ describe('WalksService', () => {
       await expect(service.markOnWay(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
     });
 
+    it('IDOR: ForbiddenException si el walkerProfile existe pero NO es el asignado al walk', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, walkerId: 'wp-otro-paseador' });
+      await expect(service.markOnWay(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
     it('NotFoundException si el walk no existe', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
       prisma.walk.findUnique.mockResolvedValue(null);
@@ -537,6 +555,12 @@ describe('WalksService', () => {
   describe('start()', () => {
     it('ForbiddenException si no existe walkerProfile', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(null);
+      await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('IDOR: ForbiddenException si el walkerProfile existe pero NO es el asignado al walk', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, walkerId: 'wp-otro-paseador' });
       await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
     });
 
@@ -573,6 +597,12 @@ describe('WalksService', () => {
   describe('finish()', () => {
     it('ForbiddenException si no existe walkerProfile', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(null);
+      await expect(service.finish(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('IDOR: ForbiddenException si el walkerProfile existe pero NO es el asignado al walk', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, walkerId: 'wp-otro-paseador' });
       await expect(service.finish(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
     });
 
@@ -697,6 +727,14 @@ describe('WalksService', () => {
       prisma.walk.findUnique.mockResolvedValue({ id: WALK_ID, walkerId: 'other-walker' });
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER); // id = WALKER_PROFILE_ID
       await expect(service.getLocations(WALKER_USER_ID, UserRole.WALKER, WALK_ID))
+        .rejects.toThrow(ForbiddenException);
+    });
+
+    it('IDOR: ForbiddenException si OWNER no es participante del walk', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ id: WALK_ID, walkerId: WALKER_PROFILE_ID });
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walkParticipant.findFirst.mockResolvedValue(null); // no es participante
+      await expect(service.getLocations(OWNER_USER_ID, UserRole.OWNER, WALK_ID))
         .rejects.toThrow(ForbiddenException);
     });
 
