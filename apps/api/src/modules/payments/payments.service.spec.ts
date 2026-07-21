@@ -753,6 +753,63 @@ describe('PaymentsService', () => {
     });
   });
 
+  // ─── Fail-loud: webhook sin headers de firma en producción ────────────────
+
+  describe('handleWebhook() — sin x-signature / x-request-id', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    it('NODE_ENV=production sin headers → UnauthorizedException y NO procesa el pago', async () => {
+      process.env.NODE_ENV = 'production';
+
+      await expect(
+        service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined,
+          undefined,
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(prisma.walk.findUnique).not.toHaveBeenCalled();
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+      expect(prisma.payout.upsert).not.toHaveBeenCalled();
+    });
+
+    it('NODE_ENV=production con solo x-signature (sin x-request-id) → UnauthorizedException', async () => {
+      process.env.NODE_ENV = 'production';
+
+      await expect(
+        service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          'ts=1700000000,v1=cualquiervalor',
+          undefined,
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('fuera de producción sin headers → sigue procesando como hoy (dev/tests)', async () => {
+      process.env.NODE_ENV = 'test';
+
+      mockPaymentGet.mockResolvedValue(approvedPayment());
+      prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
+      prisma.walk.update.mockResolvedValue({});
+      prisma.payout.upsert.mockResolvedValue({});
+
+      const result = await service.handleWebhook(
+        { type: 'payment', data: { id: '99999' } },
+        undefined,
+        undefined,
+      );
+
+      expect(result).toEqual({ status: 'processed' });
+    });
+  });
+
   // ─── OAuth state firmado (CSRF) ────────────────────────────────────────────
 
   describe('getWalkerConnectUrl() / handleWalkerCallback() — state firmado', () => {

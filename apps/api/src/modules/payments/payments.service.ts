@@ -120,6 +120,10 @@ export class PaymentsService {
   ) {
     if (xSignature && xRequestId) {
       this.verifyWebhookSignature(body, xSignature, xRequestId);
+    } else if (process.env.NODE_ENV === "production") {
+      throw new UnauthorizedException(
+        "Webhook sin x-signature/x-request-id — rechazado en producción",
+      );
     }
 
     const type = body.type as string;
