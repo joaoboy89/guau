@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRequireAuth } from "@/lib/auth";
 import { walksAPI } from "@/lib/api";
-import { Logo } from "@/components/Logo";
 import { STATUS_LABEL } from "@/lib/walk-status";
 
 interface Walk {
@@ -30,12 +29,9 @@ export default function WalksPage() {
   if (!ready || loading) return null;
 
   return (
-    <main className="min-h-dvh bg-brand-bg p-6 flex flex-col gap-6 max-w-lg mx-auto">
+    <main className="flex-1 p-6 flex flex-col gap-6 max-w-lg mx-auto w-full">
       <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Logo size={32} />
-          <h1 className="text-xl font-serif font-bold text-brand-text">Mis paseos</h1>
-        </div>
+        <h1 className="text-xl font-serif font-bold text-brand-text">Mis paseos</h1>
         <Link
           href="/walks/new"
           className="text-sm px-4 py-2 rounded-xl bg-brand-primary text-white font-semibold hover:opacity-90 transition-opacity"

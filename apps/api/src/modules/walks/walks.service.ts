@@ -1,6 +1,7 @@
 import {
   Injectable,
   Optional,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -47,6 +48,8 @@ const DEFAULT_COMMISSION_RATE = 0.15;
 
 @Injectable()
 export class WalksService {
+  private readonly logger = new Logger(WalksService.name);
+
   // Validada una sola vez al arrancar — ver validateCommissionRate()
   private readonly commissionRate: number;
 
@@ -196,6 +199,13 @@ export class WalksService {
 
       return newWalk;
     });
+
+    // Fire-and-forget: un fallo al notificar nunca debe romper la reserva ya creada.
+    // El .catch() es necesario — un `void promesa` sin manejar el rechazo sigue
+    // siendo una unhandled rejection a nivel de proceso.
+    void this.notificationsService
+      ?.notifyNewWalkRequest(walk.id)
+      .catch((err) => this.logger.warn(`No se pudo notificar la nueva solicitud: ${err}`));
 
     return this.prisma.walk.findUnique({ where: { id: walk.id }, include: WALK_INCLUDE });
   }

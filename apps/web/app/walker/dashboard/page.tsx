@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRequireAuth, useLogout } from "@/lib/auth";
+import { useRequireAuth } from "@/lib/auth";
 import { walkersAPI, paymentsAPI, walksAPI } from "@/lib/api";
-import { Logo } from "@/components/Logo";
-import { NotificationsBell } from "@/components/NotificationsBell";
 import { STATUS_LABEL } from "@/lib/walk-status";
 import { AxiosError } from "axios";
 
@@ -47,7 +45,6 @@ const BADGE: Record<
 
 export default function WalkerDashboardPage() {
   const { user, ready }             = useRequireAuth();
-  const logout                      = useLogout();
   const [profile, setProfile]       = useState<WalkerProfile | null>(null);
   const [available, setAvailable]   = useState(false);
   const [toggling, setToggling]     = useState(false);
@@ -190,26 +187,12 @@ export default function WalkerDashboardPage() {
   const otherWalks   = walks.filter((w) => w.status !== "PENDING");
 
   return (
-    <main className="min-h-dvh p-6 flex flex-col gap-6 bg-brand-bg">
+    <main className="flex-1 p-6 flex flex-col gap-6">
 
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Logo size={36} />
-          <div>
-            <h1 className="text-xl font-serif font-bold text-brand-text">Mi panel</h1>
-            <p className="text-xs text-brand-text-muted">{fullName} · {user?.email}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <NotificationsBell />
-          <button
-            onClick={logout}
-            className="text-sm px-4 py-2 rounded-xl border border-brand-border text-brand-text-muted transition-opacity hover:opacity-70"
-          >
-            Salir
-          </button>
-        </div>
-      </header>
+      <div>
+        <h1 className="text-xl font-serif font-bold text-brand-text">Mi panel</h1>
+        <p className="text-xs text-brand-text-muted">{fullName} · {user?.email}</p>
+      </div>
 
       {/* Estado de verificación */}
       <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-brand-surface-sand border border-brand-border">

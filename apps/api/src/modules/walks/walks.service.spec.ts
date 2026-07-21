@@ -129,7 +129,7 @@ describe('WalksService', () => {
   let prisma:                ReturnType<typeof buildPrismaMock>;
   let trackingGateway:       { emitStatusChanged: jest.Mock };
   let chatService:           { ensureConversationForWalk: jest.Mock };
-  let notificationsService:  { notifyWalkStatusChange: jest.Mock };
+  let notificationsService:  { notifyWalkStatusChange: jest.Mock; notifyNewWalkRequest: jest.Mock };
 
   beforeEach(async () => {
     prisma = buildPrismaMock();
@@ -140,7 +140,10 @@ describe('WalksService', () => {
 
     trackingGateway      = { emitStatusChanged: jest.fn() };
     chatService          = { ensureConversationForWalk: jest.fn().mockResolvedValue({}) };
-    notificationsService = { notifyWalkStatusChange: jest.fn().mockResolvedValue({}) };
+    notificationsService = {
+      notifyWalkStatusChange: jest.fn().mockResolvedValue({}),
+      notifyNewWalkRequest:   jest.fn().mockResolvedValue({}),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -360,6 +363,24 @@ describe('WalksService', () => {
           data: expect.objectContaining({ status: WalkStatus.PENDING }),
         }),
       );
+    });
+
+    it('camino feliz: notifica al paseador de la nueva solicitud tras commitear la transacción', async () => {
+      setupCreateMocks();
+
+      await service.create(OWNER_USER_ID, CREATE_DTO);
+
+      expect(notificationsService.notifyNewWalkRequest).toHaveBeenCalledWith(WALK_ID);
+      expect(notificationsService.notifyNewWalkRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it('un fallo del servicio de notificaciones no rompe la creación de la reserva', async () => {
+      setupCreateMocks();
+      notificationsService.notifyNewWalkRequest.mockRejectedValue(new Error('boom'));
+
+      const result = await service.create(OWNER_USER_ID, CREATE_DTO);
+
+      expect(result).toEqual(WALK_FULL);
     });
   });
 

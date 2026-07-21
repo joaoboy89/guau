@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRequireAuth } from "@/lib/auth";
 import { dogsAPI, walkTypesAPI, walkersAPI, walksAPI } from "@/lib/api";
-import { Logo } from "@/components/Logo";
 import { toDatetimeLocalValue } from "@/lib/datetime";
 import { AxiosError } from "axios";
 
@@ -140,9 +139,8 @@ export default function NewWalkPage() {
   const selectedWalker = walkers.find((w) => w.id === selectedWalkerId);
 
   return (
-    <main className="min-h-dvh bg-brand-bg p-6 flex flex-col gap-6 max-w-lg mx-auto">
+    <main className="flex-1 p-6 flex flex-col gap-6 max-w-lg mx-auto w-full">
       <header className="flex items-center gap-3">
-        <Logo size={32} />
         <h1 className="text-xl font-serif font-bold text-brand-text">Reservar paseo</h1>
       </header>
 
