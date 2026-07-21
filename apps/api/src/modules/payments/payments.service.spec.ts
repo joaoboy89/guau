@@ -12,6 +12,11 @@ import { WalkStatus, PayoutStatus } from '@prisma/client';
 import { PaymentsService } from './payments.service';
 import { PrismaService } from '../../database/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+function buildNotificationsServiceMock() {
+  return { create: jest.fn().mockResolvedValue({ id: 'notif-1' }) };
+}
 
 // Mocks for MP SDK instances — assigned fresh in beforeEach
 let mockPreferenceCreate: jest.Mock;
@@ -118,10 +123,12 @@ describe('PaymentsService', () => {
   let service: PaymentsService;
   let prisma: ReturnType<typeof buildPrismaMock>;
   let config: ReturnType<typeof buildConfigMock>;
+  let notificationsService: ReturnType<typeof buildNotificationsServiceMock>;
 
   beforeEach(async () => {
     prisma = buildPrismaMock();
     config = buildConfigMock();
+    notificationsService = buildNotificationsServiceMock();
 
     // Fresh MP instance mocks each test
     mockPreferenceCreate = jest.fn().mockResolvedValue(MP_PREFERENCE);
@@ -142,6 +149,7 @@ describe('PaymentsService', () => {
         { provide: ConfigService,  useValue: config },
         { provide: CryptoService,  useValue: cryptoMock },
         { provide: JwtService,     useValue: new JwtService() },
+        { provide: NotificationsService, useValue: notificationsService },
       ],
     }).compile();
 
@@ -260,6 +268,143 @@ describe('PaymentsService', () => {
           data:  { mpPaymentId: MP_PREFERENCE.id },
         }),
       );
+    });
+  });
+
+  // ─── refundWalkPayment — reembolso admin ──────────────────────────────────
+
+  describe('refundWalkPayment()', () => {
+    const REFUND_WALK_ID = 'walk-1';
+
+    function buildRefundWalk(overrides: Record<string, unknown> = {}) {
+      return {
+        id: REFUND_WALK_ID,
+        mpPaymentId: '99999',
+        mpRefundId: null as string | null,
+        status: WalkStatus.CONFIRMED,
+        totalAmount: 1500,
+        walker: { mpAccessToken: 'encrypted-walker-token' },
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      global.fetch = jest.fn();
+    });
+
+    it('lanza NotFoundException si el walk no existe', async () => {
+      prisma.walk.findUnique.mockResolvedValue(null);
+      await expect(service.refundWalkPayment(REFUND_WALK_ID)).rejects.toThrow(NotFoundException);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequestException si el walk no tiene mpPaymentId', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk({ mpPaymentId: null }));
+      await expect(service.refundWalkPayment(REFUND_WALK_ID)).rejects.toThrow(BadRequestException);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequestException si mpPaymentId no es numérico (preference id, no pago real)', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk({ mpPaymentId: 'pref-abc' }));
+      await expect(service.refundWalkPayment(REFUND_WALK_ID)).rejects.toThrow(BadRequestException);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequestException si el paseo ya fue reembolsado antes', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk({ mpRefundId: 'refund-existente' }));
+      await expect(service.refundWalkPayment(REFUND_WALK_ID)).rejects.toThrow(BadRequestException);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequestException si el walker no tiene mpAccessToken', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk({ walker: { mpAccessToken: null } }));
+      await expect(service.refundWalkPayment(REFUND_WALK_ID)).rejects.toThrow(BadRequestException);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('camino feliz: llama a MP con el token del walker y X-Idempotency-Key derivado del walkId', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk());
+      prisma.walk.update.mockResolvedValue({});
+      prisma.walkParticipant.findFirst.mockResolvedValue({ owner: { user: { id: 'owner-user-1' } } });
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ id: 555 }) });
+
+      await service.refundWalkPayment(REFUND_WALK_ID);
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://api.mercadopago.com/v1/payments/99999/refunds',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer encrypted-walker-token',
+            'X-Idempotency-Key': `refund-${REFUND_WALK_ID}`,
+          }),
+        }),
+      );
+    });
+
+    it('camino feliz: guarda mpRefundId + refundedAt y transiciona a CANCELLED_WALKER', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk());
+      prisma.walk.update.mockResolvedValue({});
+      prisma.walkParticipant.findFirst.mockResolvedValue({ owner: { user: { id: 'owner-user-1' } } });
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ id: 555 }) });
+
+      await service.refundWalkPayment(REFUND_WALK_ID);
+
+      expect(prisma.walk.update).toHaveBeenCalledWith({
+        where: { id: REFUND_WALK_ID },
+        data: {
+          mpRefundId: '555',
+          refundedAt: expect.any(Date),
+          status: WalkStatus.CANCELLED_WALKER,
+        },
+      });
+    });
+
+    it('camino feliz: no pisa el status si el walk ya estaba cancelado', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk({ status: WalkStatus.CANCELLED_OWNER }));
+      prisma.walk.update.mockResolvedValue({});
+      prisma.walkParticipant.findFirst.mockResolvedValue({ owner: { user: { id: 'owner-user-1' } } });
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ id: 555 }) });
+
+      await service.refundWalkPayment(REFUND_WALK_ID);
+
+      expect(prisma.walk.update).toHaveBeenCalledWith({
+        where: { id: REFUND_WALK_ID },
+        data: {
+          mpRefundId: '555',
+          refundedAt: expect.any(Date),
+        },
+      });
+    });
+
+    it('camino feliz: notifica al dueño que le devolvimos la plata', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk());
+      prisma.walk.update.mockResolvedValue({});
+      prisma.walkParticipant.findFirst.mockResolvedValue({ owner: { user: { id: 'owner-user-1' } } });
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ id: 555 }) });
+
+      await service.refundWalkPayment(REFUND_WALK_ID);
+
+      expect(notificationsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'owner-user-1',
+          title:  expect.stringMatching(/devolvimos/i),
+        }),
+      );
+    });
+
+    it('si MP responde no-ok, lanza BadRequestException y NO muta el walk ni notifica', async () => {
+      prisma.walk.findUnique.mockResolvedValue(buildRefundWalk());
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => 'refund not available for this payment',
+      });
+
+      await expect(service.refundWalkPayment(REFUND_WALK_ID)).rejects.toThrow(BadRequestException);
+
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+      expect(notificationsService.create).not.toHaveBeenCalled();
     });
   });
 
@@ -590,6 +735,7 @@ describe('PaymentsService', () => {
           { provide: ConfigService, useValue: configWithSecret },
           { provide: CryptoService, useValue: cryptoMock },
           { provide: JwtService,    useValue: new JwtService() },
+          { provide: NotificationsService, useValue: buildNotificationsServiceMock() },
         ],
       }).compile();
 
@@ -708,6 +854,7 @@ describe('PaymentsService', () => {
           { provide: ConfigService, useValue: noSecretConfig },
           { provide: CryptoService, useValue: cryptoMock },
           { provide: JwtService,    useValue: new JwtService() },
+          { provide: NotificationsService, useValue: buildNotificationsServiceMock() },
         ],
       }).compile();
 
@@ -836,6 +983,7 @@ describe('PaymentsService', () => {
           { provide: ConfigService, useValue: buildConfigMock() },
           { provide: CryptoService, useValue: cryptoMock },
           { provide: JwtService,    useValue: realJwt },
+          { provide: NotificationsService, useValue: buildNotificationsServiceMock() },
         ],
       }).compile();
 
