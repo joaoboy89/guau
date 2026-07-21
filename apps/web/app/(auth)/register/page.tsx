@@ -66,12 +66,18 @@ function SuccessScreen({ email }: { email: string }) {
 
 // ─── Form ─────────────────────────────────────────────────────────────────────
 
+type Role = "owner" | "walker";
+
 function RegisterForm() {
   const searchParams = useSearchParams();
-  const isWalker     = searchParams.get("role") === "walker";
 
+  const [role, setRole]               = useState<Role>(
+    searchParams.get("role") === "walker" ? "walker" : "owner"
+  );
   const [success, setSuccess]         = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  const isWalker = role === "walker";
 
   const {
     register,
@@ -130,6 +136,40 @@ function RegisterForm() {
               </a>
             </p>
           </div>
+        </div>
+
+        {/* Selector de rol */}
+        <div
+          role="tablist"
+          aria-label="Tipo de cuenta"
+          className="flex w-full rounded-2xl border border-brand-border bg-brand-surface p-1"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!isWalker}
+            onClick={() => setRole("owner")}
+            className={`flex-1 h-11 rounded-xl text-sm font-semibold transition ${
+              !isWalker
+                ? "bg-brand-primary text-white"
+                : "text-brand-text-muted hover:text-brand-text-body"
+            }`}
+          >
+            Dueño
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isWalker}
+            onClick={() => setRole("walker")}
+            className={`flex-1 h-11 rounded-xl text-sm font-semibold transition ${
+              isWalker
+                ? "bg-brand-primary text-white"
+                : "text-brand-text-muted hover:text-brand-text-body"
+            }`}
+          >
+            Paseador
+          </button>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">

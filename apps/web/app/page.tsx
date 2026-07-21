@@ -20,20 +20,27 @@ export default function Home() {
         >
           Ingresar
         </Link>
-        <Link
-          href="/register"
-          className="w-full h-12 flex items-center justify-center font-semibold rounded-2xl border border-brand-border text-brand-text-body bg-brand-surface transition-opacity hover:opacity-80"
-        >
-          Crear cuenta
-        </Link>
       </div>
 
-      <p className="text-xs text-brand-text-muted">
-        ¿Querés ser paseador?{" "}
-        <Link href="/register?role=walker" className="text-brand-primary underline">
-          Registrate acá
-        </Link>
-      </p>
+      <div className="flex flex-col gap-3 w-full max-w-xs">
+        <p className="text-sm font-medium text-brand-text-body">Crear cuenta</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Link
+            href="/register?role=owner"
+            className="h-16 flex flex-col items-center justify-center gap-1 font-semibold rounded-2xl border border-brand-border text-brand-text-body bg-brand-surface transition-opacity hover:opacity-80"
+          >
+            <span aria-hidden="true">🐕</span>
+            Soy dueño
+          </Link>
+          <Link
+            href="/register?role=walker"
+            className="h-16 flex flex-col items-center justify-center gap-1 font-semibold rounded-2xl border border-brand-border text-brand-text-body bg-brand-surface transition-opacity hover:opacity-80"
+          >
+            <span aria-hidden="true">🐾</span>
+            Soy paseador
+          </Link>
+        </div>
+      </div>
 
     </main>
   );
