@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import {
   NotFoundException,
   ForbiddenException,
@@ -69,6 +70,7 @@ const WALK_ROW_WITH_WALKER = {
 function buildPrismaMock() {
   return {
     ownerProfile:    { findUnique: jest.fn() },
+    walkerProfile:   { findUnique: jest.fn(), update: jest.fn() },
     walkParticipant: { findFirst: jest.fn() },
     walk:            { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     payout:          { upsert: jest.fn() },
@@ -83,6 +85,7 @@ function buildConfigMock() {
     MP_WEBHOOK_SECRET: '',       // empty → skip signature verification in tests
     MP_CLIENT_ID:      'client-id',
     MP_CLIENT_SECRET:  'client-secret',
+    JWT_SECRET:        'jwt-test-secret',
   };
   return {
     get: jest.fn((key: string) => values[key] ?? null),
@@ -138,6 +141,7 @@ describe('PaymentsService', () => {
         { provide: PrismaService,  useValue: prisma },
         { provide: ConfigService,  useValue: config },
         { provide: CryptoService,  useValue: cryptoMock },
+        { provide: JwtService,     useValue: new JwtService() },
       ],
     }).compile();
 
@@ -568,6 +572,7 @@ describe('PaymentsService', () => {
             MP_CLIENT_ID:    'client-id',
             MP_CLIENT_SECRET: 'client-secret',
             API_URL:         'http://localhost:3001',
+            JWT_SECRET:      'jwt-test-secret',
           };
           if (!values[key]) throw new Error(`Missing config: ${key}`);
           return values[key];
@@ -584,6 +589,7 @@ describe('PaymentsService', () => {
           { provide: PrismaService, useValue: signedPrisma },
           { provide: ConfigService, useValue: configWithSecret },
           { provide: CryptoService, useValue: cryptoMock },
+          { provide: JwtService,    useValue: new JwtService() },
         ],
       }).compile();
 
@@ -653,6 +659,235 @@ describe('PaymentsService', () => {
           X_REQUEST_ID,
         ),
       ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  // ─── Fail-loud: sin MP_WEBHOOK_SECRET en producción ───────────────────────
+
+  describe('handleWebhook() — sin MP_WEBHOOK_SECRET configurado', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    async function buildServiceWithoutWebhookSecret() {
+      const noSecretPrisma = buildPrismaMock();
+      const noSecretConfig = {
+        get: jest.fn((key: string) => {
+          const values: Record<string, string> = {
+            MP_ACCESS_TOKEN: 'platform-mp-token',
+            FRONTEND_URL:    'http://localhost:3000',
+            API_URL:         'http://localhost:3001',
+            // MP_WEBHOOK_SECRET deliberadamente ausente
+            MP_CLIENT_ID:     'client-id',
+            MP_CLIENT_SECRET: 'client-secret',
+          };
+          return values[key] ?? null;
+        }),
+        getOrThrow: jest.fn((key: string) => {
+          const values: Record<string, string> = {
+            MP_CLIENT_ID:     'client-id',
+            MP_CLIENT_SECRET: 'client-secret',
+            API_URL:          'http://localhost:3001',
+            JWT_SECRET:       'jwt-test-secret',
+          };
+          if (!values[key]) throw new Error(`Missing config: ${key}`);
+          return values[key];
+        }),
+      };
+      const cryptoMock = {
+        encrypt: jest.fn((s: string) => s),
+        decrypt: jest.fn((s: string) => s),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PaymentsService,
+          { provide: PrismaService, useValue: noSecretPrisma },
+          { provide: ConfigService, useValue: noSecretConfig },
+          { provide: CryptoService, useValue: cryptoMock },
+          { provide: JwtService,    useValue: new JwtService() },
+        ],
+      }).compile();
+
+      return {
+        noSecretService: module.get<PaymentsService>(PaymentsService),
+        noSecretPrisma,
+      };
+    }
+
+    it('NODE_ENV=production sin secret → UnauthorizedException y NO procesa el pago', async () => {
+      process.env.NODE_ENV = 'production';
+      const { noSecretService, noSecretPrisma } = await buildServiceWithoutWebhookSecret();
+
+      await expect(
+        noSecretService.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          'ts=1700000000,v1=cualquiervalor',
+          'req-1',
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(noSecretPrisma.walk.findUnique).not.toHaveBeenCalled();
+      expect(noSecretPrisma.walk.update).not.toHaveBeenCalled();
+      expect(noSecretPrisma.payout.upsert).not.toHaveBeenCalled();
+    });
+
+    it('fuera de producción sin secret → loguea warning y sigue procesando (no rompe tests/dev)', async () => {
+      process.env.NODE_ENV = 'test';
+      const { noSecretService, noSecretPrisma } = await buildServiceWithoutWebhookSecret();
+
+      mockPaymentGet.mockResolvedValue(approvedPayment());
+      noSecretPrisma.walk.findUnique.mockResolvedValue(WALK_ROW);
+      noSecretPrisma.walk.update.mockResolvedValue({});
+      noSecretPrisma.payout.upsert.mockResolvedValue({});
+
+      const result = await noSecretService.handleWebhook(
+        { type: 'payment', data: { id: '99999' } },
+        'ts=1700000000,v1=cualquiervalor',
+        'req-1',
+      );
+
+      expect(result).toEqual({ status: 'processed' });
+    });
+  });
+
+  // ─── OAuth state firmado (CSRF) ────────────────────────────────────────────
+
+  describe('getWalkerConnectUrl() / handleWalkerCallback() — state firmado', () => {
+    const VICTIM_USER_ID   = 'owner-user-victima';
+    const ATTACKER_USER_ID = 'owner-user-atacante';
+
+    let oauthService: PaymentsService;
+    let oauthPrisma:  ReturnType<typeof buildPrismaMock>;
+    let realJwt:       JwtService;
+
+    beforeEach(async () => {
+      oauthPrisma = buildPrismaMock();
+      realJwt = new JwtService();
+
+      const cryptoMock = {
+        encrypt: jest.fn((s: string) => s),
+        decrypt: jest.fn((s: string) => s),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PaymentsService,
+          { provide: PrismaService, useValue: oauthPrisma },
+          { provide: ConfigService, useValue: buildConfigMock() },
+          { provide: CryptoService, useValue: cryptoMock },
+          { provide: JwtService,    useValue: realJwt },
+        ],
+      }).compile();
+
+      oauthService = module.get<PaymentsService>(PaymentsService);
+    });
+
+    it('getWalkerConnectUrl: el state es un JWT firmado, no el userId crudo', () => {
+      const { url } = oauthService.getWalkerConnectUrl(VICTIM_USER_ID);
+
+      // El userId no debe aparecer en texto plano como state=<userId>
+      expect(url).not.toContain(`state=${VICTIM_USER_ID}`);
+
+      const stateParam = decodeURIComponent(new URL(url).searchParams.get('state') ?? '');
+      expect(stateParam.split('.')).toHaveLength(3); // luce como un JWT (header.payload.signature)
+
+      const decoded = realJwt.decode(stateParam) as { sub: string; purpose: string; exp: number };
+      expect(decoded.sub).toBe(VICTIM_USER_ID);
+      expect(decoded.purpose).toBe('mp-connect');
+      expect(decoded.exp).toBeDefined();
+    });
+
+    it('handleWalkerCallback: acepta un state válido y usa el userId extraído del token', async () => {
+      const state = oauthService.getWalkerConnectUrl(VICTIM_USER_ID);
+      const stateToken = decodeURIComponent(new URL(state.url).searchParams.get('state') ?? '');
+
+      oauthPrisma.walkerProfile.findUnique.mockResolvedValue({ id: 'wp-victima', userId: VICTIM_USER_ID });
+      oauthPrisma.walkerProfile.update.mockResolvedValue({});
+      global.fetch = jest.fn().mockResolvedValue({
+        ok:   true,
+        json: async () => ({ access_token: 'mp-access-token', user_id: 555 }),
+      });
+
+      await oauthService.handleWalkerCallback('auth-code', stateToken);
+
+      expect(oauthPrisma.walkerProfile.findUnique).toHaveBeenCalledWith({ where: { userId: VICTIM_USER_ID } });
+      expect(oauthPrisma.walkerProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: VICTIM_USER_ID } }),
+      );
+    });
+
+    it('CSRF: un state forjado con el userId de otro usuario (token firmado con secret distinto) es rechazado', async () => {
+      // El atacante intenta forjar un callback con el userId de la víctima, pero no conoce JWT_SECRET
+      const forgedState = new JwtService().sign(
+        { sub: VICTIM_USER_ID, purpose: 'mp-connect' },
+        { secret: 'secret-del-atacante', expiresIn: '10m' },
+      );
+
+      await expect(
+        oauthService.handleWalkerCallback('attacker-code', forgedState),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(oauthPrisma.walkerProfile.findUnique).not.toHaveBeenCalled();
+      expect(oauthPrisma.walkerProfile.update).not.toHaveBeenCalled();
+    });
+
+    it('CSRF: el viejo ataque (state = userId crudo de la víctima) ya no funciona', async () => {
+      // Antes del fix, un atacante podía mandar state=<userId de la víctima> directamente
+      await expect(
+        oauthService.handleWalkerCallback('attacker-code', VICTIM_USER_ID),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(oauthPrisma.walkerProfile.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un state expirado', async () => {
+      const expiredState = realJwt.sign(
+        { sub: VICTIM_USER_ID, purpose: 'mp-connect' },
+        { secret: 'jwt-test-secret', expiresIn: '-10s' }, // ya vencido
+      );
+
+      await expect(
+        oauthService.handleWalkerCallback('auth-code', expiredState),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rechaza un token válido pero con purpose distinto (no reusable para otros flujos)', async () => {
+      const wrongPurposeState = realJwt.sign(
+        { sub: VICTIM_USER_ID, purpose: 'otro-purpose' },
+        { secret: 'jwt-test-secret', expiresIn: '10m' },
+      );
+
+      await expect(
+        oauthService.handleWalkerCallback('auth-code', wrongPurposeState),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(oauthPrisma.walkerProfile.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('el atacante no puede reusar su propio state válido para conectar la cuenta de la víctima', async () => {
+      // El atacante firma un state legítimo para SU PROPIO userId (vía el flujo normal)
+      const attackerFlow = oauthService.getWalkerConnectUrl(ATTACKER_USER_ID);
+      const attackerState = decodeURIComponent(new URL(attackerFlow.url).searchParams.get('state') ?? '');
+
+      oauthPrisma.walkerProfile.findUnique.mockResolvedValue({ id: 'wp-atacante', userId: ATTACKER_USER_ID });
+      oauthPrisma.walkerProfile.update.mockResolvedValue({});
+      global.fetch = jest.fn().mockResolvedValue({
+        ok:   true,
+        json: async () => ({ access_token: 'mp-access-token', user_id: 555 }),
+      });
+
+      await oauthService.handleWalkerCallback('attacker-code', attackerState);
+
+      // El token conecta la cuenta MP del ATACANTE, nunca la de la víctima
+      expect(oauthPrisma.walkerProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: ATTACKER_USER_ID } }),
+      );
+      expect(oauthPrisma.walkerProfile.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: VICTIM_USER_ID } }),
+      );
     });
   });
 });

@@ -7,6 +7,7 @@ import {
   Logger,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { JwtService } from "@nestjs/jwt";
 import { Cron } from "@nestjs/schedule";
 import MercadoPago, { Preference, Payment } from "mercadopago";
 import * as crypto from "crypto";
@@ -14,6 +15,8 @@ import { PrismaService } from "../../database/prisma.service";
 import { CryptoService } from "../../common/crypto/crypto.service";
 import { WalkStatus, PayoutStatus } from "@prisma/client";
 import { CreatePreferenceDto } from "./dto/create-preference.dto";
+
+const MP_CONNECT_STATE_PURPOSE = "mp-connect";
 
 @Injectable()
 export class PaymentsService {
@@ -24,6 +27,7 @@ export class PaymentsService {
     private prisma: PrismaService,
     private config: ConfigService,
     private cryptoService: CryptoService,
+    private jwt: JwtService,
   ) {
     this.mpClient = new MercadoPago({
       accessToken: this.config.get<string>("MP_ACCESS_TOKEN") ?? "no_configurado",
@@ -304,13 +308,17 @@ export class PaymentsService {
     const redirectUri = encodeURIComponent(
       `${this.config.getOrThrow<string>("API_URL")}/payments/walker-connect/callback`
     );
+    const state = this.jwt.sign(
+      { sub: userId, purpose: MP_CONNECT_STATE_PURPOSE },
+      { secret: this.config.getOrThrow<string>("JWT_SECRET"), expiresIn: "10m" },
+    );
     const url =
       `https://auth.mercadopago.com.ar/authorization` +
       `?client_id=${clientId}` +
       `&response_type=code` +
       `&platform_id=mp` +
       `&redirect_uri=${redirectUri}` +
-      `&state=${userId}`;
+      `&state=${encodeURIComponent(state)}`;
 
     return { url };
   }
@@ -319,6 +327,19 @@ export class PaymentsService {
 
   async handleWalkerCallback(code: string, state: string) {
     if (!code || !state) throw new BadRequestException("Parámetros inválidos del callback");
+
+    let statePayload: { sub: string; purpose: string };
+    try {
+      statePayload = this.jwt.verify(state, {
+        secret: this.config.getOrThrow<string>("JWT_SECRET"),
+      });
+    } catch {
+      throw new UnauthorizedException("State de OAuth inválido o expirado");
+    }
+    if (statePayload.purpose !== MP_CONNECT_STATE_PURPOSE) {
+      throw new UnauthorizedException("State de OAuth inválido");
+    }
+    const userId = statePayload.sub;
 
     const clientId = this.config.getOrThrow<string>("MP_CLIENT_ID");
     const clientSecret = this.config.getOrThrow<string>("MP_CLIENT_SECRET");
@@ -346,12 +367,12 @@ export class PaymentsService {
     };
 
     const walker = await this.prisma.walkerProfile.findUnique({
-      where: { userId: state },
+      where: { userId },
     });
     if (!walker) throw new NotFoundException("Paseador no encontrado");
 
     await this.prisma.walkerProfile.update({
-      where: { userId: state },
+      where: { userId },
       data: {
         mpAccessToken: this.cryptoService.encrypt(data.access_token),
         mpUserId: String(data.user_id),
@@ -371,7 +392,17 @@ export class PaymentsService {
     xRequestId: string,
   ) {
     const webhookSecret = this.config.get<string>("MP_WEBHOOK_SECRET");
-    if (!webhookSecret) return;
+    if (!webhookSecret) {
+      if (process.env.NODE_ENV === "production") {
+        throw new UnauthorizedException(
+          "MP_WEBHOOK_SECRET no configurado — rechazando webhook en producción",
+        );
+      }
+      this.logger.warn(
+        "MP_WEBHOOK_SECRET no configurado — validación de firma salteada (solo permitido fuera de producción)",
+      );
+      return;
+    }
 
     const parts = Object.fromEntries(
       xSignature.split(",").map((p) => p.split("=") as [string, string])
