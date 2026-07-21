@@ -8,6 +8,9 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
+  // Presente solo en tokens de propósito especial (ej. state de MP Connect).
+  // Un access token real nunca lo trae.
+  purpose?: string;
 }
 
 @Injectable()
@@ -27,6 +30,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
   }
 
   async validate(payload: JwtPayload) {
+    // Tokens firmados con JWT_SECRET pero con un propósito distinto (ej. state
+    // OAuth de MP Connect) no deben poder autenticar como access token.
+    if (payload.purpose) {
+      throw new UnauthorizedException();
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: { id: true, email: true, role: true, isActive: true },

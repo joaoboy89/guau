@@ -61,9 +61,17 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         return;
       }
 
-      const payload = this.jwt.verify<{ sub: string; role: string }>(token, {
+      const payload = this.jwt.verify<{ sub: string; role: string; purpose?: string }>(token, {
         secret: this.config.getOrThrow<string>("JWT_SECRET"),
       });
+
+      // Tokens de propósito especial (ej. state OAuth de MP Connect) no deben
+      // poder autenticar un socket — solo los access tokens reales.
+      if (payload.purpose) {
+        this.logger.warn(`Conexión rechazada: ${client.id} — token con purpose no permitido`);
+        client.disconnect();
+        return;
+      }
 
       client.data = { userId: payload.sub, role: payload.role };
       this.logger.log(`Conectado: ${client.id} (user ${payload.sub})`);

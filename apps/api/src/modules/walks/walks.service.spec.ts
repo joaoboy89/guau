@@ -182,6 +182,41 @@ describe('WalksService', () => {
     prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status });
   }
 
+  // ─── constructor — validación de MP_MARKETPLACE_FEE ────────────────────────
+
+  describe('constructor — validación de MP_MARKETPLACE_FEE', () => {
+    function buildServiceWithFee(feeValue: string | null) {
+      const cfg = {
+        get: jest.fn((key: string) => (key === 'MP_MARKETPLACE_FEE' ? feeValue : null)),
+      };
+      return () => new WalksService(prisma as any, cfg as any);
+    }
+
+    it('sin MP_MARKETPLACE_FEE seteada, no revienta (usa default 0.15)', () => {
+      expect(buildServiceWithFee(null)).not.toThrow();
+    });
+
+    it('"0.15" es una fracción válida', () => {
+      expect(buildServiceWithFee('0.15')).not.toThrow();
+    });
+
+    it('"15" (porcentaje en vez de fracción) revienta al arrancar', () => {
+      expect(buildServiceWithFee('15')).toThrow();
+    });
+
+    it('"0" revienta al arrancar (fuera de rango)', () => {
+      expect(buildServiceWithFee('0')).toThrow();
+    });
+
+    it('"1" revienta al arrancar (fuera de rango — comisión del 100%)', () => {
+      expect(buildServiceWithFee('1')).toThrow();
+    });
+
+    it('"abc" (no numérico) revienta al arrancar', () => {
+      expect(buildServiceWithFee('abc')).toThrow();
+    });
+  });
+
   // ─── create() ─────────────────────────────────────────────────────────────
 
   describe('create()', () => {
@@ -404,6 +439,22 @@ describe('WalksService', () => {
       prisma.walkParticipant.findFirst.mockResolvedValue(null);
       await expect(service.findById(OWNER_USER_ID, UserRole.OWNER, WALK_ID))
         .rejects.toThrow(ForbiddenException);
+    });
+
+    it('default-deny: ForbiddenException para un rol desconocido (no WALKER/OWNER/ADMIN)', async () => {
+      prisma.walk.findUnique.mockResolvedValue(WALK_FULL);
+      await expect(service.findById(OWNER_USER_ID, 'SUPERUSER', WALK_ID))
+        .rejects.toThrow(ForbiddenException);
+    });
+
+    it('ADMIN tiene acceso explícito sin chequeo de pertenencia/participación', async () => {
+      prisma.walk.findUnique.mockResolvedValue(WALK_FULL);
+
+      const result = await service.findById('admin-user-1', UserRole.ADMIN, WALK_ID);
+
+      expect(result).toEqual({ ...WALK_FULL, isPaid: false });
+      expect(prisma.walkerProfile.findUnique).not.toHaveBeenCalled();
+      expect(prisma.ownerProfile.findUnique).not.toHaveBeenCalled();
     });
 
     it('camino feliz WALKER: el paseador del walk puede verlo y walker no expone mpAccessToken', async () => {
@@ -752,6 +803,23 @@ describe('WalksService', () => {
       prisma.walkParticipant.findFirst.mockResolvedValue(null); // no es participante
       await expect(service.getLocations(OWNER_USER_ID, UserRole.OWNER, WALK_ID))
         .rejects.toThrow(ForbiddenException);
+    });
+
+    it('default-deny: ForbiddenException para un rol desconocido (no WALKER/OWNER/ADMIN)', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ id: WALK_ID, walkerId: WALKER_PROFILE_ID });
+      await expect(service.getLocations(OWNER_USER_ID, 'SUPERUSER', WALK_ID))
+        .rejects.toThrow(ForbiddenException);
+    });
+
+    it('ADMIN tiene acceso explícito sin chequeo de pertenencia/participación', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ id: WALK_ID, walkerId: WALKER_PROFILE_ID });
+      prisma.walkLocation.findMany.mockResolvedValue(LOCATIONS);
+
+      const result = await service.getLocations('admin-user-1', UserRole.ADMIN, WALK_ID);
+
+      expect(result).toEqual(LOCATIONS);
+      expect(prisma.walkerProfile.findUnique).not.toHaveBeenCalled();
+      expect(prisma.ownerProfile.findUnique).not.toHaveBeenCalled();
     });
 
     it('camino feliz: devuelve ubicaciones ordenadas por recordedAt asc', async () => {
