@@ -16,6 +16,7 @@ import { QueryWalksDto } from "./dto/query-walks.dto";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { ChatService } from "../chat/chat.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { toBusinessDayAndTime } from "../../common/utils/schedule-timezone";
 
 // Incluye las relaciones que siempre se devuelven con un Walk
 const WALK_INCLUDE = {
@@ -126,8 +127,9 @@ export class WalksService {
     }
 
     // 5. Validar horario del paseador
-    const dayOfWeek = scheduledAt.getDay();
-    const timeStr = scheduledAt.toTimeString().slice(0, 5);
+    // Las franjas de WalkerSchedule se interpretan en hora argentina — ver
+    // toBusinessDayAndTime para el porqué (no usar getDay()/toTimeString() acá).
+    const { dayOfWeek, timeStr } = toBusinessDayAndTime(scheduledAt);
 
     const schedule = await this.prisma.walkerSchedule.findFirst({
       where: {

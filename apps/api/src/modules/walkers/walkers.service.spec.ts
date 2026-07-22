@@ -7,6 +7,7 @@ import {
 import { VerificationStatus } from '@prisma/client';
 import { WalkersService } from './walkers.service';
 import { PrismaService } from '../../database/prisma.service';
+import { toBusinessDayAndTime } from '../../common/utils/schedule-timezone';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -129,11 +130,9 @@ describe('WalkersService', () => {
     });
 
     it('con date: devuelve solo los paseadores con horario activo que cubre ese día/hora', async () => {
-      // Usamos mediodía UTC: minimiza el riesgo de que un offset de TZ cambie el día.
-      const date      = '2026-07-06T12:00:00.000Z';
-      // Calculamos dayOfWeek y timeStr igual que el servicio (tiempo local del proceso)
-      const dayOfWeek = new Date(date).getDay();
-      const timeStr   = new Date(date).toTimeString().slice(0, 5);
+      const date = '2026-07-06T12:00:00.000Z';
+      // Igual que el servicio: día/hora en hora ARGENTINA, no la TZ local del proceso
+      const { dayOfWeek, timeStr } = toBusinessDayAndTime(new Date(date));
 
       const walker1 = { ...BASE_WALKER_ROW, id: 'walker-1' };
       const walker2 = { ...BASE_WALKER_ROW, id: 'walker-2' };
@@ -158,6 +157,25 @@ describe('WalkersService', () => {
       // Verifica que se llamó a walkerSchedule.findMany con el día correcto
       expect(prisma.walkerSchedule.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ dayOfWeek }) }),
+      );
+    });
+
+    it('con date que cruza el día en UTC: usa el día/hora ARGENTINO, no el de UTC (fix timezone)', async () => {
+      // 2030-01-09T00:00:00Z = miércoles 00:00 UTC = martes 21:00 ART
+      const date = '2030-01-09T00:00:00.000Z';
+      const walker1 = { ...BASE_WALKER_ROW, id: 'walker-1' };
+
+      prisma.$queryRaw.mockResolvedValue([walker1]);
+      prisma.walkerSchedule.findMany.mockResolvedValue([
+        { walkerId: 'walker-1', dayOfWeek: 2, startTime: '18:00', endTime: '23:59', isActive: true },
+      ]);
+
+      const result = await service.search({ ...BASE_DTO, date });
+
+      expect(result).toHaveLength(1);
+      // dayOfWeek 2 = martes — si usara UTC directo (bug viejo) pediría miércoles (3)
+      expect(prisma.walkerSchedule.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ dayOfWeek: 2 }) }),
       );
     });
 
