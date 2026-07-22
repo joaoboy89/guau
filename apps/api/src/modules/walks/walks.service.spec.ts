@@ -384,6 +384,82 @@ describe('WalksService', () => {
     });
   });
 
+  // ─── create() — validación de horario en hora argentina (fix timezone) ────
+  // WalkerSchedule.dayOfWeek/startTime/endTime se interpretan en hora
+  // argentina. Estas fechas son fijas (no relativas a "ahora") a propósito:
+  // lo que se está probando es la conversión de un instante UTC puntual a
+  // día/hora ART, no "cualquier fecha futura" — un offset relativo perdería
+  // el día de semana exacto que cada caso necesita.
+
+  describe('create() — validación de horario en hora argentina (fix timezone)', () => {
+    it('reserva 21:00 ART (que cruza el día en UTC) matchea la franja del día ART correcto', async () => {
+      setupCreateMocks();
+      // 2030-01-09T00:00:00Z = miércoles 00:00 UTC = martes 21:00 ART
+      const dto = { ...CREATE_DTO, scheduledAt: '2030-01-09T00:00:00.000Z' };
+      prisma.walkerSchedule.findFirst.mockResolvedValue({
+        id: 'schedule-tue', walkerId: WALKER_PROFILE_ID,
+        dayOfWeek: 2, startTime: '18:00', endTime: '23:59', isActive: true,
+      });
+
+      await expect(service.create(OWNER_USER_ID, dto)).resolves.toBeDefined();
+
+      // dayOfWeek 2 = martes — NO miércoles (que es lo que getDay() daría en UTC)
+      expect(prisma.walkerSchedule.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            dayOfWeek: 2,
+            startTime: { lte: '21:00' },
+            endTime: { gt: '21:00' },
+          }),
+        }),
+      );
+    });
+
+    it('reserva 20:59 ART con franja hasta 23:59 — matchea justo antes del límite', async () => {
+      setupCreateMocks();
+      // 2030-01-08T23:59:00Z = martes 20:59 ART
+      const dto = { ...CREATE_DTO, scheduledAt: '2030-01-08T23:59:00.000Z' };
+      prisma.walkerSchedule.findFirst.mockResolvedValue({
+        id: 'schedule-tue', walkerId: WALKER_PROFILE_ID,
+        dayOfWeek: 2, startTime: '18:00', endTime: '23:59', isActive: true,
+      });
+
+      await expect(service.create(OWNER_USER_ID, dto)).resolves.toBeDefined();
+
+      expect(prisma.walkerSchedule.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            dayOfWeek: 2,
+            startTime: { lte: '20:59' },
+            endTime: { gt: '20:59' },
+          }),
+        }),
+      );
+    });
+
+    it('reserva en franja normal 9-18 sigue funcionando después del fix', async () => {
+      setupCreateMocks();
+      // 2030-01-15T15:00:00Z = martes 12:00 ART
+      const dto = { ...CREATE_DTO, scheduledAt: '2030-01-15T15:00:00.000Z' };
+      prisma.walkerSchedule.findFirst.mockResolvedValue({
+        id: 'schedule-tue', walkerId: WALKER_PROFILE_ID,
+        dayOfWeek: 2, startTime: '09:00', endTime: '18:00', isActive: true,
+      });
+
+      await expect(service.create(OWNER_USER_ID, dto)).resolves.toBeDefined();
+
+      expect(prisma.walkerSchedule.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            dayOfWeek: 2,
+            startTime: { lte: '12:00' },
+            endTime: { gt: '12:00' },
+          }),
+        }),
+      );
+    });
+  });
+
   // ─── findMyWalks() ────────────────────────────────────────────────────────
 
   describe('findMyWalks()', () => {

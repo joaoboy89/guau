@@ -12,6 +12,7 @@ import { CreateScheduleDto } from "./dto/create-schedule.dto";
 import { UpdateScheduleDto } from "./dto/update-schedule.dto";
 import { SetZoneDto } from "./dto/set-zone.dto";
 import { SearchWalkersDto } from "./dto/search-walkers.dto";
+import { toBusinessDayAndTime } from "../../common/utils/schedule-timezone";
 
 @Injectable()
 export class WalkersService {
@@ -24,9 +25,12 @@ export class WalkersService {
   async search(dto: SearchWalkersDto) {
     const { lat, lng, date, walkTypeId } = dto;
 
+    // Las franjas de WalkerSchedule se interpretan en hora argentina — ver
+    // toBusinessDayAndTime para el porqué (no usar getDay()/toTimeString() acá).
     // dayOfWeek: 0=Dom ... 6=Sáb (igual que JS Date)
-    const dayOfWeek = date ? new Date(date).getDay() : null;
-    const timeStr = date ? new Date(date).toTimeString().slice(0, 5) : null;
+    const { dayOfWeek, timeStr } = date
+      ? toBusinessDayAndTime(new Date(date))
+      : { dayOfWeek: null, timeStr: null };
 
     type WalkerRow = {
       id: string;
