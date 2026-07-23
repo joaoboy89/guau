@@ -4,7 +4,16 @@ import { useEffect, useState } from "react";
 import { useRequireAuth } from "@/lib/auth";
 import { walkersAPI, paymentsAPI, walksAPI } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/walk-status";
+import { DAY_LABELS } from "@/lib/schedule";
 import { AxiosError } from "axios";
+
+interface WalkerSchedule {
+  id:        string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime:   string;
+  isActive:  boolean;
+}
 
 interface WalkerProfile {
   id:                 string;
@@ -16,11 +25,34 @@ interface WalkerProfile {
   radiusKm:           number | null;
   mpConnected:        boolean;
   mpUserId:           string | null;
+  schedules:          WalkerSchedule[];
   user: {
     firstName: string;
     lastName:  string;
     email:     string;
   };
+}
+
+interface DayRow {
+  dayOfWeek:  number;
+  scheduleId: string | null;
+  active:     boolean;
+  startTime:  string;
+  endTime:    string;
+  saving:     boolean;
+  error:      string | null;
+}
+
+function buildDefaultDays(): DayRow[] {
+  return DAY_LABELS.map((_, dayOfWeek) => ({
+    dayOfWeek,
+    scheduleId: null,
+    active:     false,
+    startTime:  "09:00",
+    endTime:    "18:00",
+    saving:     false,
+    error:      null,
+  }));
 }
 
 interface WalkItem {
@@ -59,12 +91,22 @@ export default function WalkerDashboardPage() {
   const [zoneError, setZoneError]   = useState<string | null>(null);
   const [radiusInput, setRadiusInput] = useState(20);
 
+  const [days, setDays] = useState<DayRow[]>(buildDefaultDays());
+
   useEffect(() => {
     if (!ready) return;
     walkersAPI.myProfile().then((res) => {
       const p: WalkerProfile = res.data;
       setProfile(p);
       setAvailable(p.isAvailable);
+      setDays((prev) =>
+        prev.map((row) => {
+          const match = p.schedules.find((s) => s.dayOfWeek === row.dayOfWeek);
+          return match
+            ? { ...row, scheduleId: match.id, active: true, startTime: match.startTime, endTime: match.endTime }
+            : row;
+        })
+      );
     });
     walksAPI.list().then((res) => setWalks(res.data));
   }, [ready]);
@@ -132,6 +174,47 @@ export default function WalkerDashboardPage() {
         setZoneSaving(false);
       }
     );
+  };
+
+  const updateDay = (dayOfWeek: number, patch: Partial<DayRow>) => {
+    setDays((prev) => prev.map((row) => (row.dayOfWeek === dayOfWeek ? { ...row, ...patch } : row)));
+  };
+
+  const handleSaveDay = async (dayOfWeek: number) => {
+    const row = days.find((d) => d.dayOfWeek === dayOfWeek);
+    if (!row || row.saving) return;
+
+    if (row.active && row.startTime >= row.endTime) {
+      updateDay(dayOfWeek, { error: "La hora de inicio debe ser antes que la de fin" });
+      return;
+    }
+
+    updateDay(dayOfWeek, { saving: true, error: null });
+    try {
+      if (row.active) {
+        if (row.scheduleId) {
+          await walkersAPI.updateSchedule(row.scheduleId, {
+            startTime: row.startTime,
+            endTime:   row.endTime,
+            isActive:  true,
+          });
+        } else {
+          const res = await walkersAPI.createSchedule({
+            dayOfWeek: row.dayOfWeek,
+            startTime: row.startTime,
+            endTime:   row.endTime,
+          });
+          updateDay(dayOfWeek, { scheduleId: res.data.id });
+        }
+      } else if (row.scheduleId) {
+        await walkersAPI.updateSchedule(row.scheduleId, { isActive: false });
+      }
+    } catch (err: unknown) {
+      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
+      updateDay(dayOfWeek, { error: msg ?? "No se pudo guardar. Intentá de nuevo." });
+    } finally {
+      updateDay(dayOfWeek, { saving: false });
+    }
   };
 
   const connectMercadoPago = async () => {
@@ -207,6 +290,18 @@ export default function WalkerDashboardPage() {
             : "Tu cuenta fue rechazada. Contactanos para más información."}
         </span>
       </div>
+
+      {/* Warning: sin horarios cargados */}
+      {profile.schedules.length === 0 && (
+        <div className="flex flex-col gap-1.5 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200">
+          <p className="text-sm font-semibold text-amber-800">
+            Sin horarios cargados no aparecés en las búsquedas ni podés recibir reservas.
+          </p>
+          <a href="#horarios" className="text-xs font-semibold text-amber-800 underline underline-offset-2 w-fit">
+            Cargar mis horarios ↓
+          </a>
+        </div>
+      )}
 
       {/* Toggle de disponibilidad */}
       <div className="flex items-center justify-between px-4 py-4 rounded-2xl bg-brand-surface border border-brand-border">
@@ -284,6 +379,70 @@ export default function WalkerDashboardPage() {
         {zoneError && (
           <p className="text-xs text-red-700">{zoneError}</p>
         )}
+      </div>
+
+      {/* Mis horarios */}
+      <div id="horarios" className="flex flex-col gap-3 px-4 py-4 rounded-2xl bg-brand-surface border border-brand-border">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-semibold text-brand-text-body">Mis horarios</span>
+          <span className="text-xs text-brand-text-muted">
+            Días y horarios en los que aparecés disponible para nuevas reservas — hora Argentina
+          </span>
+        </div>
+
+        <div className="flex flex-col">
+          {days.map((row) => (
+            <div key={row.dayOfWeek} className="flex flex-col gap-2 py-3 border-t border-brand-border first:border-t-0 first:pt-0">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => updateDay(row.dayOfWeek, { active: !row.active })}
+                    className={`relative w-11 h-6 rounded-full overflow-hidden transition-colors shrink-0 ${
+                      row.active ? "bg-brand-primary" : "bg-brand-border"
+                    }`}
+                    aria-label={`Activar ${DAY_LABELS[row.dayOfWeek]}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                        row.active ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                  <span className="text-sm font-medium text-brand-text-body">
+                    {DAY_LABELS[row.dayOfWeek]}
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleSaveDay(row.dayOfWeek)}
+                  disabled={row.saving}
+                  className="h-8 px-3 rounded-lg bg-brand-primary text-white text-xs font-semibold disabled:opacity-40 transition-opacity hover:opacity-90 shrink-0"
+                >
+                  {row.saving ? "Guardando…" : "Guardar"}
+                </button>
+              </div>
+
+              {row.active && (
+                <div className="flex items-center gap-2 pl-14">
+                  <input
+                    type="time"
+                    value={row.startTime}
+                    onChange={(e) => updateDay(row.dayOfWeek, { startTime: e.target.value })}
+                    className="h-9 px-2 rounded-lg border border-brand-border bg-brand-bg text-sm text-brand-text focus:outline-none focus:border-brand-primary"
+                  />
+                  <span className="text-xs text-brand-text-muted">a</span>
+                  <input
+                    type="time"
+                    value={row.endTime}
+                    onChange={(e) => updateDay(row.dayOfWeek, { endTime: e.target.value })}
+                    className="h-9 px-2 rounded-lg border border-brand-border bg-brand-bg text-sm text-brand-text focus:outline-none focus:border-brand-primary"
+                  />
+                </div>
+              )}
+
+              {row.error && <p className="text-xs text-red-700 pl-14">{row.error}</p>}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* MercadoPago */}
