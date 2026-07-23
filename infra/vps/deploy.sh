@@ -101,9 +101,9 @@ docker image prune -f 2>/dev/null || true
 # ── Resultado ─────────────────────────────────────────────────
 echo ""
 echo "✓ Güau corriendo"
-echo "  → API:     http://38.54.57.20:3001"
-echo "  → Swagger: http://38.54.57.20:3001/docs"
-echo "  → Web:     http://38.54.57.20:3000"
+echo "  → API:     https://guauapi.jbsaasapp.com"
+echo "  → Swagger: https://guauapi.jbsaasapp.com/docs"
+echo "  → Web:     https://guau.jbsaasapp.com"
 echo ""
 echo "Comandos útiles:"
 echo "  docker logs -f guau_api    # API logs"

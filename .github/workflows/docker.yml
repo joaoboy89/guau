@@ -90,7 +90,6 @@ jobs:
           tags: ghcr.io/joaoboy89/guau-web:latest
           build-args: |
             NEXT_PUBLIC_API_URL=https://guauapi.jbsaasapp.com
-            NEXT_PUBLIC_WS_URL=http://38.54.57.20:3001
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
