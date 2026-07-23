@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useRequireAuth } from "@/lib/auth";
 import { dogsAPI, walkTypesAPI, walkersAPI, walksAPI } from "@/lib/api";
 import { toDatetimeLocalValue } from "@/lib/datetime";
+import { summarizeSchedule } from "@/lib/schedule";
 import { AxiosError } from "axios";
 
 // TODO: reemplazar por geolocalización real del dueño cuando se integre Mapbox
@@ -32,6 +33,12 @@ interface Walker {
   user: { firstName: string; lastName: string };
 }
 
+interface WalkerScheduleSlot {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+}
+
 type Step = "dog" | "type" | "walker" | "details";
 
 export default function NewWalkPage() {
@@ -55,6 +62,8 @@ export default function NewWalkPage() {
   // ── Walkers ──
   const [walkers, setWalkers] = useState<Walker[]>([]);
   const [selectedWalkerId, setSelectedWalkerId] = useState<string>("");
+  const [selectedWalkerSchedule, setSelectedWalkerSchedule] = useState<WalkerScheduleSlot[] | null>(null);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
 
   // ── Detalles ──
   const [scheduledAt, setScheduledAt] = useState("");
@@ -83,6 +92,21 @@ export default function NewWalkPage() {
       .list({ lat: DEFAULT_LAT, lng: DEFAULT_LNG })
       .then((res) => setWalkers(res.data));
   }, [ready]);
+
+  // Agenda del paseador seleccionado — se pide bajo demanda porque la lista de
+  // /walkers no trae schedules (solo el detalle GET /walkers/:id lo incluye).
+  useEffect(() => {
+    if (!selectedWalkerId) {
+      setSelectedWalkerSchedule(null);
+      return;
+    }
+    setScheduleLoading(true);
+    walkersAPI
+      .getById(selectedWalkerId)
+      .then((res) => setSelectedWalkerSchedule(res.data.schedules ?? []))
+      .catch(() => setSelectedWalkerSchedule(null))
+      .finally(() => setScheduleLoading(false));
+  }, [selectedWalkerId]);
 
   if (!ready) return null;
 
@@ -262,6 +286,15 @@ export default function NewWalkPage() {
             </button>
           ))}
         </div>
+
+        {selectedWalker && (
+          <p className="text-xs text-brand-text-muted px-1">
+            <strong className="text-brand-text-body">Agenda:</strong>{" "}
+            {scheduleLoading
+              ? "Cargando…"
+              : summarizeSchedule(selectedWalkerSchedule ?? [])}
+          </p>
+        )}
       </section>
 
       {/* ── PASO 4: Fecha y dirección ── */}

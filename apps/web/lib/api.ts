@@ -92,6 +92,10 @@ export const walkersAPI = {
   updateAvailability: (data: unknown) => api.put("/walkers/me/availability", data),
   setZone:            (data: { centerLat: number; centerLng: number; radiusKm: number }) =>
                         api.post("/walkers/me/zone", data),
+  createSchedule:     (data: { dayOfWeek: number; startTime: string; endTime: string }) =>
+                        api.post("/walkers/me/schedules", data),
+  updateSchedule:     (scheduleId: string, data: { startTime?: string; endTime?: string; isActive?: boolean }) =>
+                        api.put(`/walkers/me/schedules/${scheduleId}`, data),
 };
 
 export const dogsAPI = {
