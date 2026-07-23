@@ -283,7 +283,8 @@ export class PaymentsService {
         }
       }
     } catch (err) {
-      this.logger.error(`Error procesando webhook ${dataId}: ${err}`);
+      const detail = err instanceof Error ? err.message : JSON.stringify(err);
+      this.logger.error(`Error procesando webhook ${dataId}: ${detail}`);
     }
 
     return { status: "processed" };
@@ -507,7 +508,18 @@ export class PaymentsService {
       .update(manifest)
       .digest("hex");
 
-    if (expected !== v1) {
+    // timingSafeEqual en vez de !== — comparar firmas con un operador de
+    // longitud/short-circuit filtra un side-channel de timing. Requiere
+    // buffers de igual longitud (si no, tira RangeError), así que ese chequeo
+    // va primero — una firma de largo distinto ya es inválida de por sí.
+    const expectedBuffer = Buffer.from(expected, "hex");
+    const receivedBuffer = Buffer.from(v1 ?? "", "hex");
+
+    const isValid =
+      expectedBuffer.length === receivedBuffer.length &&
+      crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
+
+    if (!isValid) {
       throw new UnauthorizedException("Firma de webhook inválida");
     }
   }
