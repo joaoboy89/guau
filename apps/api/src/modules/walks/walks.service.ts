@@ -431,8 +431,12 @@ export class WalksService {
     // Emitir cambio de estado via Socket.io
     this.trackingGateway?.emitStatusChanged(walkId, status);
 
-    // Crear notificación push en DB y emitirla al usuario correspondiente
-    void this.notificationsService?.notifyWalkStatusChange(walkId, status);
+    // Crear notificación push en DB y emitirla al usuario correspondiente.
+    // .catch() necesario: un `void promesa` sin manejar el rechazo sigue
+    // siendo una unhandled rejection a nivel de proceso (mismo fix que create()).
+    void this.notificationsService
+      ?.notifyWalkStatusChange(walkId, status)
+      .catch((err) => this.logger.warn(`No se pudo notificar cambio de estado: ${err}`));
 
     return updated;
   }
