@@ -6,7 +6,7 @@ English | [Español](./README.es.md)
 
 Dog-walking marketplace for Buenos Aires (Capital Federal + Greater Buenos Aires), Argentina. Connects dog owners with verified walkers — booking, payments, and (in progress) live GPS tracking.
 
-**Project status:** pre-MVP, closed development beta. `master` is production — there is no staging environment.
+**Project status:** MVP live in production, closed beta — first real transaction processed and validated (real money, MercadoPago split verified). `master` is production — there is no staging environment.
 
 <!-- SCREENSHOTS: pending — se agregan mañana -->
 

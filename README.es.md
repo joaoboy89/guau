@@ -6,7 +6,7 @@
 
 Marketplace de paseo de perros para Capital Federal y Gran Buenos Aires, Argentina. Conecta dueños de mascotas con paseadores verificados — reserva, pago y (en construcción) seguimiento GPS en tiempo real.
 
-**Estado del proyecto:** pre-MVP, en beta cerrada de desarrollo. `master` es producción — no hay ambiente de staging.
+**Estado del proyecto:** MVP en producción, beta cerrada — primera transacción real procesada y validada (dinero real, split de MercadoPago verificado). `master` es producción — no hay ambiente de staging.
 
 <!-- SCREENSHOTS: pending — se agregan mañana -->
 
