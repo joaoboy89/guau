@@ -18,6 +18,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://guau.jbsaasapp.com"),
   title:       "Güau — Paseo de perros",
   description: "Encontrá el paseador ideal para tu perro en Buenos Aires.",
   manifest:    "/manifest.json",
@@ -31,6 +32,21 @@ export const metadata: Metadata = {
     description: "Marketplace de paseo de perros para CABA y GBA",
     type:        "website",
     locale:      "es_AR",
+    url:         "/",
+    images: [
+      {
+        url:    "/og-image.png",
+        width:  1200,
+        height: 630,
+        alt:    "Güau — Paseadores verificados para tu perro en Buenos Aires",
+      },
+    ],
+  },
+  twitter: {
+    card:        "summary_large_image",
+    title:       "Güau",
+    description: "Marketplace de paseo de perros para CABA y GBA",
+    images:      ["/og-image.png"],
   },
 };
 
@@ -49,7 +65,6 @@ export default function RootLayout({
   return (
     <html lang="es-AR" className={`${fraunces.variable} ${dmSans.variable}`}>
       <head>
-        {/* TODO: generar íconos PNG de PWA 192/512 con el logo definitivo */}
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
