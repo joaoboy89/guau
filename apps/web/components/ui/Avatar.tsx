@@ -45,9 +45,9 @@ export default function Avatar({
       className={cn(
         "relative rounded-full overflow-hidden shrink-0",
         "flex items-center justify-center select-none",
-        // `gradient-accent` no existe; la utilidad real de globals.css
-        // es `gradient-primary` (terracota → arena).
-        "gradient-primary text-white font-bold",
+        // Gradiente terracota → arena, con clases nativas de Tailwind sobre
+        // los tokens de marca (antes era la utilidad .gradient-primary).
+        "bg-gradient-to-br from-brand-primary to-brand-sand text-white font-bold",
         box,
         className
       )}

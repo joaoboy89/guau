@@ -51,7 +51,7 @@ function Header() {
 
 function Hero() {
   return (
-    <section className="gradient-brand">
+    <section className="bg-gradient-to-br from-brand-bg to-brand-surface-sand">
       <Container width="wide" as="div" className="py-14 sm:py-20">
         <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
           <div className="flex flex-col items-start gap-6">
