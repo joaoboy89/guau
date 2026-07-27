@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import { brandColors } from "./lib/design-tokens";
 
 const config: Config = {
   content: [
@@ -11,20 +12,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        brand: {
-          bg:             "#FAF5EE",
-          surface:        "#FFFFFF",
-          "surface-sand": "#F7F0E5",
-          border:         "#E8DDD0",
-          text:           "#1E1B16",
-          "text-body":    "#3D3628",
-          "text-muted":   "#8B7355",
-          primary:        "#C25C2A",
-          "primary-soft": "#FFF0E8",
-          green:          "#2D5A3D",
-          "green-soft":   "#EBF3EE",
-          sand:           "#D4A96A",
-        },
+        brand: brandColors,
       },
       fontFamily: {
         serif: ["var(--font-fraunces)", "Georgia", "serif"],
