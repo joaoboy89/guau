@@ -51,12 +51,15 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  width:          "device-width",
-  initialScale:   1,
-  maximumScale:   1,
-  userScalable:   false,
-  themeColor:     "#FAF5EE",
-  viewportFit:    "cover",
+  width:        "device-width",
+  initialScale: 1,
+  // `maximumScale: 1` + `userScalable: false` estaban bloqueando el zoom con
+  // dos dedos en mobile. Es un patrón heredado de apps viejas (evitaba el
+  // auto-zoom de iOS al enfocar un input), pero incumple WCAG 1.4.4: alguien
+  // con baja visión no puede agrandar el texto. El auto-zoom de iOS se evita
+  // sin romper nada usando inputs de 16px o más, que es lo que ya hacemos.
+  themeColor:  "#FAF5EE",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

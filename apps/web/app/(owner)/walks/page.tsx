@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRequireAuth } from "@/lib/auth";
 import { walksAPI } from "@/lib/api";
-import { STATUS_LABEL } from "@/lib/walk-status";
+import { STATUS_LABEL, STATUS_VARIANT } from "@/lib/walk-status";
+import { Container, Card, Badge, Spinner, buttonStyles } from "@/components/ui";
 
 interface Walk {
   id: string;
@@ -21,64 +22,78 @@ export default function WalksPage() {
 
   useEffect(() => {
     if (!ready) return;
-    walksAPI.list()
+    walksAPI
+      .list()
       .then((res) => setWalks(res.data))
       .finally(() => setLoading(false));
   }, [ready]);
 
-  if (!ready || loading) return null;
+  /**
+   * Antes esto devolvía `null`: pantalla en blanco mientras carga, que se
+   * lee como "la app se rompió" en una conexión lenta. Un spinner cuesta
+   * lo mismo y dice "esperá", que es la verdad.
+   */
+  if (!ready || loading) {
+    return (
+      <main className="flex flex-1 items-center justify-center py-20 text-brand-primary">
+        <Spinner size={32} />
+      </main>
+    );
+  }
 
   return (
-    <main className="flex-1 p-6 flex flex-col gap-6 max-w-lg mx-auto w-full">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-serif font-bold text-brand-text">Mis paseos</h1>
-        <Link
-          href="/walks/new"
-          className="text-sm px-4 py-2 rounded-xl bg-brand-primary text-white font-semibold hover:opacity-90 transition-opacity"
-        >
+    <Container width="content" as="main" className="flex flex-1 flex-col gap-6 py-6">
+      <header className="flex items-center justify-between gap-4">
+        <h1 className="font-serif text-xl font-bold text-brand-text">Mis paseos</h1>
+        <Link href="/walks/new" className={buttonStyles({ size: "sm" })}>
           Reservar
         </Link>
       </header>
 
       {walks.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-brand-border min-h-60">
-          <p className="text-sm text-brand-text-muted">Todavía no reservaste ningún paseo.</p>
-          <Link
-            href="/walks/new"
-            className="px-6 py-2.5 rounded-2xl bg-brand-primary text-white text-sm font-semibold hover:opacity-90 transition-opacity"
-          >
+        <div className="flex min-h-60 flex-1 flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-brand-border p-6 text-center">
+          <p className="text-sm text-brand-text-muted">
+            Todavía no reservaste ningún paseo.
+          </p>
+          <Link href="/walks/new" className={buttonStyles({})}>
             Reservar un paseo
           </Link>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-3">
           {walks.map((walk) => {
             const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
               dateStyle: "long",
               timeStyle: "short",
             });
             const walkerName = `${walk.walker.user.firstName} ${walk.walker.user.lastName}`;
+
             return (
-              <Link
-                key={walk.id}
-                href={`/walks/${walk.id}`}
-                className="bg-brand-surface rounded-2xl p-4 shadow-card border border-brand-border flex flex-col gap-2 hover:shadow-float transition-shadow"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-sm font-semibold text-brand-text-body">
-                    {walk.walkType.label}
-                  </span>
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-brand-primary-soft text-brand-primary shrink-0">
-                    {STATUS_LABEL[walk.status] ?? walk.status}
-                  </span>
-                </div>
-                <p className="text-xs text-brand-text-muted">{dateStr}</p>
-                <p className="text-xs text-brand-text-muted">Paseador: {walkerName}</p>
-              </Link>
+              <li key={walk.id}>
+                <Link href={`/walks/${walk.id}`} className="block">
+                  <Card interactive className="flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm font-semibold text-brand-text-body">
+                        {walk.walkType.label}
+                      </span>
+                      <Badge
+                        variant={STATUS_VARIANT[walk.status] ?? "default"}
+                        className="shrink-0"
+                      >
+                        {STATUS_LABEL[walk.status] ?? walk.status}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-brand-text-muted">{dateStr}</p>
+                    <p className="text-xs text-brand-text-muted">
+                      Paseador: {walkerName}
+                    </p>
+                  </Card>
+                </Link>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
-    </main>
+    </Container>
   );
 }

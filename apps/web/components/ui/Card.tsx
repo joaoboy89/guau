@@ -1,26 +1,36 @@
 import { HTMLAttributes, ReactNode } from "react";
-import { clsx } from "clsx";
+import { cn } from "@/lib/cn";
+
+type Padding = "none" | "sm" | "md" | "lg";
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
-  padding?: "none" | "sm" | "md" | "lg";
-  hover?:   boolean;
+  padding?: Padding;
+  /** Realce al pasar el mouse. Usar solo si la card entera es clickeable. */
+  interactive?: boolean;
 }
 
-const paddings = {
+const paddings: Record<Padding, string> = {
   none: "",
-  sm:   "p-3",
-  md:   "p-4",
-  lg:   "p-6",
+  sm: "p-3",
+  md: "p-4",
+  lg: "p-6",
 };
 
-export default function Card({ children, padding = "md", hover, className, ...props }: CardProps) {
+export default function Card({
+  children,
+  padding = "md",
+  interactive = false,
+  className,
+  ...props
+}: CardProps) {
   return (
     <div
-      className={clsx(
+      className={cn(
         "bg-brand-surface border border-brand-border rounded-2xl shadow-card",
         paddings[padding],
-        hover && "cursor-pointer hover:border-teal-600 hover:shadow-float transition-all duration-200",
+        interactive &&
+          "cursor-pointer transition-all duration-200 hover:border-brand-primary hover:shadow-float",
         className
       )}
       {...props}
