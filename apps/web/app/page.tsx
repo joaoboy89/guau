@@ -13,39 +13,13 @@ import {
 import { Logo } from "@/components/Logo";
 import { Container, Badge, buttonStyles } from "@/components/ui";
 import PhotoSlot from "@/components/landing/PhotoSlot";
+import LandingHeader from "@/components/landing/LandingHeader";
 
 export const metadata = {
   title: "Güau — Paseadores verificados para tu perro en Buenos Aires",
   description:
     "Reservá un paseo con paseadores verificados de tu barrio. Pago online con MercadoPago y comunicación directa. CABA y GBA.",
 };
-
-/* ------------------------------------------------------------------ */
-
-function Header() {
-  return (
-    <header className="sticky top-0 z-50 border-b border-brand-border/60 bg-brand-bg/85 backdrop-blur">
-      <Container width="wide" className="flex h-16 items-center justify-between">
-        <Link href="/" className="flex items-center gap-2" aria-label="Güau — inicio">
-          <Logo size={36} />
-          <span className="font-serif text-xl font-bold text-brand-text">Güau</span>
-        </Link>
-
-        <nav className="flex items-center gap-2">
-          <Link href="/login" className={buttonStyles({ variant: "ghost", size: "sm" })}>
-            Ingresar
-          </Link>
-          <Link
-            href="/register?role=owner"
-            className={buttonStyles({ size: "sm", className: "hidden sm:inline-flex" })}
-          >
-            Crear cuenta
-          </Link>
-        </nav>
-      </Container>
-    </header>
-  );
-}
 
 /* ------------------------------------------------------------------ */
 
@@ -73,7 +47,7 @@ function Hero() {
 
             <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
               <Link
-                href="/register?role=owner"
+                href="/paseadores"
                 className={buttonStyles({ size: "lg", className: "w-full sm:w-auto" })}
               >
                 Buscar paseador
@@ -139,7 +113,7 @@ function Confianza() {
     <section className="py-16 sm:py-20">
       <Container width="wide">
         <h2 className="mb-3 text-balance font-serif text-3xl font-bold text-brand-text sm:text-4xl">
-          Dejar a tu perro con alguien no debería dar nervios
+          Alguien de confianza para el mejor momento de su día.
         </h2>
         <p className="mb-10 max-w-2xl text-lg text-brand-text-body">
           Por eso Güau se construyó alrededor de una sola idea: que sepas
@@ -222,7 +196,7 @@ function ComoFunciona() {
         </ol>
 
         <div className="mt-10">
-          <Link href="/register?role=owner" className={buttonStyles({ size: "lg" })}>
+          <Link href="/paseadores" className={buttonStyles({ size: "lg" })}>
             Empezar ahora
           </Link>
         </div>
@@ -377,7 +351,7 @@ function Footer() {
 export default function Home() {
   return (
     <div className="flex min-h-dvh flex-col bg-brand-bg">
-      <Header />
+      <LandingHeader />
       <main className="flex-1">
         <Hero />
         <Confianza />
