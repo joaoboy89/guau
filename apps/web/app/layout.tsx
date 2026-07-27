@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, DM_Sans } from "next/font/google";
+import { Lora, DM_Sans } from "next/font/google";
 import { AuthHydrator } from "@/components/AuthHydrator";
 import "./globals.css";
 
-const fraunces = Fraunces({
+const lora = Lora({
   subsets:  ["latin"],
-  variable: "--font-fraunces",
-  weight:   ["400", "700", "900"],
+  variable: "--font-lora",
+  weight:   ["400", "700"],
   display:  "swap",
 });
 
@@ -66,7 +66,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es-AR" className={`${fraunces.variable} ${dmSans.variable}`}>
+    <html lang="es-AR" className={`${lora.variable} ${dmSans.variable}`}>
       <head>
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
         <meta name="mobile-web-app-capable" content="yes" />
