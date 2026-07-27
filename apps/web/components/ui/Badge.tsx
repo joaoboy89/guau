@@ -1,41 +1,57 @@
-import { clsx } from "clsx";
+import { ReactNode } from "react";
+import { cn } from "@/lib/cn";
 
 type BadgeVariant = "success" | "warning" | "error" | "info" | "default";
 
 interface BadgeProps {
-  variant?:   BadgeVariant;
-  children:   React.ReactNode;
-  dot?:       boolean;
+  variant?: BadgeVariant;
+  children: ReactNode;
+  dot?: boolean;
   className?: string;
 }
 
+/**
+ * Las variantes anteriores eran del tema oscuro (`bg-teal-900/50`,
+ * `text-teal-300`) — invisibles sobre el crema del tema actual.
+ *
+ * `success` usa el verde de marca, que en Güau no es "ok" genérico sino
+ * confianza/verificación: el mismo verde del badge de paseador verificado.
+ */
 const variants: Record<BadgeVariant, string> = {
-  success: "bg-teal-900/50 text-teal-300 border-teal-700/50",
-  warning: "bg-yellow-900/50 text-yellow-300 border-yellow-700/50",
-  error:   "bg-red-900/50 text-red-300 border-red-700/50",
-  info:    "bg-blue-900/50 text-blue-300 border-blue-700/50",
-  default: "bg-brand-border text-brand-muted border-brand-border",
+  success: "bg-brand-green-soft  text-brand-green   border-brand-green/20",
+  warning: "bg-amber-50          text-amber-800     border-amber-200",
+  error:   "bg-red-50            text-red-700       border-red-200",
+  info:    "bg-brand-primary-soft text-brand-primary border-brand-primary/20",
+  default: "bg-brand-surface-sand text-brand-text-muted border-brand-border",
 };
 
-export default function Badge({ variant = "default", children, dot, className }: BadgeProps) {
+const dots: Record<BadgeVariant, string> = {
+  success: "bg-brand-green",
+  warning: "bg-amber-500",
+  error:   "bg-red-500",
+  info:    "bg-brand-primary",
+  default: "bg-brand-text-muted",
+};
+
+export default function Badge({
+  variant = "default",
+  children,
+  dot = false,
+  className,
+}: BadgeProps) {
   return (
     <span
-      className={clsx(
-        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border",
+      className={cn(
+        "inline-flex items-center gap-1.5 border rounded-full",
+        "px-2.5 py-0.5 text-xs font-semibold",
         variants[variant],
         className
       )}
     >
       {dot && (
         <span
-          className={clsx(
-            "w-1.5 h-1.5 rounded-full shrink-0",
-            variant === "success" && "bg-teal-400",
-            variant === "warning" && "bg-yellow-400",
-            variant === "error"   && "bg-red-400",
-            variant === "info"    && "bg-blue-400",
-            variant === "default" && "bg-brand-muted"
-          )}
+          aria-hidden="true"
+          className={cn("w-1.5 h-1.5 rounded-full shrink-0", dots[variant])}
         />
       )}
       {children}
