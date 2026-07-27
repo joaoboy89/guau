@@ -15,7 +15,7 @@ const config: Config = {
         brand: brandColors,
       },
       fontFamily: {
-        serif: ["var(--font-fraunces)", "Georgia", "serif"],
+        serif: ["var(--font-lora)", "Georgia", "serif"],
         sans:  ["var(--font-dm-sans)",  "system-ui", "sans-serif"],
       },
       borderRadius: {
