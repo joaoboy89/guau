@@ -1,0 +1,18 @@
+# Normalizacion de fin de linea.
+# Git guarda SIEMPRE con LF; cada quien lo ve segun su editor.
+# Evita diffs fantasma de 400 lineas al abrir archivos en Windows.
+* text=auto eol=lf
+
+# Binarios: no tocar nunca.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+# Scripts que corren en el VPS: LF obligatorio (CRLF los rompe).
+*.sh text eol=lf
