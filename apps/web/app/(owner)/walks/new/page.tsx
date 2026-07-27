@@ -6,11 +6,9 @@ import { useRequireAuth } from "@/lib/auth";
 import { dogsAPI, walkTypesAPI, walkersAPI, walksAPI } from "@/lib/api";
 import { toDatetimeLocalValue } from "@/lib/datetime";
 import { summarizeSchedule } from "@/lib/schedule";
+import BarrioSelect from "@/components/BarrioSelect";
+import type { Barrio } from "@/lib/barrios";
 import { AxiosError } from "axios";
-
-// TODO: reemplazar por geolocalización real del dueño cuando se integre Mapbox
-const DEFAULT_LAT = -34.6037;
-const DEFAULT_LNG = -58.3816;
 
 interface Dog {
   id: string;
@@ -59,6 +57,12 @@ export default function NewWalkPage() {
   const [walkTypes, setWalkTypes] = useState<WalkType[]>([]);
   const [selectedTypeId, setSelectedTypeId] = useState<string>("");
 
+  // ── Barrio (alimenta la búsqueda de paseadores y el pickup) ──
+  // PROVISIONAL hasta integrar geocodificación real con Mapbox: usamos el
+  // centroide del barrio elegido en vez de la dirección exacta que escribe
+  // el dueño más abajo (ver lib/barrios.ts).
+  const [barrio, setBarrio] = useState<Barrio | null>(null);
+
   // ── Walkers ──
   const [walkers, setWalkers] = useState<Walker[]>([]);
   const [selectedWalkerId, setSelectedWalkerId] = useState<string>("");
@@ -88,10 +92,23 @@ export default function NewWalkPage() {
       if (list.length === 1) setSelectedDogId(list[0].id);
     });
     walkTypesAPI.list().then((res) => setWalkTypes(res.data));
-    walkersAPI
-      .list({ lat: DEFAULT_LAT, lng: DEFAULT_LNG })
-      .then((res) => setWalkers(res.data));
   }, [ready]);
+
+  // Busca paseadores recién cuando hay un barrio elegido — antes no había
+  // forma de saber dónde está el dueño, así que se buscaba siempre desde el
+  // Obelisco (fijo), lo que podía dejar afuera a paseadores de zonas reales
+  // como Belgrano. Al cambiar de barrio se limpia el paseador ya elegido:
+  // puede que no esté disponible en la nueva búsqueda.
+  useEffect(() => {
+    setSelectedWalkerId("");
+    if (!barrio) {
+      setWalkers([]);
+      return;
+    }
+    walkersAPI
+      .list({ lat: barrio.lat, lng: barrio.lng })
+      .then((res) => setWalkers(res.data));
+  }, [barrio]);
 
   // Agenda del paseador seleccionado — se pide bajo demanda porque la lista de
   // /walkers no trae schedules (solo el detalle GET /walkers/:id lo incluye).
@@ -131,7 +148,7 @@ export default function NewWalkPage() {
 
   // ── Reservar ──
   const handleSubmit = async () => {
-    if (!selectedDogId || !selectedTypeId || !selectedWalkerId || !scheduledAt || !pickupAddress) {
+    if (!barrio || !selectedDogId || !selectedTypeId || !selectedWalkerId || !scheduledAt || !pickupAddress) {
       setSubmitError("Completá todos los campos antes de continuar");
       return;
     }
@@ -143,8 +160,11 @@ export default function NewWalkPage() {
         walkTypeId: selectedTypeId,
         dogIds: [selectedDogId],
         scheduledAt: new Date(scheduledAt).toISOString(),
-        pickupLat: DEFAULT_LAT, // TODO: reemplazar por geolocalización real del dueño cuando se integre Mapbox
-        pickupLng: DEFAULT_LNG,
+        // PROVISIONAL: centroide del barrio, no la dirección exacta de abajo
+        // (ver el comentario de lib/barrios.ts) — hasta que haya geocodificación
+        // real con Mapbox.
+        pickupLat: barrio.lat,
+        pickupLng: barrio.lng,
         pickupAddress,
       });
       router.push(`/walks/${res.data.id}`);
@@ -260,8 +280,22 @@ export default function NewWalkPage() {
       {/* ── PASO 3: Paseador ── */}
       <section className="flex flex-col gap-3 bg-brand-surface rounded-2xl p-5 shadow-card border border-brand-border">
         <h2 className="font-semibold text-brand-text-body">3. Elegí un paseador</h2>
-        {walkers.length === 0 && (
-          <p className="text-sm text-brand-text-muted">No hay paseadores disponibles en tu zona.</p>
+
+        <BarrioSelect
+          value={barrio?.nombre ?? ""}
+          onChange={setBarrio}
+          label="Tu barrio"
+        />
+
+        {!barrio && (
+          <p className="text-sm text-brand-text-muted">
+            Elegí tu barrio para ver los paseadores disponibles cerca tuyo.
+          </p>
+        )}
+        {barrio && walkers.length === 0 && (
+          <p className="text-sm text-brand-text-muted">
+            No hay paseadores disponibles en {barrio.nombre} todavía.
+          </p>
         )}
         <div className="flex flex-col gap-2">
           {walkers.map((w) => (
@@ -347,7 +381,7 @@ export default function NewWalkPage() {
 
       <button
         onClick={handleSubmit}
-        disabled={submitting || !selectedDogId || !selectedTypeId || !selectedWalkerId || !scheduledAt || !pickupAddress}
+        disabled={submitting || !barrio || !selectedDogId || !selectedTypeId || !selectedWalkerId || !scheduledAt || !pickupAddress}
         className="h-13 rounded-2xl bg-brand-primary text-white font-semibold text-base disabled:opacity-40 transition-opacity hover:opacity-90 shadow-float"
       >
         {submitting ? "Reservando…" : "Reservar"}
