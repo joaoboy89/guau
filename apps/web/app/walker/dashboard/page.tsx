@@ -107,6 +107,7 @@ export default function WalkerDashboardPage() {
       if (p.centerLat != null && p.centerLng != null) {
         setBarrio(findNearestBarrio(p.centerLat, p.centerLng));
       }
+      setRadiusInput(p.radiusKm != null && p.radiusKm >= 2 && p.radiusKm <= 3 ? p.radiusKm : 3);
       setDays((prev) =>
         prev.map((row) => {
           const match = p.schedules.find((s) => s.dayOfWeek === row.dayOfWeek);
