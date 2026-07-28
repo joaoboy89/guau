@@ -176,9 +176,14 @@ export class WalkersService {
       throw new NotFoundException("Paseador no disponible");
     }
 
-    // Excluir datos sensibles
+    // Excluir datos sensibles. centerLat/centerLng/radiusKm y userId también
+    // se excluyen acá aunque no sean secretos como el DNI o el token de MP:
+    // la zona de trabajo del paseador no tiene por qué ser pública con esta
+    // precisión, y userId es un identificador interno sin uso en el perfil
+    // público (search() ya expone lo necesario para mostrar distancia).
     const { dniNumber, dniPhotoUrl, selfieUrl, mpAccessToken, mpUserId,
-            verificationNotes, refreshTokenHash, ...safe } = profile as typeof profile & { refreshTokenHash?: string };
+            verificationNotes, refreshTokenHash, userId, centerLat, centerLng,
+            radiusKm, ...safe } = profile as typeof profile & { refreshTokenHash?: string };
 
     return safe;
   }
