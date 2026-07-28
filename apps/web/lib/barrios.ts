@@ -119,10 +119,11 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
 }
 
 /**
- * Barrio cuyo centroide está más cerca de un punto dado. Sirve para mostrar
- * un nombre legible cuando solo se tienen coordenadas guardadas — por
- * ejemplo, zonas configuradas antes de que existiera este selector, vía
- * geolocalización, que no van a coincidir exacto con ningún centroide.
+ * Barrio cuyo centroide está más cerca de un punto dado. Es el inverso
+ * exacto de cómo se guarda la zona ahora: el selector de zona escribe el
+ * centroide de un barrio elegido (ver BarrioSelect + set-zone), así que
+ * encontrar el barrio más cercano a esas coordenadas no es una adivinanza —
+ * recupera exactamente lo que se declaró.
  */
 export function findNearestBarrio(lat: number, lng: number): Barrio {
   return BARRIOS.reduce((closest, b) =>
