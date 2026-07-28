@@ -14,8 +14,22 @@ interface BarrioSelectProps {
   id?: string;
 }
 
-const CABA = BARRIOS.filter((b) => b.zona === "CABA");
-const GBA = BARRIOS.filter((b) => b.zona === "GBA");
+// Solo localidades activas — el resto existe en el catálogo para poder
+// encenderlas después, pero ofrecerlas hoy solo lleva a elegir una zona
+// vacía (ver Barrio.activa en lib/barrios.ts).
+const ACTIVE_BARRIOS = BARRIOS.filter((b) => b.activa);
+
+// Agrupa por partido preservando el orden de aparición en BARRIOS (CABA
+// primero, después cada partido en el orden en que se fue activando).
+const GROUPS: Array<{ partido: string; barrios: Barrio[] }> = [];
+for (const b of ACTIVE_BARRIOS) {
+  let group = GROUPS.find((g) => g.partido === b.partido);
+  if (!group) {
+    group = { partido: b.partido, barrios: [] };
+    GROUPS.push(group);
+  }
+  group.barrios.push(b);
+}
 
 export default function BarrioSelect({
   value,
@@ -41,7 +55,7 @@ export default function BarrioSelect({
         value={value}
         onChange={(e) => {
           const nombre = e.target.value;
-          const barrio = BARRIOS.find((b) => b.nombre === nombre) ?? null;
+          const barrio = ACTIVE_BARRIOS.find((b) => b.nombre === nombre) ?? null;
           onChange(barrio);
         }}
         className={cn(
@@ -54,20 +68,15 @@ export default function BarrioSelect({
         )}
       >
         <option value="">{placeholder}</option>
-        <optgroup label="CABA">
-          {CABA.map((b) => (
-            <option key={b.nombre} value={b.nombre}>
-              {b.nombre}
-            </option>
-          ))}
-        </optgroup>
-        <optgroup label="GBA">
-          {GBA.map((b) => (
-            <option key={b.nombre} value={b.nombre}>
-              {b.nombre}
-            </option>
-          ))}
-        </optgroup>
+        {GROUPS.map((g) => (
+          <optgroup key={g.partido} label={g.partido}>
+            {g.barrios.map((b) => (
+              <option key={b.nombre} value={b.nombre}>
+                {b.nombre}
+              </option>
+            ))}
+          </optgroup>
+        ))}
       </select>
     </div>
   );

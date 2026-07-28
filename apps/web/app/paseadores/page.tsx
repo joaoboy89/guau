@@ -95,8 +95,9 @@ export default function PaseadoresPage() {
           {status === "success" && walkers.length === 0 && (
             <div className="flex min-h-60 flex-col items-center justify-center gap-2 rounded-3xl border border-dashed border-brand-border p-6 text-center">
               <p className="text-sm text-brand-text-muted">
-                Todavía no hay paseadores verificados cerca de {barrio?.nombre}.
-                Probá con un barrio vecino.
+                Todavía no hay paseadores disponibles en {barrio?.nombre}. Estamos
+                empezando por Capital y zona norte, y sumamos paseadores todas
+                las semanas.
               </p>
             </div>
           )}
