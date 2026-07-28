@@ -5,6 +5,8 @@ import { useRequireAuth } from "@/lib/auth";
 import { walkersAPI, paymentsAPI, walksAPI } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/walk-status";
 import { DAY_LABELS } from "@/lib/schedule";
+import { findNearestBarrio, type Barrio } from "@/lib/barrios";
+import BarrioSelect from "@/components/BarrioSelect";
 import { AxiosError } from "axios";
 
 interface WalkerSchedule {
@@ -89,6 +91,7 @@ export default function WalkerDashboardPage() {
 
   const [zoneSaving, setZoneSaving] = useState(false);
   const [zoneError, setZoneError]   = useState<string | null>(null);
+  const [barrio, setBarrio]         = useState<Barrio | null>(null);
   const [radiusInput, setRadiusInput] = useState(20);
 
   const [days, setDays] = useState<DayRow[]>(buildDefaultDays());
@@ -99,6 +102,9 @@ export default function WalkerDashboardPage() {
       const p: WalkerProfile = res.data;
       setProfile(p);
       setAvailable(p.isAvailable);
+      if (p.centerLat != null && p.centerLng != null) {
+        setBarrio(findNearestBarrio(p.centerLat, p.centerLng));
+      }
       setDays((prev) =>
         prev.map((row) => {
           const match = p.schedules.find((s) => s.dayOfWeek === row.dayOfWeek);
@@ -141,39 +147,31 @@ export default function WalkerDashboardPage() {
     }
   };
 
-  const getLocationAndSave = () => {
+  // La zona de trabajo se elige por barrio, no por geolocalización: un
+  // paseador puede vivir en provincia y trabajar en Capital, moviéndose
+  // hacia la demanda como un conductor de apps. A diferencia de un
+  // conductor, acá los paseos se reservan con anticipación, así que el
+  // paseador puede comprometerse de antemano a una zona sin necesidad de
+  // estar parado en ella.
+  const handleSaveZone = async () => {
+    if (!barrio || zoneSaving) return;
     setZoneSaving(true);
     setZoneError(null);
-    if (!navigator.geolocation) {
-      setZoneError("Tu dispositivo no soporta geolocalización.");
+    try {
+      await walkersAPI.setZone({
+        centerLat: barrio.lat,
+        centerLng: barrio.lng,
+        radiusKm:  radiusInput,
+      });
+      setProfile((prev) =>
+        prev ? { ...prev, centerLat: barrio.lat, centerLng: barrio.lng, radiusKm: radiusInput } : prev
+      );
+    } catch (err: unknown) {
+      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
+      setZoneError(msg ?? "No se pudo guardar la zona. Intentá de nuevo.");
+    } finally {
       setZoneSaving(false);
-      return;
     }
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          await walkersAPI.setZone({
-            centerLat: pos.coords.latitude,
-            centerLng: pos.coords.longitude,
-            radiusKm:  radiusInput,
-          });
-          setProfile((prev) =>
-            prev
-              ? { ...prev, centerLat: pos.coords.latitude, centerLng: pos.coords.longitude, radiusKm: radiusInput }
-              : prev
-          );
-        } catch (err: unknown) {
-          const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
-          setZoneError(msg ?? "No se pudo guardar la zona. Intentá de nuevo.");
-        } finally {
-          setZoneSaving(false);
-        }
-      },
-      () => {
-        setZoneError("Permiso de ubicación denegado. Habilitalo en tu navegador e intentá de nuevo.");
-        setZoneSaving(false);
-      }
-    );
   };
 
   const updateDay = (dayOfWeek: number, patch: Partial<DayRow>) => {
@@ -335,20 +333,28 @@ export default function WalkerDashboardPage() {
 
       {/* Zona de trabajo */}
       <div className="flex flex-col gap-3 px-4 py-4 rounded-2xl bg-brand-surface border border-brand-border">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-semibold text-brand-text-body">Zona de trabajo</span>
-            {profile.centerLat && profile.radiusKm ? (
-              <span className="text-xs text-brand-text-muted">
-                Zona activa: radio de {profile.radiusKm} km
-              </span>
-            ) : (
-              <span className="text-xs text-amber-700">
-                Todavía no configuraste tu zona de trabajo — no vas a aparecer en búsquedas hasta que lo hagas
-              </span>
-            )}
-          </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-semibold text-brand-text-body">Zona de trabajo</span>
+          {profile.centerLat != null && profile.centerLng != null && profile.radiusKm != null && (
+            <span className="text-xs text-brand-text-muted">
+              Trabajás en {findNearestBarrio(profile.centerLat, profile.centerLng).nombre}, hasta {profile.radiusKm} km a la redonda
+            </span>
+          )}
         </div>
+
+        {(profile.centerLat == null || profile.centerLng == null || profile.radiusKm == null) && (
+          <div className="flex flex-col gap-1.5 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200">
+            <p className="text-sm font-semibold text-amber-800">
+              Todavía no configuraste tu zona de trabajo — sin zona no aparecés en ninguna búsqueda.
+            </p>
+          </div>
+        )}
+
+        <BarrioSelect
+          value={barrio?.nombre ?? ""}
+          onChange={setBarrio}
+          label="¿En qué barrio querés trabajar?"
+        />
 
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-brand-text-body">
@@ -364,15 +370,11 @@ export default function WalkerDashboardPage() {
             />
           </label>
           <button
-            onClick={getLocationAndSave}
-            disabled={zoneSaving}
+            onClick={handleSaveZone}
+            disabled={zoneSaving || !barrio}
             className="flex-1 h-9 rounded-xl bg-brand-primary text-white text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
           >
-            {zoneSaving
-              ? "Guardando…"
-              : profile.centerLat
-              ? "Actualizar zona"
-              : "Usar mi ubicación actual y guardar zona"}
+            {zoneSaving ? "Guardando…" : "Guardar zona"}
           </button>
         </div>
 

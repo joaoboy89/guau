@@ -107,3 +107,25 @@ export const BARRIOS: Barrio[] = [
   { nombre: "Vicente López", lat: -34.5270, lng: -58.4790, zona: "GBA" },
   { nombre: "Wilde", lat: -34.7050, lng: -58.3300, zona: "GBA" },
 ];
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/**
+ * Barrio cuyo centroide está más cerca de un punto dado. Sirve para mostrar
+ * un nombre legible cuando solo se tienen coordenadas guardadas — por
+ * ejemplo, zonas configuradas antes de que existiera este selector, vía
+ * geolocalización, que no van a coincidir exacto con ningún centroide.
+ */
+export function findNearestBarrio(lat: number, lng: number): Barrio {
+  return BARRIOS.reduce((closest, b) =>
+    haversineKm(lat, lng, b.lat, b.lng) < haversineKm(lat, lng, closest.lat, closest.lng) ? b : closest
+  );
+}
