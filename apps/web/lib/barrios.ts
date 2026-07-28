@@ -1,7 +1,7 @@
 /**
- * Lista estática de barrios (CABA) y localidades (GBA) con un centroide
- * aproximado cada uno, para alimentar el selector de zona en /paseadores y
- * en la reserva de un paseo.
+ * Lista estática de barrios (CABA) y localidades (GBA) con un centroide cada
+ * uno, para alimentar el selector de zona en /paseadores y en la reserva de
+ * un paseo.
  *
  * Esto es PROVISIONAL hasta integrar geocodificación real con Mapbox (ya es
  * dependencia del proyecto — mapbox-gl / @mapbox/mapbox-gl-geocoder están
@@ -9,6 +9,20 @@
  * dirección que escribe el dueño es un problema distinto del tracking GPS en
  * vivo del paseo: acá alcanza con un punto aproximado por barrio porque el
  * radio de cobertura del paseador se mide en kilómetros, no en metros.
+ *
+ * FIABILIDAD DE LAS COORDENADAS — no es uniforme, y es importante no tratar
+ * todo el archivo como si lo fuera:
+ *
+ * - Los 48 barrios de CABA usan centroides OFICIALES: calculados a partir de
+ *   los polígonos del dataset "Barrios" de Buenos Aires Data (licencia
+ *   CC-BY-2.5-AR, actualización trimestral).
+ *   https://data.buenosaires.gob.ar/dataset/barrios
+ *   El cálculo es el centroide de área de cada polígono (fórmula de
+ *   shoelace, con las islas/huecos del polígono restando en vez de sumar),
+ *   no el promedio de sus vértices.
+ * - Las 36 localidades de GBA siguen siendo ESTIMACIONES aproximadas (el
+ *   dataset de Buenos Aires Data cubre solo Ciudad de Buenos Aires, no la
+ *   provincia). No hay una fuente oficial equivalente todavía integrada acá.
  */
 
 export type Barrio = {
@@ -19,57 +33,58 @@ export type Barrio = {
 };
 
 export const BARRIOS: Barrio[] = [
-  // ─── CABA (48 barrios oficiales) ─────────────────────────────────────────
-  { nombre: "Agronomía", lat: -34.5930, lng: -58.4880, zona: "CABA" },
-  { nombre: "Almagro", lat: -34.6100, lng: -58.4200, zona: "CABA" },
-  { nombre: "Balvanera", lat: -34.6090, lng: -58.4010, zona: "CABA" },
-  { nombre: "Barracas", lat: -34.6430, lng: -58.3830, zona: "CABA" },
-  { nombre: "Belgrano", lat: -34.5620, lng: -58.4560, zona: "CABA" },
-  { nombre: "Boedo", lat: -34.6280, lng: -58.4180, zona: "CABA" },
-  { nombre: "Caballito", lat: -34.6190, lng: -58.4370, zona: "CABA" },
-  { nombre: "Chacarita", lat: -34.5880, lng: -58.4540, zona: "CABA" },
-  { nombre: "Coghlan", lat: -34.5620, lng: -58.4740, zona: "CABA" },
-  { nombre: "Colegiales", lat: -34.5750, lng: -58.4500, zona: "CABA" },
-  { nombre: "Constitución", lat: -34.6270, lng: -58.3810, zona: "CABA" },
-  { nombre: "Flores", lat: -34.6280, lng: -58.4640, zona: "CABA" },
-  { nombre: "Floresta", lat: -34.6300, lng: -58.4820, zona: "CABA" },
-  { nombre: "La Boca", lat: -34.6345, lng: -58.3630, zona: "CABA" },
-  { nombre: "La Paternal", lat: -34.5950, lng: -58.4650, zona: "CABA" },
-  { nombre: "Liniers", lat: -34.6420, lng: -58.5230, zona: "CABA" },
-  { nombre: "Mataderos", lat: -34.6580, lng: -58.5030, zona: "CABA" },
-  { nombre: "Monserrat", lat: -34.6110, lng: -58.3830, zona: "CABA" },
-  { nombre: "Monte Castro", lat: -34.6180, lng: -58.5030, zona: "CABA" },
-  { nombre: "Nueva Pompeya", lat: -34.6470, lng: -58.4180, zona: "CABA" },
-  { nombre: "Núñez", lat: -34.5450, lng: -58.4620, zona: "CABA" },
-  { nombre: "Palermo", lat: -34.5889, lng: -58.4300, zona: "CABA" },
-  { nombre: "Parque Avellaneda", lat: -34.6380, lng: -58.4750, zona: "CABA" },
-  { nombre: "Parque Chacabuco", lat: -34.6350, lng: -58.4390, zona: "CABA" },
-  { nombre: "Parque Chas", lat: -34.5860, lng: -58.4720, zona: "CABA" },
-  { nombre: "Parque Patricios", lat: -34.6360, lng: -58.4020, zona: "CABA" },
-  { nombre: "Puerto Madero", lat: -34.6083, lng: -58.3630, zona: "CABA" },
-  { nombre: "Recoleta", lat: -34.5875, lng: -58.3974, zona: "CABA" },
-  { nombre: "Retiro", lat: -34.5920, lng: -58.3750, zona: "CABA" },
-  { nombre: "Saavedra", lat: -34.5580, lng: -58.4830, zona: "CABA" },
-  { nombre: "San Cristóbal", lat: -34.6220, lng: -58.4040, zona: "CABA" },
-  { nombre: "San Nicolás", lat: -34.6030, lng: -58.3780, zona: "CABA" },
-  { nombre: "San Telmo", lat: -34.6210, lng: -58.3720, zona: "CABA" },
-  { nombre: "Vélez Sarsfield", lat: -34.6320, lng: -58.4900, zona: "CABA" },
-  { nombre: "Versalles", lat: -34.6270, lng: -58.5170, zona: "CABA" },
-  { nombre: "Villa Crespo", lat: -34.5990, lng: -58.4380, zona: "CABA" },
-  { nombre: "Villa del Parque", lat: -34.6020, lng: -58.4900, zona: "CABA" },
-  { nombre: "Villa Devoto", lat: -34.6010, lng: -58.5150, zona: "CABA" },
-  { nombre: "Villa General Mitre", lat: -34.6050, lng: -58.4780, zona: "CABA" },
-  { nombre: "Villa Lugano", lat: -34.6780, lng: -58.4700, zona: "CABA" },
-  { nombre: "Villa Luro", lat: -34.6390, lng: -58.5020, zona: "CABA" },
-  { nombre: "Villa Ortúzar", lat: -34.5820, lng: -58.4650, zona: "CABA" },
-  { nombre: "Villa Pueyrredón", lat: -34.5820, lng: -58.5040, zona: "CABA" },
-  { nombre: "Villa Real", lat: -34.6210, lng: -58.5280, zona: "CABA" },
-  { nombre: "Villa Riachuelo", lat: -34.6800, lng: -58.4620, zona: "CABA" },
-  { nombre: "Villa Santa Rita", lat: -34.6180, lng: -58.4750, zona: "CABA" },
-  { nombre: "Villa Soldati", lat: -34.6650, lng: -58.4380, zona: "CABA" },
-  { nombre: "Villa Urquiza", lat: -34.5720, lng: -58.4900, zona: "CABA" },
+  // ─── CABA (48 barrios, centroides OFICIALES — ver fuente arriba) ────────
+  { nombre: "Agronomía", lat: -34.5930, lng: -58.4887, zona: "CABA" },
+  { nombre: "Almagro", lat: -34.6092, lng: -58.4217, zona: "CABA" },
+  { nombre: "Balvanera", lat: -34.6091, lng: -58.4031, zona: "CABA" },
+  { nombre: "Barracas", lat: -34.6464, lng: -58.3843, zona: "CABA" },
+  { nombre: "Belgrano", lat: -34.5547, lng: -58.4501, zona: "CABA" },
+  { nombre: "Boedo", lat: -34.6300, lng: -58.4188, zona: "CABA" },
+  { nombre: "Caballito", lat: -34.6168, lng: -58.4436, zona: "CABA" },
+  { nombre: "Chacarita", lat: -34.5884, lng: -58.4542, zona: "CABA" },
+  { nombre: "Coghlan", lat: -34.5606, lng: -58.4749, zona: "CABA" },
+  { nombre: "Colegiales", lat: -34.5746, lng: -58.4510, zona: "CABA" },
+  { nombre: "Constitución", lat: -34.6250, lng: -58.3844, zona: "CABA" },
+  { nombre: "Flores", lat: -34.6368, lng: -58.4583, zona: "CABA" },
+  { nombre: "Floresta", lat: -34.6277, lng: -58.4836, zona: "CABA" },
+  { nombre: "La Boca", lat: -34.6311, lng: -58.3568, zona: "CABA" },
+  { nombre: "La Paternal", lat: -34.5974, lng: -58.4687, zona: "CABA" },
+  { nombre: "Liniers", lat: -34.6438, lng: -58.5191, zona: "CABA" },
+  { nombre: "Mataderos", lat: -34.6584, lng: -58.5017, zona: "CABA" },
+  { nombre: "Monserrat", lat: -34.6127, lng: -58.3797, zona: "CABA" },
+  { nombre: "Monte Castro", lat: -34.6193, lng: -58.5066, zona: "CABA" },
+  { nombre: "Nueva Pompeya", lat: -34.6505, lng: -58.4189, zona: "CABA" },
+  { nombre: "Núñez", lat: -34.5433, lng: -58.4626, zona: "CABA" },
+  { nombre: "Palermo", lat: -34.5738, lng: -58.4223, zona: "CABA" },
+  { nombre: "Parque Avellaneda", lat: -34.6486, lng: -58.4765, zona: "CABA" },
+  { nombre: "Parque Chacabuco", lat: -34.6359, lng: -58.4377, zona: "CABA" },
+  { nombre: "Parque Chas", lat: -34.5855, lng: -58.4791, zona: "CABA" },
+  { nombre: "Parque Patricios", lat: -34.6376, lng: -58.4017, zona: "CABA" },
+  { nombre: "Puerto Madero", lat: -34.6091, lng: -58.3557, zona: "CABA" },
+  { nombre: "Recoleta", lat: -34.5856, lng: -58.3947, zona: "CABA" },
+  { nombre: "Retiro", lat: -34.5884, lng: -58.3760, zona: "CABA" },
+  { nombre: "Saavedra", lat: -34.5531, lng: -58.4887, zona: "CABA" },
+  { nombre: "San Cristóbal", lat: -34.6239, lng: -58.4019, zona: "CABA" },
+  { nombre: "San Nicolás", lat: -34.6037, lng: -58.3805, zona: "CABA" },
+  { nombre: "San Telmo", lat: -34.6215, lng: -58.3715, zona: "CABA" },
+  { nombre: "Vélez Sarsfield", lat: -34.6314, lng: -58.4933, zona: "CABA" },
+  { nombre: "Versalles", lat: -34.6301, lng: -58.5224, zona: "CABA" },
+  { nombre: "Villa Crespo", lat: -34.5988, lng: -58.4427, zona: "CABA" },
+  { nombre: "Villa del Parque", lat: -34.6043, lng: -58.4907, zona: "CABA" },
+  { nombre: "Villa Devoto", lat: -34.6024, lng: -58.5143, zona: "CABA" },
+  { nombre: "Villa General Mitre", lat: -34.6100, lng: -58.4689, zona: "CABA" },
+  { nombre: "Villa Lugano", lat: -34.6750, lng: -58.4762, zona: "CABA" },
+  { nombre: "Villa Luro", lat: -34.6364, lng: -58.5027, zona: "CABA" },
+  { nombre: "Villa Ortúzar", lat: -34.5810, lng: -58.4677, zona: "CABA" },
+  { nombre: "Villa Pueyrredón", lat: -34.5821, lng: -58.5035, zona: "CABA" },
+  { nombre: "Villa Real", lat: -34.6195, lng: -58.5260, zona: "CABA" },
+  { nombre: "Villa Riachuelo", lat: -34.6919, lng: -58.4633, zona: "CABA" },
+  { nombre: "Villa Santa Rita", lat: -34.6162, lng: -58.4830, zona: "CABA" },
+  { nombre: "Villa Soldati", lat: -34.6654, lng: -58.4466, zona: "CABA" },
+  { nombre: "Villa Urquiza", lat: -34.5715, lng: -58.4879, zona: "CABA" },
 
-  // ─── GBA (localidades más pobladas, zona norte/oeste/sur) ────────────────
+  // ─── GBA (localidades más pobladas, zona norte/oeste/sur) — ESTIMADAS,
+  // no oficiales. El dataset de Buenos Aires Data no cubre la provincia. ──
   { nombre: "Adrogué", lat: -34.7990, lng: -58.3890, zona: "GBA" },
   { nombre: "Avellaneda", lat: -34.6620, lng: -58.3650, zona: "GBA" },
   { nombre: "Banfield", lat: -34.7440, lng: -58.3960, zona: "GBA" },
