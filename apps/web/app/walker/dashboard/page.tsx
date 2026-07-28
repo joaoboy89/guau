@@ -7,6 +7,7 @@ import { STATUS_LABEL } from "@/lib/walk-status";
 import { DAY_LABELS } from "@/lib/schedule";
 import { findNearestBarrio, type Barrio } from "@/lib/barrios";
 import BarrioSelect from "@/components/BarrioSelect";
+import { Button } from "@/components/ui";
 import { AxiosError } from "axios";
 
 interface WalkerSchedule {
@@ -41,8 +42,10 @@ interface DayRow {
   active:     boolean;
   startTime:  string;
   endTime:    string;
-  saving:     boolean;
   error:      string | null;
+  // Última versión persistida de esta fila. Compararla contra los campos de
+  // arriba es lo que dice si la fila tiene cambios sin guardar.
+  original: { active: boolean; startTime: string; endTime: string };
 }
 
 function buildDefaultDays(): DayRow[] {
@@ -52,9 +55,17 @@ function buildDefaultDays(): DayRow[] {
     active:     false,
     startTime:  "09:00",
     endTime:    "18:00",
-    saving:     false,
     error:      null,
+    original:   { active: false, startTime: "09:00", endTime: "18:00" },
   }));
+}
+
+function isDayDirty(row: DayRow): boolean {
+  if (row.active !== row.original.active) return true;
+  if (row.active && (row.startTime !== row.original.startTime || row.endTime !== row.original.endTime)) {
+    return true;
+  }
+  return false;
 }
 
 interface WalkItem {
@@ -97,6 +108,7 @@ export default function WalkerDashboardPage() {
   const [radiusInput, setRadiusInput] = useState(3);
 
   const [days, setDays] = useState<DayRow[]>(buildDefaultDays());
+  const [schedulesSaving, setSchedulesSaving] = useState(false);
 
   useEffect(() => {
     if (!ready) return;
@@ -107,13 +119,13 @@ export default function WalkerDashboardPage() {
       if (p.centerLat != null && p.centerLng != null) {
         setBarrio(findNearestBarrio(p.centerLat, p.centerLng));
       }
-      setRadiusInput(p.radiusKm != null && p.radiusKm >= 2 && p.radiusKm <= 3 ? p.radiusKm : 3);
+      setRadiusInput(p.radiusKm != null && p.radiusKm >= 1 && p.radiusKm <= 3 ? p.radiusKm : 3);
       setDays((prev) =>
         prev.map((row) => {
           const match = p.schedules.find((s) => s.dayOfWeek === row.dayOfWeek);
-          return match
-            ? { ...row, scheduleId: match.id, active: true, startTime: match.startTime, endTime: match.endTime }
-            : row;
+          if (!match) return row;
+          const loaded = { active: true, startTime: match.startTime, endTime: match.endTime };
+          return { ...row, scheduleId: match.id, ...loaded, original: loaded };
         })
       );
     });
@@ -181,41 +193,65 @@ export default function WalkerDashboardPage() {
     setDays((prev) => prev.map((row) => (row.dayOfWeek === dayOfWeek ? { ...row, ...patch } : row)));
   };
 
-  const handleSaveDay = async (dayOfWeek: number) => {
-    const row = days.find((d) => d.dayOfWeek === dayOfWeek);
-    if (!row || row.saving) return;
+  // Un solo "Guardar horarios" para toda la semana, no uno por día: con un
+  // botón por fila, activar tres días y guardar solo dos era una pérdida de
+  // datos silenciosa — el tercero no persistía y nadie se enteraba. Acá se
+  // mandan en paralelo únicamente las requests de los días con cambios sin
+  // guardar (como mucho 7, y son las mismas que ya existían por fila) y, si
+  // alguna falla, el error queda en la fila de ese día puntual sin bloquear
+  // el resto.
+  const handleSaveSchedules = async () => {
+    const dirtyRows = days.filter(isDayDirty);
+    if (dirtyRows.length === 0 || schedulesSaving) return;
 
-    if (row.active && row.startTime >= row.endTime) {
-      updateDay(dayOfWeek, { error: "La hora de inicio debe ser antes que la de fin" });
-      return;
-    }
+    setSchedulesSaving(true);
+    setDays((prev) => prev.map((row) => (isDayDirty(row) ? { ...row, error: null } : row)));
 
-    updateDay(dayOfWeek, { saving: true, error: null });
-    try {
-      if (row.active) {
-        if (row.scheduleId) {
-          await walkersAPI.updateSchedule(row.scheduleId, {
-            startTime: row.startTime,
-            endTime:   row.endTime,
-            isActive:  true,
-          });
-        } else {
+    const results = await Promise.allSettled(
+      dirtyRows.map(async (row) => {
+        if (row.active && row.startTime >= row.endTime) {
+          throw new Error("La hora de inicio debe ser antes que la de fin");
+        }
+        if (row.active) {
+          if (row.scheduleId) {
+            await walkersAPI.updateSchedule(row.scheduleId, {
+              startTime: row.startTime,
+              endTime:   row.endTime,
+              isActive:  true,
+            });
+            return row.scheduleId;
+          }
           const res = await walkersAPI.createSchedule({
             dayOfWeek: row.dayOfWeek,
             startTime: row.startTime,
             endTime:   row.endTime,
           });
-          updateDay(dayOfWeek, { scheduleId: res.data.id });
+          return res.data.id as string;
         }
-      } else if (row.scheduleId) {
-        await walkersAPI.updateSchedule(row.scheduleId, { isActive: false });
-      }
-    } catch (err: unknown) {
-      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
-      updateDay(dayOfWeek, { error: msg ?? "No se pudo guardar. Intentá de nuevo." });
-    } finally {
-      updateDay(dayOfWeek, { saving: false });
-    }
+        if (row.scheduleId) {
+          await walkersAPI.updateSchedule(row.scheduleId, { isActive: false });
+        }
+        return row.scheduleId;
+      })
+    );
+
+    setDays((prev) =>
+      prev.map((row) => {
+        const idx = dirtyRows.findIndex((d) => d.dayOfWeek === row.dayOfWeek);
+        if (idx === -1) return row;
+        const result = results[idx];
+        if (result.status === "fulfilled") {
+          return {
+            ...row,
+            scheduleId: result.value,
+            original:   { active: row.active, startTime: row.startTime, endTime: row.endTime },
+          };
+        }
+        const msg = (result.reason as AxiosError<{ message: string }>)?.response?.data?.message;
+        return { ...row, error: msg ?? (result.reason as Error)?.message ?? "No se pudo guardar. Intentá de nuevo." };
+      })
+    );
+    setSchedulesSaving(false);
   };
 
   const connectMercadoPago = async () => {
@@ -270,6 +306,22 @@ export default function WalkerDashboardPage() {
   const pendingWalks = walks.filter((w) => w.status === "PENDING");
   const otherWalks   = walks.filter((w) => w.status !== "PENDING");
 
+  const hasZone         = profile.centerLat != null && profile.centerLng != null && profile.radiusKm != null;
+  const hasUnsavedDays   = days.some(isDayDirty);
+
+  // Un solo aviso en vez de tres apilados: la lista muestra solo lo que
+  // realmente falta, en el orden en que aparecen las secciones de abajo.
+  const missingItems: Array<{ text: string; anchor?: string }> = [];
+  if (profile.verificationStatus === "PENDING") {
+    missingItems.push({ text: "Que verifiquemos tu cuenta" });
+  }
+  if (profile.schedules.length === 0) {
+    missingItems.push({ text: "Cargar tus horarios", anchor: "#horarios" });
+  }
+  if (!hasZone) {
+    missingItems.push({ text: "Configurar tu zona de trabajo" });
+  }
+
   return (
     <main className="flex-1 p-6 flex flex-col gap-6">
 
@@ -292,15 +344,26 @@ export default function WalkerDashboardPage() {
         </span>
       </div>
 
-      {/* Warning: sin horarios cargados */}
-      {profile.schedules.length === 0 && (
+      {/* Un solo bloque de advertencia — antes eran tres (verificación,
+          horarios, zona) apilados, y con todo gritando nada se destacaba. */}
+      {missingItems.length > 0 && (
         <div className="flex flex-col gap-1.5 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200">
           <p className="text-sm font-semibold text-amber-800">
-            Sin horarios cargados no aparecés en las búsquedas ni podés recibir reservas.
+            Para empezar a recibir paseos te falta:
           </p>
-          <a href="#horarios" className="text-xs font-semibold text-amber-800 underline underline-offset-2 w-fit">
-            Cargar mis horarios ↓
-          </a>
+          <ul className="flex flex-col gap-0.5 pl-4 list-disc text-sm text-amber-800">
+            {missingItems.map((item) => (
+              <li key={item.text}>
+                {item.anchor ? (
+                  <a href={item.anchor} className="underline underline-offset-2">
+                    {item.text}
+                  </a>
+                ) : (
+                  item.text
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -345,47 +408,43 @@ export default function WalkerDashboardPage() {
           )}
         </div>
 
-        {(profile.centerLat == null || profile.centerLng == null || profile.radiusKm == null) && (
-          <div className="flex flex-col gap-1.5 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200">
-            <p className="text-sm font-semibold text-amber-800">
-              Todavía no configuraste tu zona de trabajo — sin zona no aparecés en ninguna búsqueda.
-            </p>
-          </div>
-        )}
-
         <BarrioSelect
           value={barrio?.nombre ?? ""}
           onChange={setBarrio}
           label="¿En qué barrio querés trabajar?"
         />
 
-        <div className="flex items-center gap-3">
-          {/*
-            20 km era un valor de prueba, no una decisión de producto: nadie
-            camina perros a 20 km de su zona. 2-3 km es lo que razonablemente
-            cubre a alguien que se mueve a pie (ver SetZoneDto en el backend,
-            que es quien realmente lo hace cumplir).
-          */}
-          <label className="flex items-center gap-2 text-sm text-brand-text-body">
-            <span className="shrink-0">¿Hasta dónde estás dispuesto a ir a buscar un perro? (km)</span>
-            <input
-              type="number"
-              min={2}
-              max={3}
-              step={0.5}
-              value={radiusInput}
-              onChange={(e) => setRadiusInput(Number(e.target.value))}
-              className="w-20 h-9 px-3 rounded-xl border border-brand-border bg-brand-bg text-sm text-brand-text focus:outline-none focus:border-brand-primary"
-            />
-          </label>
-          <button
-            onClick={handleSaveZone}
-            disabled={zoneSaving || !barrio}
-            className="flex-1 h-9 rounded-xl bg-brand-primary text-white text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+        {/*
+          20 km era un valor de prueba, no una decisión de producto: nadie
+          camina perros a 20 km de su zona. 1-3 km es lo que razonablemente
+          cubre a alguien que se mueve a pie (ver SetZoneDto en el backend,
+          que es quien realmente lo hace cumplir). El control es un
+          desplegable de tres opciones, no un número libre: no hay nada
+          entre 1 y 3 que tenga sentido ofrecer.
+
+          La fila se apila siempre (nunca lado a lado con el botón): en
+          mobile, el label "¿Hasta dónde estás dispuesto a ir a buscar un
+          perro?" no se dejaba encoger dentro de un flex horizontal, la fila
+          desbordaba y el botón de guardar quedaba montado encima del texto.
+        */}
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm text-brand-text-body">
+            ¿Hasta dónde estás dispuesto a ir a buscar un perro?
+          </span>
+          <select
+            value={radiusInput}
+            onChange={(e) => setRadiusInput(Number(e.target.value))}
+            className="h-12 w-full sm:w-40 rounded-2xl border border-brand-border bg-brand-surface px-4 text-brand-text transition-colors duration-150 hover:border-brand-text-muted focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
           >
-            {zoneSaving ? "Guardando…" : "Guardar zona"}
-          </button>
-        </div>
+            <option value={1}>1 km</option>
+            <option value={2}>2 km</option>
+            <option value={3}>3 km</option>
+          </select>
+        </label>
+
+        <Button onClick={handleSaveZone} disabled={!barrio} loading={zoneSaving} fullWidth>
+          Guardar zona
+        </Button>
 
         {zoneError && (
           <p className="text-xs text-red-700">{zoneError}</p>
@@ -404,32 +463,23 @@ export default function WalkerDashboardPage() {
         <div className="flex flex-col">
           {days.map((row) => (
             <div key={row.dayOfWeek} className="flex flex-col gap-2 py-3 border-t border-brand-border first:border-t-0 first:pt-0">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => updateDay(row.dayOfWeek, { active: !row.active })}
-                    className={`relative w-11 h-6 rounded-full overflow-hidden transition-colors shrink-0 ${
-                      row.active ? "bg-brand-primary" : "bg-brand-border"
-                    }`}
-                    aria-label={`Activar ${DAY_LABELS[row.dayOfWeek]}`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
-                        row.active ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                  <span className="text-sm font-medium text-brand-text-body">
-                    {DAY_LABELS[row.dayOfWeek]}
-                  </span>
-                </div>
+              <div className="flex items-center gap-3">
                 <button
-                  onClick={() => handleSaveDay(row.dayOfWeek)}
-                  disabled={row.saving}
-                  className="h-8 px-3 rounded-lg bg-brand-primary text-white text-xs font-semibold disabled:opacity-40 transition-opacity hover:opacity-90 shrink-0"
+                  onClick={() => updateDay(row.dayOfWeek, { active: !row.active })}
+                  className={`relative w-11 h-6 rounded-full overflow-hidden transition-colors shrink-0 ${
+                    row.active ? "bg-brand-primary" : "bg-brand-border"
+                  }`}
+                  aria-label={`Activar ${DAY_LABELS[row.dayOfWeek]}`}
                 >
-                  {row.saving ? "Guardando…" : "Guardar"}
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                      row.active ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
                 </button>
+                <span className="text-sm font-medium text-brand-text-body">
+                  {DAY_LABELS[row.dayOfWeek]}
+                </span>
               </div>
 
               {row.active && (
@@ -454,6 +504,10 @@ export default function WalkerDashboardPage() {
             </div>
           ))}
         </div>
+
+        <Button onClick={handleSaveSchedules} disabled={!hasUnsavedDays} loading={schedulesSaving} fullWidth>
+          Guardar horarios
+        </Button>
       </div>
 
       {/* MercadoPago */}
@@ -467,23 +521,30 @@ export default function WalkerDashboardPage() {
               </span>
             )}
           </span>
-          <button
-            onClick={connectMercadoPago}
-            disabled={connectLoading}
-            className="text-xs text-brand-text-muted underline underline-offset-2 transition-opacity hover:opacity-70 disabled:opacity-40"
-          >
-            {connectLoading ? "Redirigiendo…" : "Reconectar"}
-          </button>
+          <Button variant="ghost" size="sm" onClick={connectMercadoPago} loading={connectLoading}>
+            Reconectar
+          </Button>
         </div>
       ) : (
-        <button
-          onClick={connectMercadoPago}
-          disabled={connectLoading}
-          className="w-full sm:w-auto h-12 px-8 rounded-2xl font-semibold text-white transition-opacity disabled:opacity-50"
-          style={{ backgroundColor: "#009ee3" }}
-        >
-          {connectLoading ? "Redirigiendo…" : "Conectar MercadoPago"}
-        </button>
+        <div className="flex items-center justify-between gap-3 px-4 py-4 rounded-2xl bg-brand-surface border border-brand-border">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-brand-text-body">MercadoPago</span>
+            <span className="text-xs text-brand-text-muted">
+              Conectá tu cuenta para poder cobrar los paseos.
+            </span>
+          </div>
+          {/* #009ee3 es color de marca de MercadoPago, no de Güau — se
+              respeta sobre el primitivo Button en vez de duplicar sus
+              estilos a mano. */}
+          <Button
+            size="sm"
+            onClick={connectMercadoPago}
+            loading={connectLoading}
+            style={{ backgroundColor: "#009ee3" }}
+          >
+            Conectar
+          </Button>
+        </div>
       )}
 
       {/* Paseos */}
@@ -517,7 +578,7 @@ export default function WalkerDashboardPage() {
               return (
                 <div
                   key={walk.id}
-                  className="bg-brand-surface rounded-2xl p-4 shadow-card border border-brand-primary/30 flex flex-col gap-3"
+                  className="bg-brand-surface rounded-2xl p-4 border border-brand-primary/30 flex flex-col gap-3"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex flex-col gap-0.5">
@@ -535,20 +596,25 @@ export default function WalkerDashboardPage() {
                     <span>Dueño: <strong className="text-brand-text-body">{ownerName}</strong></span>
                   </div>
                   <div className="flex gap-2 pt-1">
-                    <button
+                    <Button
+                      size="sm"
+                      className="flex-1"
                       onClick={() => handleConfirm(walk.id)}
                       disabled={!!actioning}
-                      className="flex-1 h-9 rounded-xl bg-brand-primary text-white text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-90"
+                      loading={isActioning}
                     >
-                      {isActioning ? "…" : "Confirmar"}
-                    </button>
-                    <button
+                      Confirmar
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1"
                       onClick={() => handleReject(walk.id)}
                       disabled={!!actioning}
-                      className="flex-1 h-9 rounded-xl border border-brand-border text-brand-text-muted text-sm font-semibold disabled:opacity-40 transition-opacity hover:opacity-70"
+                      loading={isActioning}
                     >
-                      {isActioning ? "…" : "Rechazar"}
-                    </button>
+                      Rechazar
+                    </Button>
                   </div>
                 </div>
               );
