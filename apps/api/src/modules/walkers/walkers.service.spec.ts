@@ -120,13 +120,14 @@ describe('WalkersService', () => {
         distanceKm:   BASE_WALKER_ROW.distanceKm,
         user: {
           firstName: 'Juan',
-          lastName:  'Pérez',
           avatarUrl: null,
         },
       });
       // Los campos del usuario no deben estar en el nivel raíz
       expect(result[0]).not.toHaveProperty('firstName');
       expect(result[0]).not.toHaveProperty('lastName');
+      // Solo nombre de pila en respuestas públicas — el apellido no viaja
+      expect(result[0].user).not.toHaveProperty('lastName');
     });
 
     it('con date: devuelve solo los paseadores con horario activo que cubre ese día/hora', async () => {
@@ -248,6 +249,19 @@ describe('WalkersService', () => {
       expect(result).not.toHaveProperty('centerLat');
       expect(result).not.toHaveProperty('centerLng');
       expect(result).not.toHaveProperty('radiusKm');
+    });
+
+    it('camino feliz: no incluye el apellido del paseador (solo nombre de pila en publico)', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_PROFILE,
+        user:      { firstName: 'Juan', lastName: 'Pérez', avatarUrl: null, createdAt: new Date() },
+        schedules: [],
+      });
+
+      const result = await service.getPublicProfile(PROFILE_ID);
+
+      expect(result.user).toHaveProperty('firstName', 'Juan');
+      expect(result.user).not.toHaveProperty('lastName');
     });
   });
 

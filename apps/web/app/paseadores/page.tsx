@@ -15,9 +15,9 @@ interface WalkerResult {
   totalReviews: number;
   maxDogsPerWalk: number;
   distanceKm: number;
+  // Solo nombre de pila — el backend no devuelve apellido en respuestas públicas.
   user: {
     firstName: string;
-    lastName: string;
     avatarUrl: string | null;
   };
 }
@@ -110,12 +110,12 @@ export default function PaseadoresPage() {
                       <div className="flex items-center gap-3">
                         <Avatar
                           src={w.user.avatarUrl}
-                          name={`${w.user.firstName} ${w.user.lastName}`}
+                          name={w.user.firstName}
                           size="md"
                         />
                         <div className="flex flex-col">
                           <span className="font-semibold text-brand-text-body">
-                            {w.user.firstName} {w.user.lastName}
+                            {w.user.firstName}
                           </span>
                           <span className="text-xs text-brand-text-muted">
                             {w.distanceKm.toFixed(1)} km · ★ {w.rating.toFixed(1)} (

@@ -45,7 +45,6 @@ export class WalkersService {
       radiusKm: number;
       verificationStatus: string;
       firstName: string;
-      lastName: string;
       avatarUrl: string | null;
       distanceKm: number;
     };
@@ -64,7 +63,6 @@ export class WalkersService {
         wp."radiusKm",
         wp."verificationStatus",
         u."firstName",
-        u."lastName",
         u."avatarUrl",
         (
           6371 * acos(
@@ -145,9 +143,10 @@ export class WalkersService {
       isAvailable: w.isAvailable,
       maxDogsPerWalk: w.maxDogsPerWalk,
       distanceKm: w.distanceKm,
+      // Solo nombre de pila en respuestas públicas — decisión de producto,
+      // no un descuido: el apellido no se pide ni viaja acá.
       user: {
         firstName: w.firstName,
-        lastName: w.lastName,
         avatarUrl: w.avatarUrl,
       },
     }));
@@ -162,9 +161,7 @@ export class WalkersService {
         user: {
           select: {
             firstName: true,
-            lastName: true,
             avatarUrl: true,
-            createdAt: true,
           },
         },
         schedules: { where: { isActive: true }, orderBy: { dayOfWeek: "asc" } },
@@ -176,16 +173,23 @@ export class WalkersService {
       throw new NotFoundException("Paseador no disponible");
     }
 
-    // Excluir datos sensibles. centerLat/centerLng/radiusKm y userId también
-    // se excluyen acá aunque no sean secretos como el DNI o el token de MP:
-    // la zona de trabajo del paseador no tiene por qué ser pública con esta
-    // precisión, y userId es un identificador interno sin uso en el perfil
-    // público (search() ya expone lo necesario para mostrar distancia).
-    const { dniNumber, dniPhotoUrl, selfieUrl, mpAccessToken, mpUserId,
-            verificationNotes, refreshTokenHash, userId, centerLat, centerLng,
-            radiusKm, ...safe } = profile as typeof profile & { refreshTokenHash?: string };
-
-    return safe;
+    // Lista blanca, no negra: se arma explícitamente lo que la pantalla
+    // pública necesita, en vez de devolver el modelo entero menos una lista
+    // de campos sensibles conocidos. Con lista negra, cualquier columna
+    // nueva del modelo se filtra sola a la respuesta pública hasta que
+    // alguien se da cuenta — ya pasó una vez con centerLat/centerLng.
+    return {
+      id: profile.id,
+      bio: profile.bio,
+      rating: profile.rating,
+      totalReviews: profile.totalReviews,
+      maxDogsPerWalk: profile.maxDogsPerWalk,
+      schedules: profile.schedules,
+      user: {
+        firstName: profile.user.firstName,
+        avatarUrl: profile.user.avatarUrl,
+      },
+    };
   }
 
   // ─── Perfil propio del paseador ──────────────────────────

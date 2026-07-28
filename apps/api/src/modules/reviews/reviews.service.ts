@@ -95,10 +95,13 @@ export class ReviewsService {
     });
     if (!walker) throw new NotFoundException("Paseador no encontrado");
 
+    // Reviews públicas — los reseñadores son dueños, no paseadores
+    // verificados. Mismo criterio que en WalkersService: solo nombre de
+    // pila, el apellido no viaja.
     const reviews = await this.prisma.review.findMany({
       where: { revieweeId: walker.userId },
       include: {
-        reviewer: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        reviewer: { select: { id: true, firstName: true, avatarUrl: true } },
         walk: { select: { scheduledAt: true, walkType: { select: { label: true } } } },
       },
       orderBy: { createdAt: "desc" },
