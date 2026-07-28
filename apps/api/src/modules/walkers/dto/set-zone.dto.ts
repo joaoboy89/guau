@@ -14,14 +14,14 @@ export class SetZoneDto {
   @Max(180)
   centerLng: number;
 
-  @ApiProperty({ example: 3, description: "Radio de operación en kilómetros (2 a 3, caminando)" })
+  @ApiProperty({ example: 3, description: "Radio de operación en kilómetros (1 a 3, caminando)" })
   @IsNumber()
   // 20 km era un valor de prueba, no una decisión de producto: nadie camina
-  // perros a 20 km de su zona. 2-3 km es lo que razonablemente cubre a
+  // perros a 20 km de su zona. 1-3 km es lo que razonablemente cubre a
   // alguien que se mueve a pie. Este rango rige lo que se guarda de acá en
   // adelante — los perfiles ya guardados con un radio fuera de rango no se
   // tocan hasta que el paseador actualice su zona.
-  @Min(2)
+  @Min(1)
   @Max(3)
   radiusKm: number;
 }
