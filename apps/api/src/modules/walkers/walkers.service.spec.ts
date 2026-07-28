@@ -234,6 +234,21 @@ describe('WalkersService', () => {
       expect(result).toHaveProperty('user');
       expect(result).toHaveProperty('schedules');
     });
+
+    it('camino feliz: no incluye la ubicacion del paseador ni su userId interno', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_PROFILE,
+        user:      { firstName: 'Juan', lastName: 'Pérez', avatarUrl: null, createdAt: new Date() },
+        schedules: [],
+      });
+
+      const result = await service.getPublicProfile(PROFILE_ID);
+
+      expect(result).not.toHaveProperty('userId');
+      expect(result).not.toHaveProperty('centerLat');
+      expect(result).not.toHaveProperty('centerLng');
+      expect(result).not.toHaveProperty('radiusKm');
+    });
   });
 
   // ─── getMyProfile() ─────────────────────────────────────────────────────────
