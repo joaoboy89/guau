@@ -17,9 +17,9 @@ interface WalkerProfile {
   totalReviews: number;
   maxDogsPerWalk: number;
   schedules: Array<{ dayOfWeek: number; startTime: string; endTime: string }>;
+  // Solo nombre de pila — el backend no devuelve apellido en respuestas públicas.
   user: {
     firstName: string;
-    lastName: string;
     avatarUrl: string | null;
   };
 }
@@ -30,7 +30,6 @@ interface Review {
   comment: string | null;
   reviewer: {
     firstName: string;
-    lastName: string;
     avatarUrl: string | null;
   };
 }
@@ -88,7 +87,7 @@ export default function WalkerProfilePage() {
     );
   }
 
-  const fullName = `${profile.user.firstName} ${profile.user.lastName}`;
+  const firstName = profile.user.firstName;
   // Sin sesión: hay que crear cuenta antes de reservar. Con sesión, directo
   // al flujo de reserva — el `next` queda para cuando el registro/login
   // sepan retomar a esta página (todavía no lo hacen).
@@ -103,12 +102,12 @@ export default function WalkerProfilePage() {
       <main className="flex-1 py-10">
         <Container width="content" className="flex flex-col gap-8">
           <Card className="flex flex-col gap-4 sm:flex-row sm:items-start">
-            <Avatar src={profile.user.avatarUrl} name={fullName} size="xl" />
+            <Avatar src={profile.user.avatarUrl} name={firstName} size="xl" />
 
             <div className="flex flex-1 flex-col gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="font-serif text-2xl font-bold text-brand-text">
-                  {fullName}
+                  {firstName}
                 </h1>
                 {/* getPublicProfile ya tira 404 si no está VERIFIED — llegar
                     hasta acá implica que lo está. */}
@@ -171,11 +170,11 @@ export default function WalkerProfilePage() {
                       <div className="flex items-center gap-2">
                         <Avatar
                           src={r.reviewer.avatarUrl}
-                          name={`${r.reviewer.firstName} ${r.reviewer.lastName}`}
+                          name={r.reviewer.firstName}
                           size="xs"
                         />
                         <span className="text-sm font-semibold text-brand-text-body">
-                          {r.reviewer.firstName} {r.reviewer.lastName[0]}.
+                          {r.reviewer.firstName}
                         </span>
                         <span className="text-xs text-brand-text-muted">
                           ★ {r.rating}
