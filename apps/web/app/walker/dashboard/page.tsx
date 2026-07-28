@@ -92,7 +92,9 @@ export default function WalkerDashboardPage() {
   const [zoneSaving, setZoneSaving] = useState(false);
   const [zoneError, setZoneError]   = useState<string | null>(null);
   const [barrio, setBarrio]         = useState<Barrio | null>(null);
-  const [radiusInput, setRadiusInput] = useState(20);
+  // 3 es el tope del rango permitido, no un valor arbitrario: ver el rango
+  // de radiusKm más abajo.
+  const [radiusInput, setRadiusInput] = useState(3);
 
   const [days, setDays] = useState<DayRow[]>(buildDefaultDays());
 
@@ -357,12 +359,18 @@ export default function WalkerDashboardPage() {
         />
 
         <div className="flex items-center gap-3">
+          {/*
+            20 km era un valor de prueba, no una decisión de producto: nadie
+            camina perros a 20 km de su zona. 2-3 km es lo que razonablemente
+            cubre a alguien que se mueve a pie (ver SetZoneDto en el backend,
+            que es quien realmente lo hace cumplir).
+          */}
           <label className="flex items-center gap-2 text-sm text-brand-text-body">
-            <span className="shrink-0">Radio (km):</span>
+            <span className="shrink-0">¿Hasta dónde estás dispuesto a ir a buscar un perro? (km)</span>
             <input
               type="number"
-              min={0.5}
-              max={20}
+              min={2}
+              max={3}
               step={0.5}
               value={radiusInput}
               onChange={(e) => setRadiusInput(Number(e.target.value))}
