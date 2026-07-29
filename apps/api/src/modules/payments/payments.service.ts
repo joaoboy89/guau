@@ -17,6 +17,7 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { WalkStatus, PayoutStatus } from "@prisma/client";
 import { NOTIFICATION_TYPES } from "@guau/shared";
 import { CreatePreferenceDto } from "./dto/create-preference.dto";
+import { isWalkPaid } from "../walks/walk-payment.util";
 
 const MP_CONNECT_STATE_PURPOSE = "mp-connect";
 
@@ -59,8 +60,15 @@ export class PaymentsService {
     if (walk.status !== WalkStatus.CONFIRMED) {
       throw new BadRequestException("Solo podés pagar un paseo confirmado");
     }
-    if (walk.mpPaymentId && /^\d+$/.test(walk.mpPaymentId)) {
+    if (isWalkPaid(walk.mpPaymentId)) {
       throw new BadRequestException("Este paseo ya fue pagado");
+    }
+    // Comparación de instantes, sin zona horaria — no toBusinessDayAndTime:
+    // esa TZ de negocio hace falta para mapear un instante a un día/hora de
+    // pared (las franjas de WalkerSchedule), no para comparar dos instantes.
+    // Mismo patrón que WalksService.create().
+    if (walk.scheduledAt.getTime() <= Date.now()) {
+      throw new BadRequestException("Este paseo ya venció y no se puede pagar");
     }
     if (!walk.walker.mpAccessToken) {
       throw new BadRequestException("El paseador todavía no conectó su cuenta de MercadoPago");
