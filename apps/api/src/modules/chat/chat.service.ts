@@ -6,7 +6,7 @@ import {
 import { PrismaService } from "../../database/prisma.service";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { SendMessageDto } from "./dto/send-message.dto";
-import { CONTACT_PATTERNS, SOCKET_EVENTS } from "@guau/shared";
+import { CONTACT_PATTERNS } from "@guau/shared";
 import { UserRole } from "@prisma/client";
 
 @Injectable()

@@ -23,7 +23,14 @@ export class WalkersService {
   // Cuando se agregue PostGIS se puede reemplazar por ST_DWithin para mejor performance.
 
   async search(dto: SearchWalkersDto) {
-    const { lat, lng, date, walkTypeId } = dto;
+    // SearchWalkersDto acepta walkTypeId, pero a propósito no se usa para
+    // filtrar acá: mostrar solo a los paseadores que ya aceptaron ese tipo
+    // de paseo ocultaría al resto. Esa lógica se resuelve recién al crear
+    // la reserva. Antes había un bloque que corría una query completa a
+    // Walk, armaba un Set con el resultado y lo descartaba sin usarlo —
+    // una query desperdiciada en cada búsqueda pública que no cambiaba el
+    // resultado. Se sacó.
+    const { lat, lng, date } = dto;
 
     // Las franjas de WalkerSchedule se interpretan en hora argentina — ver
     // toBusinessDayAndTime para el porqué (no usar getDay()/toTimeString() acá).
@@ -115,24 +122,6 @@ export class WalkersService {
       );
 
       filtered = walkers.filter((w) => availableIds.has(w.id));
-    }
-
-    // Filtro por tipo de paseo (verificar que el paseador tiene walks de ese tipo)
-    if (walkTypeId) {
-      const walkerIds = filtered.map((w) => w.id);
-      const walksWithType = await this.prisma.walk.findMany({
-        where: {
-          walkerId: { in: walkerIds },
-          walkTypeId,
-          status: { in: ["PENDING", "CONFIRMED"] },
-        },
-        select: { walkerId: true },
-        distinct: ["walkerId"],
-      });
-      const validIds = new Set(walksWithType.map((w) => w.walkerId));
-      // No filtramos fuera — solo mostramos el tipo si el paseador acepta ese tipo.
-      // La lógica de tipos se resuelve al crear la reserva.
-      // Dejamos el array sin filtrar por walkTypeId para no ocultar paseadores.
     }
 
     return filtered.map((w) => ({

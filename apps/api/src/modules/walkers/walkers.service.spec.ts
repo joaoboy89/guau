@@ -133,7 +133,7 @@ describe('WalkersService', () => {
     it('con date: devuelve solo los paseadores con horario activo que cubre ese día/hora', async () => {
       const date = '2026-07-06T12:00:00.000Z';
       // Igual que el servicio: día/hora en hora ARGENTINA, no la TZ local del proceso
-      const { dayOfWeek, timeStr } = toBusinessDayAndTime(new Date(date));
+      const { dayOfWeek } = toBusinessDayAndTime(new Date(date));
 
       const walker1 = { ...BASE_WALKER_ROW, id: 'walker-1' };
       const walker2 = { ...BASE_WALKER_ROW, id: 'walker-2' };

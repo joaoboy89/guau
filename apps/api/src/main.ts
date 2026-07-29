@@ -61,4 +61,11 @@ async function bootstrap() {
   console.log(`Swagger docs en http://localhost:${port}/docs`);
 }
 
-bootstrap();
+// Si el arranque falla, el proceso tiene que morir con código != 0 — así
+// Docker lo reinicia. Sin este .catch(), un bootstrap() rechazado es una
+// unhandled rejection: en algunas versiones de Node el proceso sigue
+// vivo mal, ni arrancado ni caído, en vez de reiniciarse.
+bootstrap().catch((err) => {
+  console.error("Error fatal al arrancar la API:", err);
+  process.exit(1);
+});
