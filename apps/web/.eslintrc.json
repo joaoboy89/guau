@@ -1,3 +1,13 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "plugins": ["tailwindcss"],
+  "settings": {
+    "tailwindcss": {
+      "whitelist": ["pb-safe", "no-scrollbar", "text-balance"],
+      "callees": ["classnames", "clsx", "ctl", "cva", "tv", "cn"]
+    }
+  },
+  "rules": {
+    "tailwindcss/no-custom-classname": "error"
+  }
 }
