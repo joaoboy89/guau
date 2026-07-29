@@ -17,6 +17,7 @@ import { TrackingGateway } from "../tracking/tracking.gateway";
 import { ChatService } from "../chat/chat.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { toBusinessDayAndTime } from "../../common/utils/schedule-timezone";
+import { isWalkPaid } from "./walk-payment.util";
 
 // Incluye las relaciones que siempre se devuelven con un Walk
 const WALK_INCLUDE = {
@@ -221,11 +222,16 @@ export class WalksService {
       const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
       if (!walker) throw new NotFoundException("Perfil de paseador no encontrado");
 
-      return this.prisma.walk.findMany({
+      const walks = await this.prisma.walk.findMany({
         where: { walkerId: walker.id, ...statusFilter },
         include: WALK_INCLUDE,
         orderBy: { scheduledAt: "desc" },
       });
+      return walks.map((w) => ({
+        ...w,
+        isPaid: isWalkPaid(w.mpPaymentId),
+        isExpired: w.scheduledAt.getTime() <= Date.now(),
+      }));
     }
 
     // OWNER — busca por WalkParticipant
@@ -239,11 +245,16 @@ export class WalksService {
     });
     const walkIds = participants.map((p) => p.walkId);
 
-    return this.prisma.walk.findMany({
+    const walks = await this.prisma.walk.findMany({
       where: { id: { in: walkIds }, ...statusFilter },
       include: WALK_INCLUDE,
       orderBy: { scheduledAt: "desc" },
     });
+    return walks.map((w) => ({
+      ...w,
+      isPaid: isWalkPaid(w.mpPaymentId),
+      isExpired: w.scheduledAt.getTime() <= Date.now(),
+    }));
   }
 
   // ─── Detalle de un paseo ─────────────────────────────────
@@ -256,7 +267,23 @@ export class WalksService {
     if (!walk) throw new NotFoundException("Paseo no encontrado");
 
     await this.assertWalkAccess(userId, role, walk);
-    return { ...walk, isPaid: /^\d+$/.test(walk.mpPaymentId ?? "") };
+
+    // Lista blanca, no spread: `{ ...walk, isPaid }` mandaba mpPaymentId y
+    // mpRefundId al front, y manda sola cualquier columna nueva del modelo
+    // Walk el día que se agregue. Estos son los campos que el front
+    // realmente usa (app/(owner)/walks/[id]/page.tsx).
+    return {
+      id: walk.id,
+      status: walk.status,
+      scheduledAt: walk.scheduledAt,
+      pickupAddress: walk.pickupAddress,
+      totalAmount: walk.totalAmount,
+      walkType: walk.walkType,
+      walker: walk.walker,
+      participants: walk.participants,
+      isPaid: isWalkPaid(walk.mpPaymentId),
+      isExpired: walk.scheduledAt.getTime() <= Date.now(),
+    };
   }
 
   // ─── Confirmar (paseador) ────────────────────────────────
@@ -319,6 +346,19 @@ export class WalksService {
     if (!cancellableStatuses.includes(walk.status)) {
       throw new BadRequestException(
         `No se puede cancelar un paseo en estado "${walk.status}"`
+      );
+    }
+
+    // Falla cerrado: mientras no exista la política de reembolso, la API no
+    // puede cancelar nada que tenga plata adentro — la plata quedaría en la
+    // cuenta del paseador (split directo, Güau nunca la custodia) sin que
+    // nadie decida nada. El mensaje no menciona ningún canal de contacto a
+    // propósito (no existe ninguno en la app hoy) ni afirma nada sobre la
+    // plata (la política todavía no está definida). Cuando la política
+    // exista, este throw es el punto exacto donde se enchufa el refund.
+    if (isWalkPaid(walk.mpPaymentId)) {
+      throw new BadRequestException(
+        "No se puede cancelar un paseo ya pagado desde la app"
       );
     }
 

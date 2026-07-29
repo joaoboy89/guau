@@ -53,11 +53,12 @@ const BASE_SCHEDULE = {
 };
 
 const BASE_WALK = {
-  id:          WALK_ID,
-  walkerId:    WALKER_PROFILE_ID,
-  status:      WalkStatus.PENDING,
-  scheduledAt: new Date('2026-07-06T12:00:00.000Z'),
-  totalAmount: 1000,
+  id:            WALK_ID,
+  walkerId:      WALKER_PROFILE_ID,
+  status:        WalkStatus.PENDING,
+  scheduledAt:   new Date('2026-07-06T12:00:00.000Z'),
+  totalAmount:   1000,
+  pickupAddress: 'Av. Santa Fe 1234, Palermo',
 };
 
 // Versión extendida con relaciones (equivalente al WALK_INCLUDE del servicio)
@@ -70,6 +71,24 @@ const WALK_FULL = {
   },
   participants: [],
 };
+
+// Forma que devuelve findById() — lista blanca, no ...walk. Reconstruida acá
+// campo por campo (no como spread de WALK_FULL) para que un campo agregado
+// a WALK_FULL sin querer no se cuele en la aserción y tape una regresión.
+function expectedFindByIdResult(walk: typeof WALK_FULL, isPaid: boolean) {
+  return {
+    id:            walk.id,
+    status:        walk.status,
+    scheduledAt:   walk.scheduledAt,
+    pickupAddress: walk.pickupAddress,
+    totalAmount:   walk.totalAmount,
+    walkType:      walk.walkType,
+    walker:        walk.walker,
+    participants:  walk.participants,
+    isPaid,
+    isExpired:     walk.scheduledAt.getTime() <= Date.now(),
+  };
+}
 
 // Siempre en el futuro relativo a "ahora" — evita que la suite se rompa con el
 // paso del tiempo una vez que create() valida que scheduledAt sea futuro.
@@ -469,7 +488,7 @@ describe('WalksService', () => {
         .rejects.toThrow(NotFoundException);
     });
 
-    it('WALKER: camino feliz — devuelve walks filtrados por walkerId del perfil', async () => {
+    it('WALKER: camino feliz — devuelve walks filtrados por walkerId del perfil, con isPaid e isExpired', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
       prisma.walk.findMany.mockResolvedValue([WALK_FULL]);
 
@@ -478,7 +497,9 @@ describe('WalksService', () => {
       expect(prisma.walk.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { walkerId: WALKER_PROFILE_ID } }),
       );
-      expect(result).toEqual([WALK_FULL]);
+      // WALK_FULL no tiene mpPaymentId (undefined) → isPaid false;
+      // scheduledAt 2026-07-06 ya pasó → isExpired true.
+      expect(result).toEqual([{ ...WALK_FULL, isPaid: false, isExpired: true }]);
     });
 
     it('OWNER: lanza NotFoundException si no existe ownerProfile', async () => {
@@ -487,7 +508,7 @@ describe('WalksService', () => {
         .rejects.toThrow(NotFoundException);
     });
 
-    it('OWNER: camino feliz — devuelve walks a partir de walkIds de WalkParticipant', async () => {
+    it('OWNER: camino feliz — devuelve walks a partir de walkIds de WalkParticipant, con isPaid e isExpired', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
       prisma.walkParticipant.findMany.mockResolvedValue([{ walkId: WALK_ID }]);
       prisma.walk.findMany.mockResolvedValue([WALK_FULL]);
@@ -497,7 +518,27 @@ describe('WalksService', () => {
       expect(prisma.walk.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: { in: [WALK_ID] } } }),
       );
-      expect(result).toEqual([WALK_FULL]);
+      expect(result).toEqual([{ ...WALK_FULL, isPaid: false, isExpired: true }]);
+    });
+
+    it('WALKER: isPaid es true cuando mpPaymentId es numérico', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([{ ...WALK_FULL, mpPaymentId: '99999' }]);
+
+      const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
+
+      expect(result[0].isPaid).toBe(true);
+    });
+
+    it('OWNER: isExpired es false cuando scheduledAt es futuro', async () => {
+      const futureWalk = { ...WALK_FULL, scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000) };
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walkParticipant.findMany.mockResolvedValue([{ walkId: WALK_ID }]);
+      prisma.walk.findMany.mockResolvedValue([futureWalk]);
+
+      const result = await service.findMyWalks(OWNER_USER_ID, UserRole.OWNER, {});
+
+      expect(result[0].isExpired).toBe(false);
     });
 
     it('con query.status aplica filtro adicional en el where', async () => {
@@ -549,7 +590,7 @@ describe('WalksService', () => {
 
       const result = await service.findById('admin-user-1', UserRole.ADMIN, WALK_ID);
 
-      expect(result).toEqual({ ...WALK_FULL, isPaid: false });
+      expect(result).toEqual(expectedFindByIdResult(WALK_FULL, false));
       expect(prisma.walkerProfile.findUnique).not.toHaveBeenCalled();
       expect(prisma.ownerProfile.findUnique).not.toHaveBeenCalled();
     });
@@ -559,7 +600,7 @@ describe('WalksService', () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
 
       const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
-      expect(result).toEqual({ ...WALK_FULL, isPaid: false });
+      expect(result).toEqual(expectedFindByIdResult(WALK_FULL, false));
       expect(result.walker).not.toHaveProperty('mpAccessToken');
       expect(result.walker).not.toHaveProperty('mpUserId');
     });
@@ -572,7 +613,7 @@ describe('WalksService', () => {
       });
 
       const result = await service.findById(OWNER_USER_ID, UserRole.OWNER, WALK_ID);
-      expect(result).toEqual({ ...WALK_FULL, isPaid: false });
+      expect(result).toEqual(expectedFindByIdResult(WALK_FULL, false));
     });
 
     it('isPaid es true cuando mpPaymentId es numérico (pago real confirmado)', async () => {
@@ -589,6 +630,36 @@ describe('WalksService', () => {
 
       const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
       expect(result.isPaid).toBe(false);
+    });
+
+    it('isExpired es true cuando scheduledAt ya pasó', async () => {
+      prisma.walk.findUnique.mockResolvedValue(WALK_FULL); // scheduledAt: 2026-07-06, ya pasado
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+      expect(result.isExpired).toBe(true);
+    });
+
+    it('isExpired es false cuando scheduledAt es futuro', async () => {
+      const futureWalk = { ...WALK_FULL, scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000) };
+      prisma.walk.findUnique.mockResolvedValue(futureWalk);
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+      expect(result.isExpired).toBe(false);
+    });
+
+    it('lista blanca: no expone mpPaymentId ni mpRefundId en la respuesta', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...WALK_FULL,
+        mpPaymentId: '99999',
+        mpRefundId: 'refund-1',
+      });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+      expect(result).not.toHaveProperty('mpPaymentId');
+      expect(result).not.toHaveProperty('mpRefundId');
     });
   });
 
@@ -811,6 +882,57 @@ describe('WalksService', () => {
       prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, status: WalkStatus.IN_PROGRESS });
       await expect(service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}))
         .rejects.toThrow(BadRequestException);
+    });
+
+    // ─── Guard de plata: falla cerrado ante un paseo pagado ──────────────────
+
+    it('WALKER: lanza BadRequestException si el paseo ya está pagado (mpPaymentId numérico)', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.CONFIRMED, mpPaymentId: '99999',
+      });
+      await expect(service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}))
+        .rejects.toThrow(BadRequestException);
+      // Falla antes de resolver el rol — ni siquiera busca el perfil del paseador
+      expect(prisma.walkerProfile.findUnique).not.toHaveBeenCalled();
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('OWNER: lanza BadRequestException si el paseo ya está pagado (mpPaymentId numérico)', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.CONFIRMED, mpPaymentId: '99999',
+      });
+      await expect(service.cancel(OWNER_USER_ID, UserRole.OWNER, WALK_ID, {}))
+        .rejects.toThrow(BadRequestException);
+      expect(prisma.ownerProfile.findUnique).not.toHaveBeenCalled();
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('SÍ cancela cuando mpPaymentId es un preference id no numérico (checkout abandonado, no es un pago real) — evita el falso positivo', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.CONFIRMED, mpPaymentId: '3541787996-9905f4f5-abc',
+      });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.CANCELLED_WALKER });
+
+      await expect(
+        service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}),
+      ).resolves.toBeDefined();
+      expect(prisma.walk.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: WalkStatus.CANCELLED_WALKER }) }),
+      );
+    });
+
+    it('sigue cancelando con mpPaymentId === null (nunca se abrió el checkout)', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.CONFIRMED, mpPaymentId: null,
+      });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.CANCELLED_WALKER });
+
+      await expect(
+        service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}),
+      ).resolves.toBeDefined();
+      expect(prisma.walk.update).toHaveBeenCalled();
     });
 
     it('WALKER: ForbiddenException si el walk no le pertenece', async () => {
