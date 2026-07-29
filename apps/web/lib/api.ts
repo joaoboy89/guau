@@ -114,7 +114,8 @@ export const walksAPI = {
   reject:    (id: string)    => api.put(`/walks/${id}/reject`),
   start:     (id: string)    => api.put(`/walks/${id}/start`),
   finish:    (id: string)    => api.put(`/walks/${id}/finish`),
-  cancel:    (id: string)    => api.put(`/walks/${id}/cancel`),
+  cancel:    (id: string, data?: { cancellationReason?: string }) =>
+                          api.put(`/walks/${id}/cancel`, data ?? {}),
 };
 
 export const reviewsAPI = {

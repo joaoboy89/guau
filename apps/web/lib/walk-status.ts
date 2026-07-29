@@ -27,3 +27,18 @@ export const STATUS_VARIANT: Record<string, BadgeVariant> = {
   CANCELLED_OWNER:  "error",
   CANCELLED_WALKER: "error",
 };
+
+/**
+ * Extraída como función pura (en vez de dejarla inline en el JSX de
+ * walks/[id] y walker/dashboard) específicamente para poder testearla
+ * barato: el proyecto no tiene infraestructura de render de componentes
+ * (ningún test monta React todavía, solo lógica de lib/*), así que esta es
+ * la forma de cubrir la condición sin agregar esa infraestructura para un
+ * solo caso.
+ *
+ * El guard real vive en el backend (WalksService.cancel rechaza un paseo
+ * pagado); esto solo decide si mostrar el botón.
+ */
+export function canCancelWalk(status: string, isPaid: boolean): boolean {
+  return (status === "PENDING" || status === "CONFIRMED") && !isPaid;
+}
