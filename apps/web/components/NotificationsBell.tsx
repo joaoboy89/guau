@@ -90,7 +90,17 @@ export function NotificationsBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-w-[90vw] max-h-96 overflow-y-auto rounded-2xl border border-brand-border bg-brand-surface shadow-float z-50">
+        // El panel es hijo de un wrapper "relative" anclado a la derecha,
+        // adentro del header (px-6, gap-2, botón "Salir"): en 375px el borde
+        // derecho del ancla queda a ~98px del borde de pantalla, y un
+        // dropdown de w-80 (320px) right-anchored se sale por la izquierda
+        // sin importar su ancho — max-w-[90vw] nunca se activaba (90vw de
+        // 375px = 337px, más ancho que los 320px que debía limitar).
+        // El fix no es un ancho: en mobile deja de ser un dropdown y pasa a
+        // ser una hoja inferior anclada a las dos aristas del viewport
+        // (inset-x-0) — imposible que se corte, no hay número mágico que
+        // pueda desalinearse. Dropdown normal recién desde sm.
+        <div className="fixed inset-x-0 bottom-0 top-auto max-h-[70dvh] overflow-y-auto rounded-t-2xl border-t border-brand-border bg-brand-surface shadow-float z-50 sm:absolute sm:inset-x-auto sm:right-0 sm:bottom-auto sm:top-full sm:mt-2 sm:w-80 sm:max-h-96 sm:rounded-2xl sm:border">
           <div className="px-4 py-3 border-b border-brand-border">
             <p className="text-sm font-semibold text-brand-text-body">Notificaciones</p>
           </div>
