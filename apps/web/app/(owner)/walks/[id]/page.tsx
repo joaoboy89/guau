@@ -7,6 +7,7 @@ import { useRequireAuth } from "@/lib/auth";
 import { walksAPI, paymentsAPI } from "@/lib/api";
 import { AxiosError } from "axios";
 import { STATUS_LABEL } from "@/lib/walk-status";
+import { Container, Button } from "@/components/ui";
 
 interface WalkDetail {
   id: string;
@@ -75,11 +76,13 @@ export default function WalkDetailPage() {
 
   if (!walk) {
     return (
-      <main className="flex-1 p-6 flex flex-col items-center justify-center gap-4">
-        <p className="text-sm text-brand-text-muted">Paseo no encontrado.</p>
-        <Link href="/walks" className="text-sm text-brand-primary font-semibold hover:opacity-80 transition-opacity">
-          ← Mis paseos
-        </Link>
+      <main className="flex-1 py-6 flex flex-col items-center justify-center">
+        <Container width="content" className="flex flex-col items-center gap-4">
+          <p className="text-sm text-brand-text-muted">Paseo no encontrado.</p>
+          <Link href="/walks" className="text-sm text-brand-primary font-semibold hover:opacity-80 transition-opacity">
+            ← Mis paseos
+          </Link>
+        </Container>
       </main>
     );
   }
@@ -92,129 +95,127 @@ export default function WalkDetailPage() {
   });
 
   return (
-    <main className="flex-1 p-6 flex flex-col gap-5 max-w-lg mx-auto w-full">
-      <header className="flex flex-col gap-1">
-        <Link
-          href="/walks"
-          className="text-sm text-brand-primary font-semibold hover:opacity-80 transition-opacity w-fit"
-        >
-          ← Mis paseos
-        </Link>
-        <h1 className="text-xl font-serif font-bold text-brand-text">Detalle del paseo</h1>
-      </header>
-
-      {/* Banner de resultado de pago */}
-      {paymentResult === "success" && (
-        <div className="flex flex-col gap-2">
-          <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
-            Pago aprobado. ¡Gracias!
-          </div>
+    <main className="flex-1 py-6">
+      <Container width="content" className="flex flex-col gap-5">
+        <header className="flex flex-col gap-1">
           <Link
             href="/walks"
-            className="text-sm text-center text-brand-primary font-semibold py-2 hover:opacity-80 transition-opacity"
+            className="text-sm text-brand-primary font-semibold hover:opacity-80 transition-opacity w-fit"
           >
-            ← Volver a Mis paseos
+            ← Mis paseos
           </Link>
-        </div>
-      )}
-      {paymentResult === "failure" && (
-        <div className="flex flex-col gap-2">
-          <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm font-semibold text-red-700">
-            El pago fue rechazado. Podés intentarlo de nuevo.
-          </div>
-          <Link
-            href="/walks"
-            className="text-sm text-center text-brand-text-muted py-2 hover:opacity-80 transition-opacity"
-          >
-            ← Volver a Mis paseos
-          </Link>
-        </div>
-      )}
-      {paymentResult === "pending" && (
-        <div className="flex flex-col gap-2">
-          <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm font-semibold text-amber-700">
-            Pago pendiente de acreditación.
-          </div>
-          <Link
-            href="/walks"
-            className="text-sm text-center text-brand-text-muted py-2 hover:opacity-80 transition-opacity"
-          >
-            ← Volver a Mis paseos
-          </Link>
-        </div>
-      )}
+          <h1 className="text-xl font-serif font-bold text-brand-text">Detalle del paseo</h1>
+        </header>
 
-      {/* Datos del paseo */}
-      <section className="bg-brand-surface rounded-2xl p-5 shadow-card border border-brand-border flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-base font-semibold text-brand-text-body">
-              {walk.walkType.label}
-            </span>
-            <span className="text-xs text-brand-text-muted">{dateStr}</span>
-          </div>
-          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-brand-primary-soft text-brand-primary shrink-0">
-            {STATUS_LABEL[walk.status] ?? walk.status}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs text-brand-text-muted">Paseador</span>
-            <span className="font-medium text-brand-text-body">{walkerName}</span>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs text-brand-text-muted">Monto total</span>
-            <span className="font-medium text-brand-text-body">
-              ${walk.totalAmount.toLocaleString("es-AR")}
-            </span>
-          </div>
-          <div className="flex flex-col gap-0.5 col-span-2">
-            <span className="text-xs text-brand-text-muted">Dirección</span>
-            <span className="font-medium text-brand-text-body">{walk.pickupAddress}</span>
-          </div>
-          <div className="flex flex-col gap-0.5 col-span-2">
-            <span className="text-xs text-brand-text-muted">
-              {dogs.length === 1 ? "Perro" : "Perros"}
-            </span>
-            <span className="font-medium text-brand-text-body">
-              {dogs.map((d) => d.name).join(", ")}
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* Acción según estado */}
-      {walk.status === "PENDING" && (
-        <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-700">
-          Esperando que el paseador confirme tu reserva.
-        </div>
-      )}
-
-      {walk.status === "CONFIRMED" && (
-        <div className="flex flex-col gap-3">
-          {walk.isPaid ? (
+        {/* Banner de resultado de pago */}
+        {paymentResult === "success" && (
+          <div className="flex flex-col gap-2">
             <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
-              Pago completado
+              Pago aprobado. ¡Gracias!
             </div>
-          ) : (
-            <>
-              {payError && (
-                <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
-                  {payError}
-                </div>
-              )}
-              <button
-                onClick={handlePay}
-                disabled={paying}
-                className="h-13 rounded-2xl bg-brand-primary text-white font-semibold text-base disabled:opacity-40 transition-opacity hover:opacity-90 shadow-float"
-              >
-                {paying ? "Redirigiendo a MercadoPago…" : `Pagar $${walk.totalAmount.toLocaleString("es-AR")}`}
-              </button>
-            </>
-          )}
-        </div>
-      )}
+            <Link
+              href="/walks"
+              className="text-sm text-center text-brand-primary font-semibold py-2 hover:opacity-80 transition-opacity"
+            >
+              ← Volver a Mis paseos
+            </Link>
+          </div>
+        )}
+        {paymentResult === "failure" && (
+          <div className="flex flex-col gap-2">
+            <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm font-semibold text-red-700">
+              El pago fue rechazado. Podés intentarlo de nuevo.
+            </div>
+            <Link
+              href="/walks"
+              className="text-sm text-center text-brand-text-muted py-2 hover:opacity-80 transition-opacity"
+            >
+              ← Volver a Mis paseos
+            </Link>
+          </div>
+        )}
+        {paymentResult === "pending" && (
+          <div className="flex flex-col gap-2">
+            <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm font-semibold text-amber-700">
+              Pago pendiente de acreditación.
+            </div>
+            <Link
+              href="/walks"
+              className="text-sm text-center text-brand-text-muted py-2 hover:opacity-80 transition-opacity"
+            >
+              ← Volver a Mis paseos
+            </Link>
+          </div>
+        )}
+
+        {/* Datos del paseo */}
+        <section className="bg-brand-surface rounded-2xl p-5 shadow-card border border-brand-border flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-base font-semibold text-brand-text-body">
+                {walk.walkType.label}
+              </span>
+              <span className="text-xs text-brand-text-muted">{dateStr}</span>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-brand-primary-soft text-brand-primary shrink-0">
+              {STATUS_LABEL[walk.status] ?? walk.status}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs text-brand-text-muted">Paseador</span>
+              <span className="font-medium text-brand-text-body">{walkerName}</span>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs text-brand-text-muted">Monto total</span>
+              <span className="font-medium text-brand-text-body">
+                ${walk.totalAmount.toLocaleString("es-AR")}
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5 col-span-2">
+              <span className="text-xs text-brand-text-muted">Dirección</span>
+              <span className="font-medium text-brand-text-body">{walk.pickupAddress}</span>
+            </div>
+            <div className="flex flex-col gap-0.5 col-span-2">
+              <span className="text-xs text-brand-text-muted">
+                {dogs.length === 1 ? "Perro" : "Perros"}
+              </span>
+              <span className="font-medium text-brand-text-body">
+                {dogs.map((d) => d.name).join(", ")}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {/* Acción según estado */}
+        {walk.status === "PENDING" && (
+          <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-700">
+            Esperando que el paseador confirme tu reserva.
+          </div>
+        )}
+
+        {walk.status === "CONFIRMED" && (
+          <div className="flex flex-col gap-3">
+            {walk.isPaid ? (
+              <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
+                Pago completado
+              </div>
+            ) : (
+              <>
+                {payError && (
+                  <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
+                    {payError}
+                  </div>
+                )}
+                <Button size="lg" fullWidth onClick={handlePay} loading={paying}>
+                  {paying ? "Redirigiendo a MercadoPago…" : `Pagar $${walk.totalAmount.toLocaleString("es-AR")}`}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </Container>
     </main>
   );
 }
