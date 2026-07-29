@@ -213,17 +213,10 @@ export default function NewWalkPage() {
                 {dogs.map((dog) => (
                   <Card
                     key={dog.id}
+                    as="button"
                     interactive
                     padding="none"
-                    role="button"
-                    tabIndex={0}
                     onClick={() => setSelectedDogId(dog.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setSelectedDogId(dog.id);
-                      }
-                    }}
                     className={cn(
                       "flex items-center justify-between px-4 py-3",
                       selectedDogId === dog.id && "border-brand-primary bg-brand-primary-soft"
@@ -265,6 +258,7 @@ export default function NewWalkPage() {
                   <button
                     key={s}
                     onClick={() => setDogSize(s)}
+                    aria-pressed={dogSize === s}
                     className={`flex-1 h-9 rounded-xl border text-xs font-medium transition-colors ${
                       dogSize === s
                         ? "border-brand-primary bg-brand-primary-soft text-brand-primary"
@@ -293,17 +287,10 @@ export default function NewWalkPage() {
               {walkTypes.map((t) => (
                 <Card
                   key={t.id}
+                  as="button"
                   interactive
                   padding="none"
-                  role="button"
-                  tabIndex={0}
                   onClick={() => setSelectedTypeId(t.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setSelectedTypeId(t.id);
-                    }
-                  }}
                   className={cn(
                     "flex flex-col gap-0.5 p-4 text-left",
                     selectedTypeId === t.id && "border-brand-primary bg-brand-primary-soft"
@@ -342,17 +329,10 @@ export default function NewWalkPage() {
               {walkers.map((w) => (
                 <Card
                   key={w.id}
+                  as="button"
                   interactive
                   padding="none"
-                  role="button"
-                  tabIndex={0}
                   onClick={() => setSelectedWalkerId(w.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setSelectedWalkerId(w.id);
-                    }
-                  }}
                   className={cn(
                     "flex flex-col gap-1 px-4 py-3 text-left",
                     selectedWalkerId === w.id && "border-brand-primary bg-brand-primary-soft"

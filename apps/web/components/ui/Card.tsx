@@ -1,13 +1,19 @@
-import { HTMLAttributes, ReactNode } from "react";
+import { ElementType, HTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 type Padding = "none" | "sm" | "md" | "lg";
 
-interface CardProps extends HTMLAttributes<HTMLDivElement> {
+interface CardProps extends HTMLAttributes<HTMLElement> {
   children: ReactNode;
   padding?: Padding;
   /** Realce al pasar el mouse. Usar solo si la card entera es clickeable. */
   interactive?: boolean;
+  /**
+   * Elemento nativo a renderizar. `as="button"` para una tarjeta
+   * seleccionable: hereda teclado, foco y semántica del botón nativo en vez
+   * de tener que parchearlos a mano (role="button" + tabIndex + onKeyDown).
+   */
+  as?: ElementType;
 }
 
 const paddings: Record<Padding, string> = {
@@ -21,11 +27,12 @@ export default function Card({
   children,
   padding = "md",
   interactive = false,
+  as: Tag = "div",
   className,
   ...props
 }: CardProps) {
   return (
-    <div
+    <Tag
       className={cn(
         "bg-brand-surface border border-brand-border rounded-2xl shadow-card",
         paddings[padding],
@@ -36,6 +43,6 @@ export default function Card({
       {...props}
     >
       {children}
-    </div>
+    </Tag>
   );
 }
