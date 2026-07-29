@@ -13,6 +13,16 @@ const nextConfig = {
     outputFileTracingRoot: path.join(__dirname, "../../"),
   },
   transpilePackages: ["@guau/shared"],
+  eslint: {
+    // El lint es un gate explícito del workflow de CI (`npm run lint`,
+    // paso propio antes del build), no un efecto colateral escondido
+    // adentro de `next build`. Antes de arreglar la config de ESLint esto
+    // no importaba porque el lint interno de next build ni cargaba y no
+    // frenaba nada; ahora que carga, dejarlo activo acá duplicaría el gate
+    // de forma implícita — un gate que no sabés que tenés es peor que no
+    // tenerlo.
+    ignoreDuringBuilds: true,
+  },
   images: {
     remotePatterns: [
       {

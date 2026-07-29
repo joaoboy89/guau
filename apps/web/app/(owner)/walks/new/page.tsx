@@ -40,13 +40,9 @@ interface WalkerScheduleSlot {
   endTime: string;
 }
 
-type Step = "dog" | "type" | "walker" | "details";
-
 export default function NewWalkPage() {
   const { ready } = useRequireAuth();
   const router = useRouter();
-
-  const [step, setStep] = useState<Step>("dog");
 
   // ── Perros ──
   const [dogs, setDogs] = useState<Dog[]>([]);
