@@ -26,7 +26,12 @@ const WALK_STATUS_MESSAGES: Partial<Record<
   [WalkStatus.CANCELLED_WALKER]: {
     forOwner: {
       title: "Paseo cancelado",
-      body: "El paseador canceló el paseo. Te devolvemos el dinero automáticamente.",
+      // No prometer un reembolso automático que no existe: el refund es
+      // POST /admin/walks/:id/refund, manual y solo ADMIN. Este mensaje ya
+      // se manda hoy (reject() también transiciona acá), así que dueños de
+      // paseos que nunca pagaron estaban recibiendo la promesa de una
+      // devolución que no iba a llegar sola.
+      body: "El paseador canceló el paseo. Podés reservar con otro paseador cuando quieras.",
     },
   },
   [WalkStatus.CANCELLED_OWNER]: {
