@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { VerificationStatus, WalkStatus, PayoutStatus, UserRole } from '@prisma/client';
+import { VerificationStatus, WalkStatus, PayoutStatus } from '@prisma/client';
 import { NOTIFICATION_TYPES } from '@guau/shared';
 import { AdminService } from './admin.service';
 import { PrismaService } from '../../database/prisma.service';
