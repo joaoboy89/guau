@@ -36,6 +36,9 @@ import MercadoPago, { Preference, Payment } from 'mercadopago';
 
 const OWNER = { id: 'owner-1' };
 const PARTICIPANT = { id: 'part-1', amountPaid: 1500 };
+// Siempre en el futuro relativo a "ahora" — createPreference() valida que el
+// paseo no haya vencido, igual criterio que walks.service.spec.ts.
+const FUTURE_SCHEDULED_AT = new Date(Date.now() + 24 * 60 * 60 * 1000);
 const WALK_BASE = {
   id: 'walk-1',
   walkTypeId: 'wt-1',
@@ -45,6 +48,7 @@ const WALK_BASE = {
   walkerAmount: 1350,
   mode: 'EXCLUSIVO',
   pickupAddress: 'Palermo',
+  scheduledAt: FUTURE_SCHEDULED_AT,
   walkType: { label: 'Paseo 30min' },
   walker: { mpAccessToken: 'walker-token-123' },
 };
@@ -205,6 +209,24 @@ describe('PaymentsService', () => {
       prisma.walk.findUnique.mockResolvedValue({ ...WALK_BASE, mpPaymentId: '99999' });
       await expect(service.createPreference('user-1', DTO))
         .rejects.toThrow(BadRequestException);
+    });
+
+    it('lanza BadRequestException si el paseo ya venció (scheduledAt en el pasado)', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
+      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walk.findUnique.mockResolvedValue({
+        ...WALK_BASE,
+        scheduledAt: new Date(Date.now() - 60_000),
+      });
+      await expect(service.createPreference('user-1', DTO))
+        .rejects.toThrow(BadRequestException);
+      expect(mockPreferenceCreate).not.toHaveBeenCalled();
+    });
+
+    it('sigue funcionando con scheduledAt en el futuro (camino feliz no se rompe)', async () => {
+      setupHappyPath();
+      const result = await service.createPreference('user-1', DTO);
+      expect(result.preferenceId).toBe(MP_PREFERENCE.id);
     });
 
     it('permite re-crear la preferencia si mpPaymentId es no numérico (pago no completado)', async () => {
