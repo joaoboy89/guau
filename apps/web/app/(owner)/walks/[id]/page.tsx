@@ -6,8 +6,9 @@ import Link from "next/link";
 import { useRequireAuth } from "@/lib/auth";
 import { walksAPI, paymentsAPI } from "@/lib/api";
 import { AxiosError } from "axios";
-import { STATUS_LABEL } from "@/lib/walk-status";
+import { STATUS_LABEL, canCancelWalk } from "@/lib/walk-status";
 import { Container, Button } from "@/components/ui";
+import CancelWalkDialog from "@/components/CancelWalkDialog";
 
 interface WalkDetail {
   id: string;
@@ -16,6 +17,7 @@ interface WalkDetail {
   pickupAddress: string;
   totalAmount: number;
   isPaid: boolean;
+  isExpired: boolean;
   walkType: { label: string; durationMinutes: number };
   walker: {
     user: { firstName: string; lastName: string };
@@ -36,6 +38,11 @@ export default function WalkDetailPage() {
   const [payError, setPayError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [paymentResult, setPaymentResult] = useState<string | null>(null);
+
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   // Capturar el resultado de pago en estado y limpiar la URL para que:
   // (a) el banner no re-aparezca al refrescar
@@ -69,6 +76,36 @@ export default function WalkDetailPage() {
       const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
       setPayError(msg ?? "No se pudo iniciar el pago");
       setPaying(false);
+    }
+  };
+
+  const dismissCancelDialog = () => {
+    if (cancelling) return;
+    setShowCancelDialog(false);
+    setCancelReason("");
+    setCancelError(null);
+  };
+
+  const handleCancelConfirm = async () => {
+    if (!walk) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await walksAPI.cancel(
+        walk.id,
+        cancelReason.trim() ? { cancellationReason: cancelReason.trim() } : undefined
+      );
+      // Se refresca desde el servidor, no se muta el estado local a mano —
+      // que lo que se ve sea lo que el backend realmente guardó.
+      const res = await walksAPI.getById(walk.id);
+      setWalk(res.data);
+      setShowCancelDialog(false);
+      setCancelReason("");
+    } catch (err) {
+      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
+      setCancelError(msg ?? "No se pudo cancelar la reserva");
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -201,6 +238,13 @@ export default function WalkDetailPage() {
               <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
                 Pago completado
               </div>
+            ) : walk.isExpired ? (
+              // El guard real vive en el backend (createPreference rechaza
+              // un scheduledAt pasado) — esto es solo cortesía, para no
+              // ofrecer un botón que va a fallar.
+              <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-700">
+                Este paseo ya venció.
+              </div>
             ) : (
               <>
                 {payError && (
@@ -215,7 +259,36 @@ export default function WalkDetailPage() {
             )}
           </div>
         )}
+
+        {/* Cancelar — un solo botón, dos comportamientos: si no está pagado,
+            cancela; si está pagado, la cancelación con devolución todavía no
+            existe en la app y no hay ningún canal de contacto al que mandar
+            (verificado: no hay mailto/whatsapp/contacto en todo el front) —
+            así que el texto no promete ni un canal ni una plata que no se
+            sabe si vuelve. */}
+        {(walk.status === "PENDING" || walk.status === "CONFIRMED") && (
+          canCancelWalk(walk.status, walk.isPaid) ? (
+            <Button variant="secondary" fullWidth onClick={() => setShowCancelDialog(true)}>
+              Cancelar reserva
+            </Button>
+          ) : (
+            <p className="text-xs text-brand-text-muted px-1">
+              Este paseo ya está pagado. La cancelación con devolución todavía no
+              está disponible desde la app.
+            </p>
+          )
+        )}
       </Container>
+
+      <CancelWalkDialog
+        open={showCancelDialog}
+        reason={cancelReason}
+        onReasonChange={setCancelReason}
+        onDismiss={dismissCancelDialog}
+        onConfirm={handleCancelConfirm}
+        confirming={cancelling}
+        error={cancelError}
+      />
     </main>
   );
 }

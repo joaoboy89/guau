@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import { useRequireAuth } from "@/lib/auth";
 import { walkersAPI, paymentsAPI, walksAPI } from "@/lib/api";
-import { STATUS_LABEL } from "@/lib/walk-status";
+import { STATUS_LABEL, canCancelWalk } from "@/lib/walk-status";
 import { DAY_LABELS } from "@/lib/schedule";
 import { findNearestBarrio, type Barrio } from "@/lib/barrios";
 import BarrioSelect from "@/components/BarrioSelect";
 import { Button } from "@/components/ui";
+import CancelWalkDialog from "@/components/CancelWalkDialog";
 import { AxiosError } from "axios";
 
 interface WalkerSchedule {
@@ -72,6 +73,7 @@ interface WalkItem {
   id: string;
   status: string;
   scheduledAt: string;
+  isPaid: boolean;
   walkType: { label: string };
   participants: Array<{
     dog:   { name: string };
@@ -99,6 +101,9 @@ export default function WalkerDashboardPage() {
   const [walks, setWalks]           = useState<WalkItem[]>([]);
   const [actioning, setActioning]   = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const [cancelDialogWalkId, setCancelDialogWalkId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   const [zoneSaving, setZoneSaving] = useState(false);
   const [zoneError, setZoneError]   = useState<string | null>(null);
@@ -293,6 +298,34 @@ export default function WalkerDashboardPage() {
     } catch (err: unknown) {
       const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
       setActionError(msg ?? "No se pudo rechazar el paseo. Intentá de nuevo.");
+    } finally {
+      setActioning(null);
+    }
+  };
+
+  const dismissCancelDialog = () => {
+    if (actioning) return;
+    setCancelDialogWalkId(null);
+    setCancelReason("");
+  };
+
+  const handleCancel = async (walkId: string) => {
+    if (actioning) return;
+    setActioning(walkId);
+    setActionError(null);
+    try {
+      await walksAPI.cancel(
+        walkId,
+        cancelReason.trim() ? { cancellationReason: cancelReason.trim() } : undefined
+      );
+      // Se refresca desde el servidor, no se muta el estado local a mano.
+      const res = await walksAPI.list();
+      setWalks(res.data);
+      setCancelDialogWalkId(null);
+      setCancelReason("");
+    } catch (err: unknown) {
+      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
+      setActionError(msg ?? "No se pudo cancelar la reserva. Intentá de nuevo.");
     } finally {
       setActioning(null);
     }
@@ -652,6 +685,20 @@ export default function WalkerDashboardPage() {
                   </div>
                   <p className="text-xs text-brand-text-muted">{dateStr}</p>
                   <p className="text-xs text-brand-text-muted">Perro: {dogName}</p>
+
+                  {/* Cancelar — solo CONFIRMED sin pagar. Un PENDING ya tiene
+                      Rechazar arriba (mismo efecto neto); un paseo pagado no
+                      se puede cancelar desde la app todavía. */}
+                  {canCancelWalk(walk.status, walk.isPaid) && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="mt-2 w-fit"
+                      onClick={() => setCancelDialogWalkId(walk.id)}
+                    >
+                      Cancelar reserva
+                    </Button>
+                  )}
                 </div>
               );
             })}
@@ -667,6 +714,15 @@ export default function WalkerDashboardPage() {
         )}
       </div>
 
+      <CancelWalkDialog
+        open={cancelDialogWalkId !== null}
+        reason={cancelReason}
+        onReasonChange={setCancelReason}
+        onDismiss={dismissCancelDialog}
+        onConfirm={() => cancelDialogWalkId && handleCancel(cancelDialogWalkId)}
+        confirming={actioning === cancelDialogWalkId}
+        error={actionError}
+      />
     </main>
   );
 }
