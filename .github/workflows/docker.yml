@@ -27,6 +27,12 @@ jobs:
       - name: Generar cliente de Prisma (necesario para compilar, aunque los tests mockeen PrismaService)
         run: npm run prisma:generate --workspace=apps/api
 
+      - name: Lint backend (apps/api)
+        run: npm run lint --workspace=apps/api
+
+      - name: Lint frontend (apps/web)
+        run: npm run lint --workspace=apps/web
+
       - name: Tests backend (apps/api)
         run: npm test --workspace=apps/api
 
