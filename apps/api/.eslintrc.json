@@ -15,7 +15,25 @@
   "rules": {
     "@typescript-eslint/explicit-function-return-type": "off",
     "@typescript-eslint/explicit-module-boundary-types": "off",
-    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/no-explicit-any": "error",
     "@typescript-eslint/no-floating-promises": "error"
-  }
+  },
+  "overrides": [
+    {
+      // Solo no-explicit-any se apaga acá, nada más. Un any en un mock no es
+      // una duda sobre el tipo: es la declaración de que el objeto es
+      // parcial a propósito (un mock completo de PrismaService sería una
+      // base de datos), o la única forma de alcanzar un método protected
+      // desde el test. El resto de las reglas — no-floating-promises en
+      // particular — vale igual o más en un test que en producción: un
+      // await olvidado ahí hace pasar el test sin probar nada, un verde que
+      // no mira, que es peor que no tener el test. Si en algún momento hace
+      // falta apagar otra regla acá, que se agregue con su propia
+      // justificación, no se sume a esta.
+      "files": ["**/*.spec.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    }
+  ]
 }
