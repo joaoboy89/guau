@@ -72,10 +72,12 @@ const WALK_FULL = {
   participants: [],
 };
 
-// Forma que devuelve findById() — lista blanca, no ...walk. Reconstruida acá
-// campo por campo (no como spread de WALK_FULL) para que un campo agregado
-// a WALK_FULL sin querer no se cuele en la aserción y tape una regresión.
-function expectedFindByIdResult(walk: typeof WALK_FULL, isPaid: boolean) {
+// Forma que devuelve toPublicWalk() — usada por findById() y las dos ramas
+// de findMyWalks(). Reconstruida acá campo por campo (no como spread de
+// WALK_FULL) para que un campo agregado a WALK_FULL sin querer no se cuele
+// en la aserción y tape una regresión (ej. walkerId, que WALK_FULL sí tiene
+// pero la salida pública no debe tener).
+function expectedPublicWalk(walk: typeof WALK_FULL, isPaid: boolean) {
   return {
     id:            walk.id,
     status:        walk.status,
@@ -499,7 +501,7 @@ describe('WalksService', () => {
       );
       // WALK_FULL no tiene mpPaymentId (undefined) → isPaid false;
       // scheduledAt 2026-07-06 ya pasó → isExpired true.
-      expect(result).toEqual([{ ...WALK_FULL, isPaid: false, isExpired: true }]);
+      expect(result).toEqual([expectedPublicWalk(WALK_FULL, false)]);
     });
 
     it('OWNER: lanza NotFoundException si no existe ownerProfile', async () => {
@@ -518,7 +520,7 @@ describe('WalksService', () => {
       expect(prisma.walk.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: { in: [WALK_ID] } } }),
       );
-      expect(result).toEqual([{ ...WALK_FULL, isPaid: false, isExpired: true }]);
+      expect(result).toEqual([expectedPublicWalk(WALK_FULL, false)]);
     });
 
     it('WALKER: isPaid es true cuando mpPaymentId es numérico', async () => {
@@ -552,6 +554,18 @@ describe('WalksService', () => {
           where: { walkerId: WALKER_PROFILE_ID, status: WalkStatus.PENDING },
         }),
       );
+    });
+
+    it('lista blanca en findMyWalks: no expone mpPaymentId ni mpRefundId', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([
+        { ...WALK_FULL, mpPaymentId: '99999', mpRefundId: 'refund-1' },
+      ]);
+
+      const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
+
+      expect(result[0]).not.toHaveProperty('mpPaymentId');
+      expect(result[0]).not.toHaveProperty('mpRefundId');
     });
   });
 
@@ -590,7 +604,7 @@ describe('WalksService', () => {
 
       const result = await service.findById('admin-user-1', UserRole.ADMIN, WALK_ID);
 
-      expect(result).toEqual(expectedFindByIdResult(WALK_FULL, false));
+      expect(result).toEqual(expectedPublicWalk(WALK_FULL, false));
       expect(prisma.walkerProfile.findUnique).not.toHaveBeenCalled();
       expect(prisma.ownerProfile.findUnique).not.toHaveBeenCalled();
     });
@@ -600,7 +614,7 @@ describe('WalksService', () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
 
       const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
-      expect(result).toEqual(expectedFindByIdResult(WALK_FULL, false));
+      expect(result).toEqual(expectedPublicWalk(WALK_FULL, false));
       expect(result.walker).not.toHaveProperty('mpAccessToken');
       expect(result.walker).not.toHaveProperty('mpUserId');
     });
@@ -613,7 +627,7 @@ describe('WalksService', () => {
       });
 
       const result = await service.findById(OWNER_USER_ID, UserRole.OWNER, WALK_ID);
-      expect(result).toEqual(expectedFindByIdResult(WALK_FULL, false));
+      expect(result).toEqual(expectedPublicWalk(WALK_FULL, false));
     });
 
     it('isPaid es true cuando mpPaymentId es numérico (pago real confirmado)', async () => {
