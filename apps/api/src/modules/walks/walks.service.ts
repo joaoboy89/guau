@@ -46,6 +46,41 @@ const WALK_INCLUDE = {
   },
 } as const;
 
+type WalkWithInclude = {
+  id: string;
+  status: WalkStatus;
+  scheduledAt: Date;
+  pickupAddress: string;
+  totalAmount: number;
+  mpPaymentId: string | null;
+  walkType: unknown;
+  walker: unknown;
+  participants: unknown;
+};
+
+/**
+ * Salida pública de un Walk — un solo lugar. Usado en findById() y en las
+ * dos ramas de findMyWalks(): antes findById construía la salida a mano
+ * (lista blanca) pero findMyWalks seguía con `...w` (lista negra, mandaba
+ * mpPaymentId/mpRefundId), así que alcanzaba con pedir la lista en vez del
+ * detalle para esquivar la protección. Con un solo helper no pueden volver
+ * a divergir.
+ */
+function toPublicWalk(walk: WalkWithInclude) {
+  return {
+    id: walk.id,
+    status: walk.status,
+    scheduledAt: walk.scheduledAt,
+    pickupAddress: walk.pickupAddress,
+    totalAmount: walk.totalAmount,
+    walkType: walk.walkType,
+    walker: walk.walker,
+    participants: walk.participants,
+    isPaid: isWalkPaid(walk.mpPaymentId),
+    isExpired: walk.scheduledAt.getTime() <= Date.now(),
+  };
+}
+
 const DEFAULT_COMMISSION_RATE = 0.15;
 
 @Injectable()
@@ -227,11 +262,7 @@ export class WalksService {
         include: WALK_INCLUDE,
         orderBy: { scheduledAt: "desc" },
       });
-      return walks.map((w) => ({
-        ...w,
-        isPaid: isWalkPaid(w.mpPaymentId),
-        isExpired: w.scheduledAt.getTime() <= Date.now(),
-      }));
+      return walks.map(toPublicWalk);
     }
 
     // OWNER — busca por WalkParticipant
@@ -250,11 +281,7 @@ export class WalksService {
       include: WALK_INCLUDE,
       orderBy: { scheduledAt: "desc" },
     });
-    return walks.map((w) => ({
-      ...w,
-      isPaid: isWalkPaid(w.mpPaymentId),
-      isExpired: w.scheduledAt.getTime() <= Date.now(),
-    }));
+    return walks.map(toPublicWalk);
   }
 
   // ─── Detalle de un paseo ─────────────────────────────────
@@ -267,23 +294,7 @@ export class WalksService {
     if (!walk) throw new NotFoundException("Paseo no encontrado");
 
     await this.assertWalkAccess(userId, role, walk);
-
-    // Lista blanca, no spread: `{ ...walk, isPaid }` mandaba mpPaymentId y
-    // mpRefundId al front, y manda sola cualquier columna nueva del modelo
-    // Walk el día que se agregue. Estos son los campos que el front
-    // realmente usa (app/(owner)/walks/[id]/page.tsx).
-    return {
-      id: walk.id,
-      status: walk.status,
-      scheduledAt: walk.scheduledAt,
-      pickupAddress: walk.pickupAddress,
-      totalAmount: walk.totalAmount,
-      walkType: walk.walkType,
-      walker: walk.walker,
-      participants: walk.participants,
-      isPaid: isWalkPaid(walk.mpPaymentId),
-      isExpired: walk.scheduledAt.getTime() <= Date.now(),
-    };
+    return toPublicWalk(walk);
   }
 
   // ─── Confirmar (paseador) ────────────────────────────────
