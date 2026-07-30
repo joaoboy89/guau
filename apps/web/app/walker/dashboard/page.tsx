@@ -104,6 +104,7 @@ export default function WalkerDashboardPage() {
 
   const [cancelDialogWalkId, setCancelDialogWalkId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const [zoneSaving, setZoneSaving] = useState(false);
   const [zoneError, setZoneError]   = useState<string | null>(null);
@@ -307,12 +308,13 @@ export default function WalkerDashboardPage() {
     if (actioning) return;
     setCancelDialogWalkId(null);
     setCancelReason("");
+    setCancelError(null);
   };
 
   const handleCancel = async (walkId: string) => {
     if (actioning) return;
     setActioning(walkId);
-    setActionError(null);
+    setCancelError(null);
     try {
       await walksAPI.cancel(
         walkId,
@@ -325,7 +327,7 @@ export default function WalkerDashboardPage() {
       setCancelReason("");
     } catch (err: unknown) {
       const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
-      setActionError(msg ?? "No se pudo cancelar la reserva. Intentá de nuevo.");
+      setCancelError(msg ?? "No se pudo cancelar la reserva. Intentá de nuevo.");
     } finally {
       setActioning(null);
     }
@@ -721,7 +723,7 @@ export default function WalkerDashboardPage() {
         onDismiss={dismissCancelDialog}
         onConfirm={() => cancelDialogWalkId && handleCancel(cancelDialogWalkId)}
         confirming={actioning === cancelDialogWalkId}
-        error={actionError}
+        error={cancelError}
       />
     </main>
   );
