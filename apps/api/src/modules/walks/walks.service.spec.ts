@@ -878,8 +878,54 @@ describe('WalksService', () => {
         .rejects.toThrow(NotFoundException);
     });
 
+    // ─── Autorización primero, siempre (ver resolveCancelTarget) ────────────
+    // Estos son el corazón del fix: verifican que un no-autorizado recibe
+    // siempre el mismo error, sin importar el estado interno del paseo. Si
+    // alguien vuelve a mover el orden (auth después de estado/plata), se
+    // rompen.
+
+    it('WALKER: ForbiddenException si el walk no le pertenece', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, walkerId: 'other-walker' });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER); // id = WALKER_PROFILE_ID
+      await expect(service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}))
+        .rejects.toThrow(ForbiddenException);
+    });
+
+    it('WALKER ajeno recibe 403, no 400, aunque el paseo esté en un estado no cancelable', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.IN_PROGRESS, walkerId: 'other-walker',
+      });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      await expect(service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}))
+        .rejects.toThrow(ForbiddenException);
+    });
+
+    it('OWNER que no es participante recibe 403, no 400, aunque el paseo esté pagado — la autorización corre primero y no filtra el estado de pago', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.CONFIRMED, mpPaymentId: '99999',
+      });
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walkParticipant.findFirst.mockResolvedValue(null); // no es participante
+
+      await expect(service.cancel(OWNER_USER_ID, UserRole.OWNER, WALK_ID, {}))
+        .rejects.toThrow(ForbiddenException);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('ADMIN no puede cancelar por esta ruta — deny-by-default explícito (el refund pasa por admin/walks/:id/refund)', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, status: WalkStatus.CONFIRMED });
+
+      await expect(service.cancel('admin-user-1', UserRole.ADMIN, WALK_ID, {}))
+        .rejects.toThrow(ForbiddenException);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    // ─── Estado — corre después de resolver la autorización ─────────────────
+
     it('lanza BadRequestException si el walk no está en PENDING ni CONFIRMED', async () => {
       prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, status: WalkStatus.IN_PROGRESS });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER); // la auth corre primero
       await expect(service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}))
         .rejects.toThrow(BadRequestException);
     });
@@ -890,10 +936,9 @@ describe('WalksService', () => {
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.CONFIRMED, mpPaymentId: '99999',
       });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER); // la auth corre primero y pasa
       await expect(service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}))
         .rejects.toThrow(BadRequestException);
-      // Falla antes de resolver el rol — ni siquiera busca el perfil del paseador
-      expect(prisma.walkerProfile.findUnique).not.toHaveBeenCalled();
       expect(prisma.walk.update).not.toHaveBeenCalled();
     });
 
@@ -901,9 +946,12 @@ describe('WalksService', () => {
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.CONFIRMED, mpPaymentId: '99999',
       });
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walkParticipant.findFirst.mockResolvedValue({
+        id: 'p-1', walkId: WALK_ID, ownerId: OWNER_PROFILE_ID,
+      });
       await expect(service.cancel(OWNER_USER_ID, UserRole.OWNER, WALK_ID, {}))
         .rejects.toThrow(BadRequestException);
-      expect(prisma.ownerProfile.findUnique).not.toHaveBeenCalled();
       expect(prisma.walk.update).not.toHaveBeenCalled();
     });
 
@@ -933,13 +981,6 @@ describe('WalksService', () => {
         service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}),
       ).resolves.toBeDefined();
       expect(prisma.walk.update).toHaveBeenCalled();
-    });
-
-    it('WALKER: ForbiddenException si el walk no le pertenece', async () => {
-      prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, walkerId: 'other-walker' });
-      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER); // id = WALKER_PROFILE_ID
-      await expect(service.cancel(WALKER_USER_ID, UserRole.WALKER, WALK_ID, {}))
-        .rejects.toThrow(ForbiddenException);
     });
 
     it('WALKER: camino feliz — pasa a CANCELLED_WALKER con cancellationReason', async () => {
