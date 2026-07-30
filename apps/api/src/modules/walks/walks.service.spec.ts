@@ -61,12 +61,19 @@ const BASE_WALK = {
   pickupAddress: 'Av. Santa Fe 1234, Palermo',
 };
 
-// Versión extendida con relaciones (equivalente al WALK_INCLUDE del servicio)
+// Versión extendida con relaciones (equivalente al WALK_INCLUDE del servicio,
+// ya en la forma que devuelve Prisma con select — no include — en owner y dog)
 const WALK_FULL = {
   ...BASE_WALK,
-  walkType:     { id: WALK_TYPE_ID, name: 'Paseo básico', basePrice: 1000 },
-  walker:       {
-    id: WALKER_PROFILE_ID,
+  walkType: { id: WALK_TYPE_ID, label: 'Paseo básico', durationMinutes: 30 },
+  walker: {
+    id:                  WALKER_PROFILE_ID,
+    bio:                 'Amante de los perros',
+    rating:              4.8,
+    totalReviews:        12,
+    isAvailable:         true,
+    verificationStatus:  VerificationStatus.VERIFIED,
+    maxDogsPerWalk:      3,
     user: { firstName: 'Juan', lastName: 'Pérez', avatarUrl: null, phone: null },
   },
   participants: [],
