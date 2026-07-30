@@ -36,9 +36,10 @@ const WALK_INCLUDE = {
   },
   participants: {
     include: {
-      dog: true,
+      dog: { select: { id: true, name: true, size: true } },
       owner: {
-        include: {
+        select: {
+          id: true,
           user: { select: { firstName: true, lastName: true, avatarUrl: true } },
         },
       },
@@ -47,6 +48,68 @@ const WALK_INCLUDE = {
 } as const;
 
 type WalkWithInclude = Prisma.WalkGetPayload<{ include: typeof WALK_INCLUDE }>;
+type ParticipantWithInclude = WalkWithInclude["participants"][number];
+
+function toPublicWalkType(walkType: WalkWithInclude["walkType"]) {
+  return {
+    id: walkType.id,
+    label: walkType.label,
+    durationMinutes: walkType.durationMinutes,
+  };
+}
+
+function toPublicWalker(walker: WalkWithInclude["walker"]) {
+  return {
+    id: walker.id,
+    bio: walker.bio,
+    rating: walker.rating,
+    totalReviews: walker.totalReviews,
+    isAvailable: walker.isAvailable,
+    verificationStatus: walker.verificationStatus,
+    maxDogsPerWalk: walker.maxDogsPerWalk,
+    user: {
+      firstName: walker.user.firstName,
+      lastName: walker.user.lastName,
+      avatarUrl: walker.user.avatarUrl,
+      phone: walker.user.phone,
+    },
+  };
+}
+
+function toPublicDog(dog: ParticipantWithInclude["dog"]) {
+  return {
+    id: dog.id,
+    name: dog.name,
+    size: dog.size,
+  };
+}
+
+// El OwnerProfile completo tiene address/neighborhood/lat/lng — el domicilio
+// exacto del dueño. En un paseo GRUPAL (el @default de Walk.mode) todos los
+// participantes comparten el mismo array de `participants`, así que copiar
+// el owner entero le manda a cada dueño el domicilio y las coordenadas de
+// los otros dueños del mismo paseo. Lista blanca explícita, no include.
+function toPublicOwner(owner: ParticipantWithInclude["owner"]) {
+  return {
+    id: owner.id,
+    user: {
+      firstName: owner.user.firstName,
+      lastName: owner.user.lastName,
+      avatarUrl: owner.user.avatarUrl,
+    },
+  };
+}
+
+// WalkParticipant trae su propia columna amountPaid (lo que ESE dueño paga
+// por ESE perro) además de dog/owner. En un GRUPAL, todo el array de
+// participants viaja a cada dueño — copiar el participante entero le
+// mostraría a un dueño cuánto pagan los demás por sus perros.
+function toPublicParticipant(participant: ParticipantWithInclude) {
+  return {
+    dog: toPublicDog(participant.dog),
+    owner: toPublicOwner(participant.owner),
+  };
+}
 
 /**
  * Salida pública de un Walk — un solo lugar. Usado en findById() y en las
@@ -55,6 +118,13 @@ type WalkWithInclude = Prisma.WalkGetPayload<{ include: typeof WALK_INCLUDE }>;
  * mpPaymentId/mpRefundId), así que alcanzaba con pedir la lista en vez del
  * detalle para esquivar la protección. Con un solo helper no pueden volver
  * a divergir.
+ *
+ * Cada campo anidado (walkType, walker, participants) se construye nombrando
+ * columnas — nunca copiando el objeto que vino de Prisma tal cual. Copiar el
+ * objeto entero es una lista blanca de una sola capa: alcanza con que alguien
+ * cambie WALK_INCLUDE de `select` a `include` (como pasaba antes con
+ * participants.owner) para que vuelva a viajar todo. Con dos capas, cambiar
+ * el include no alcanza para filtrar algo nuevo.
  */
 function toPublicWalk(walk: WalkWithInclude) {
   return {
@@ -63,9 +133,9 @@ function toPublicWalk(walk: WalkWithInclude) {
     scheduledAt: walk.scheduledAt,
     pickupAddress: walk.pickupAddress,
     totalAmount: walk.totalAmount,
-    walkType: walk.walkType,
-    walker: walk.walker,
-    participants: walk.participants,
+    walkType: toPublicWalkType(walk.walkType),
+    walker: toPublicWalker(walk.walker),
+    participants: walk.participants.map(toPublicParticipant),
     isPaid: isWalkPaid(walk.mpPaymentId),
     isExpired: walk.scheduledAt.getTime() <= Date.now(),
   };
