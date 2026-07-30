@@ -305,7 +305,12 @@ export class WalksService {
       ?.notifyNewWalkRequest(walk.id)
       .catch((err) => this.logger.warn(`No se pudo notificar la nueva solicitud: ${err}`));
 
-    return this.prisma.walk.findUnique({ where: { id: walk.id }, include: WALK_INCLUDE });
+    const created = await this.prisma.walk.findUnique({
+      where: { id: walk.id },
+      include: WALK_INCLUDE,
+    });
+    if (!created) throw new NotFoundException("Paseo no encontrado");
+    return toPublicWalk(created);
   }
 
   // ─── Mis paseos ──────────────────────────────────────────
@@ -578,6 +583,6 @@ export class WalksService {
       ?.notifyWalkStatusChange(walkId, status)
       .catch((err) => this.logger.warn(`No se pudo notificar cambio de estado: ${err}`));
 
-    return updated;
+    return toPublicWalk(updated);
   }
 }

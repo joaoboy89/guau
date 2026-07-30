@@ -408,7 +408,7 @@ describe('WalksService', () => {
 
       const result = await service.create(OWNER_USER_ID, CREATE_DTO);
 
-      expect(result).toEqual(WALK_FULL);
+      expect(result).toEqual(expectedPublicWalk(WALK_FULL, false));
     });
   });
 
