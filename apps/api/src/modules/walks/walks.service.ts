@@ -342,6 +342,14 @@ export class WalksService {
     const walk = await this.prisma.walk.findUnique({ where: { id: walkId } });
     if (!walk) throw new NotFoundException("Paseo no encontrado");
 
+    // 1. AUTORIZACIÓN — primero, siempre. Si corre después de validar estado
+    // o plata, cada chequeo de arriba le filtra un dato del paseo a alguien
+    // que no tiene acceso (ver resolveCancelTarget): un mismo endpoint que
+    // hoy devolvería 404 / 400 "estado X" / 400 "ya pagado" / 403 según lo
+    // que se valide primero es un oráculo de estado para paseos ajenos.
+    const targetStatus = await this.resolveCancelTarget(userId, role, walk);
+
+    // 2. ESTADO
     const cancellableStatuses: WalkStatus[] = [WalkStatus.PENDING, WalkStatus.CONFIRMED];
     if (!cancellableStatuses.includes(walk.status)) {
       throw new BadRequestException(
@@ -349,38 +357,21 @@ export class WalksService {
       );
     }
 
-    // Falla cerrado: mientras no exista la política de reembolso, la API no
-    // puede cancelar nada que tenga plata adentro — la plata quedaría en la
-    // cuenta del paseador (split directo, Güau nunca la custodia) sin que
-    // nadie decida nada. El mensaje no menciona ningún canal de contacto a
-    // propósito (no existe ninguno en la app hoy) ni afirma nada sobre la
-    // plata (la política todavía no está definida). Cuando la política
-    // exista, este throw es el punto exacto donde se enchufa el refund.
+    // 3. PLATA — falla cerrado: mientras no exista la política de reembolso,
+    // la API no puede cancelar nada que tenga plata adentro — la plata
+    // quedaría en la cuenta del paseador (split directo, Güau nunca la
+    // custodia) sin que nadie decida nada. El mensaje no menciona ningún
+    // canal de contacto a propósito (no existe ninguno en la app hoy) ni
+    // afirma nada sobre la plata (la política todavía no está definida).
+    // Cuando la política exista, este throw es el punto exacto donde se
+    // enchufa el refund.
     if (isWalkPaid(walk.mpPaymentId)) {
       throw new BadRequestException(
         "No se puede cancelar un paseo ya pagado desde la app"
       );
     }
 
-    if (role === UserRole.WALKER) {
-      const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
-      if (!walker || walk.walkerId !== walker.id) {
-        throw new ForbiddenException("No tenés acceso a este paseo");
-      }
-      return this.updateStatus(walkId, WalkStatus.CANCELLED_WALKER, {
-        cancellationReason: dto.cancellationReason ?? null,
-      });
-    }
-
-    // OWNER
-    const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
-    if (!owner) throw new ForbiddenException("No tenés acceso a este paseo");
-    const isParticipant = await this.prisma.walkParticipant.findFirst({
-      where: { walkId, ownerId: owner.id },
-    });
-    if (!isParticipant) throw new ForbiddenException("No tenés acceso a este paseo");
-
-    return this.updateStatus(walkId, WalkStatus.CANCELLED_OWNER, {
+    return this.updateStatus(walkId, targetStatus, {
       cancellationReason: dto.cancellationReason ?? null,
     });
   }
@@ -442,6 +433,44 @@ export class WalksService {
     // (presente o futuro) queda afuera salvo que se agregue acá a propósito.
     if (role === UserRole.ADMIN) return;
 
+    throw new ForbiddenException("No tenés acceso a este paseo");
+  }
+
+  /**
+   * Autorización primero: resuelve la pertenencia y devuelve el estado
+   * destino. Va ANTES de cualquier otra validación en cancel() — si corre
+   * después, cada chequeo de arriba (estado, pago) le filtra un dato del
+   * paseo a quien no tiene acceso.
+   */
+  private async resolveCancelTarget(
+    userId: string,
+    role: string,
+    walk: { id: string; walkerId: string },
+  ): Promise<WalkStatus> {
+    if (role === UserRole.WALKER) {
+      const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
+      if (!walker || walk.walkerId !== walker.id) {
+        throw new ForbiddenException("No tenés acceso a este paseo");
+      }
+      return WalkStatus.CANCELLED_WALKER;
+    }
+
+    if (role === UserRole.OWNER) {
+      const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
+      if (!owner) throw new ForbiddenException("No tenés acceso a este paseo");
+      const isParticipant = await this.prisma.walkParticipant.findFirst({
+        where: { walkId: walk.id, ownerId: owner.id },
+      });
+      if (!isParticipant) throw new ForbiddenException("No tenés acceso a este paseo");
+      return WalkStatus.CANCELLED_OWNER;
+    }
+
+    // Deny-by-default explícito. ADMIN incluido: un admin que quiere deshacer
+    // un paseo pagado va por POST /admin/walks/:id/refund, no por acá. Antes
+    // caía en la rama OWNER y moría en el `!owner` — mismo resultado, pero
+    // por accidente. Ojo: assertWalkAccess() SÍ le da acceso a ADMIN (lectura,
+    // en findById/getLocations). Son criterios distintos a propósito: leer
+    // no es escribir.
     throw new ForbiddenException("No tenés acceso a este paseo");
   }
 
