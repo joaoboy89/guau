@@ -9,7 +9,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../../database/prisma.service";
-import { WalkStatus, WalkMode, VerificationStatus, UserRole } from "@prisma/client";
+import { Prisma, WalkStatus, WalkMode, VerificationStatus, UserRole } from "@prisma/client";
 import { CreateWalkDto } from "./dto/create-walk.dto";
 import { CancelWalkDto } from "./dto/cancel-walk.dto";
 import { QueryWalksDto } from "./dto/query-walks.dto";
@@ -46,17 +46,7 @@ const WALK_INCLUDE = {
   },
 } as const;
 
-type WalkWithInclude = {
-  id: string;
-  status: WalkStatus;
-  scheduledAt: Date;
-  pickupAddress: string;
-  totalAmount: number;
-  mpPaymentId: string | null;
-  walkType: unknown;
-  walker: unknown;
-  participants: unknown;
-};
+type WalkWithInclude = Prisma.WalkGetPayload<{ include: typeof WALK_INCLUDE }>;
 
 /**
  * Salida pública de un Walk — un solo lugar. Usado en findById() y en las
