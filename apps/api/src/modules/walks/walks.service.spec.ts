@@ -574,6 +574,41 @@ describe('WalksService', () => {
       expect(result[0]).not.toHaveProperty('mpPaymentId');
       expect(result[0]).not.toHaveProperty('mpRefundId');
     });
+
+    it('el walker de findMyWalks no arrastra mpAccessToken aunque venga en el dato crudo', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([
+        { ...WALK_FULL, walker: { ...WALK_FULL.walker, mpAccessToken: 'no-es-un-token-real', mpUserId: 'fake-123' } },
+      ]);
+
+      const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
+
+      expect(result[0].walker).not.toHaveProperty('mpAccessToken');
+      expect(result[0].walker).not.toHaveProperty('mpUserId');
+    });
+
+    it('el owner de un participante en findMyWalks no expone domicilio ni coordenadas', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([{
+        ...WALK_FULL,
+        participants: [{
+          dog: { id: 'd1', name: 'Toto', size: 'MEDIANO' },
+          owner: {
+            id: 'o1',
+            address: 'Calle Falsa 123', neighborhood: 'Palermo', lat: -34.5, lng: -58.4,
+            user: { firstName: 'Ana', lastName: 'Gómez', avatarUrl: null },
+          },
+        }],
+      }]);
+
+      const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
+
+      const owner = result[0].participants[0].owner;
+      expect(owner).not.toHaveProperty('address');
+      expect(owner).not.toHaveProperty('neighborhood');
+      expect(owner).not.toHaveProperty('lat');
+      expect(owner).not.toHaveProperty('lng');
+    });
   });
 
   // ─── findById() ───────────────────────────────────────────────────────────
@@ -682,6 +717,44 @@ describe('WalksService', () => {
       expect(result).not.toHaveProperty('mpPaymentId');
       expect(result).not.toHaveProperty('mpRefundId');
     });
+
+    // ─── Lista blanca anidada — hay que ensuciar el mock para que pruebe algo.
+    // Un test de ausencia solo vale si el campo estaba presente a la entrada:
+    // si el mock nunca tuvo el campo, "no lo tiene a la salida" no prueba nada.
+
+    it('el walker de la salida no arrastra mpAccessToken aunque venga en el dato crudo', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...WALK_FULL,
+        walker: { ...WALK_FULL.walker, mpAccessToken: 'no-es-un-token-real', mpUserId: 'fake-123' },
+      });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+      expect(result.walker).not.toHaveProperty('mpAccessToken');
+      expect(result.walker).not.toHaveProperty('mpUserId');
+    });
+
+    it('el owner de un participante no expone domicilio ni coordenadas aunque vengan en el dato crudo', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...WALK_FULL,
+        participants: [{
+          dog: { id: 'd1', name: 'Toto', size: 'MEDIANO' },
+          owner: {
+            id: 'o1',
+            address: 'Calle Falsa 123', neighborhood: 'Palermo', lat: -34.5, lng: -58.4,
+            user: { firstName: 'Ana', lastName: 'Gómez', avatarUrl: null },
+          },
+        }],
+      });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+      const owner = result.participants[0].owner;
+      expect(owner).not.toHaveProperty('address');
+      expect(owner).not.toHaveProperty('neighborhood');
+      expect(owner).not.toHaveProperty('lat');
+      expect(owner).not.toHaveProperty('lng');
+    });
   });
 
   // ─── confirm() ────────────────────────────────────────────────────────────
@@ -729,6 +802,37 @@ describe('WalksService', () => {
 
       expect(trackingGateway.emitStatusChanged).toHaveBeenCalledWith(WALK_ID, WalkStatus.CONFIRMED);
       expect(notificationsService.notifyWalkStatusChange).toHaveBeenCalledWith(WALK_ID, WalkStatus.CONFIRMED);
+    });
+
+    // Las 7 rutas que escriben (confirm/reject/on-way/start/finish/cancel, más
+    // create) pasan por updateStatus(), que ahora también devuelve
+    // toPublicWalk(). Antes devolvían el Walk crudo de Prisma: mpPaymentId,
+    // platformFee, commissionRate, walkerId, y el walker/participants sin
+    // recortar. No era fuga entre usuarios (a quien llama ya se le validó la
+    // pertenencia), pero es la misma info que la lista blanca decidió que no
+    // viaja, saliendo por otra puerta. confirm() alcanza para probarlo — el
+    // resto comparte el mismo updateStatus().
+    it('lista blanca: la respuesta de confirm() no expone plata interna ni mpAccessToken del walker', async () => {
+      setupWalkerWalk(WalkStatus.PENDING);
+      prisma.walk.update.mockResolvedValue({
+        ...WALK_FULL,
+        status: WalkStatus.CONFIRMED,
+        mpPaymentId: '99999',
+        platformFee: 450,
+        commissionRate: 0.15,
+        walkerAmount: 2420.91,
+        walker: { ...WALK_FULL.walker, mpAccessToken: 'no-es-un-token-real', mpUserId: 'fake-123' },
+      });
+
+      const result = await service.confirm(WALKER_USER_ID, WALK_ID);
+
+      expect(result).not.toHaveProperty('mpPaymentId');
+      expect(result).not.toHaveProperty('platformFee');
+      expect(result).not.toHaveProperty('commissionRate');
+      expect(result).not.toHaveProperty('walkerAmount');
+      expect(result).not.toHaveProperty('walkerId');
+      expect(result.walker).not.toHaveProperty('mpAccessToken');
+      expect(result.walker).not.toHaveProperty('mpUserId');
     });
   });
 
