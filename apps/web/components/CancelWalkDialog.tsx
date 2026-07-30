@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui";
 
 interface CancelWalkDialogProps {
@@ -11,6 +12,8 @@ interface CancelWalkDialogProps {
   confirming: boolean;
   error?: string | null;
 }
+
+const TITLE_ID = "cancel-walk-dialog-title";
 
 /**
  * Diálogo de confirmación propio (no window.confirm, que no respeta la
@@ -30,13 +33,56 @@ export default function CancelWalkDialog({
   confirming,
   error,
 }: CancelWalkDialogProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  // Foco inicial en el panel al abrir; devuelve el foco al elemento que
+  // disparó el diálogo al cerrarse (sin trap completo de foco — agrandaría
+  // el diff más de lo que este caso justifica).
+  useEffect(() => {
+    if (!open) return;
+
+    triggerRef.current = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+
+    return () => {
+      triggerRef.current?.focus();
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape" || confirming) return;
+      onDismiss();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, confirming, onDismiss]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
-      <div className="w-full sm:max-w-sm bg-brand-surface rounded-2xl border border-brand-border shadow-float p-5 flex flex-col gap-4">
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4"
+      onClick={() => {
+        if (confirming) return;
+        onDismiss();
+      }}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={TITLE_ID}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full sm:max-w-sm bg-brand-surface rounded-2xl border border-brand-border shadow-float p-5 flex flex-col gap-4"
+      >
         <div className="flex flex-col gap-1">
-          <h2 className="font-serif text-lg font-bold text-brand-text">
+          <h2 id={TITLE_ID} className="font-serif text-lg font-bold text-brand-text">
             ¿Cancelar esta reserva?
           </h2>
           <p className="text-sm text-brand-text-body">
