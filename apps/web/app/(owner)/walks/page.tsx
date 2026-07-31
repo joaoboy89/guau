@@ -11,22 +11,62 @@ interface Walk {
   id: string;
   status: string;
   scheduledAt: string;
+  totalAmount: number;
+  isPaid: boolean;
+  isExpired: boolean;
   walkType: { label: string };
   walker: { user: { firstName: string; lastName: string } };
+}
+
+interface WalksMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  days: number;
 }
 
 export default function WalksPage() {
   const { ready } = useRequireAuth();
   const [walks, setWalks] = useState<Walk[]>([]);
+  const [meta, setMeta] = useState<WalksMeta | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     if (!ready) return;
     walksAPI
       .list()
-      .then((res) => setWalks(res.data))
+      .then((res) => {
+        setWalks(res.data.data);
+        setMeta(res.data.meta);
+      })
       .finally(() => setLoading(false));
   }, [ready]);
+
+  const handleLoadMore = async () => {
+    if (!meta || loadingMore) return;
+    const nextPage = meta.page + 1;
+    if (nextPage > meta.totalPages) return;
+    setLoadingMore(true);
+    try {
+      const res = await walksAPI.list({ page: nextPage });
+      setWalks((prev) => [...prev, ...res.data.data]);
+      setMeta(res.data.meta);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Lo accionable del dueño no es PENDING (ahí no puede hacer nada, está
+  // esperando al paseador) — es lo que ya está confirmado y sin pagar. Se
+  // deriva de la misma lista: el dueño tiene pocos paseos activos, no hace
+  // falta una llamada aparte (a diferencia de "Requieren confirmación" del
+  // paseador, que si puede acumular pendientes viejos fuera de la ventana).
+  const pendingPayment = walks.filter(
+    (w) => w.status === "CONFIRMED" && !w.isPaid && !w.isExpired
+  );
+  const history = walks.filter((w) => !pendingPayment.includes(w));
 
   /**
    * Antes esto devolvía `null`: pantalla en blanco mientras carga, que se
@@ -60,40 +100,89 @@ export default function WalksPage() {
           </Link>
         </div>
       ) : (
-        <ul className="flex flex-col gap-3">
-          {walks.map((walk) => {
-            const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
-              dateStyle: "long",
-              timeStyle: "short",
-            });
-            const walkerName = `${walk.walker.user.firstName} ${walk.walker.user.lastName}`;
+        <div className="flex flex-col gap-6">
+          {pendingPayment.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs font-semibold text-brand-text-muted uppercase tracking-wide">
+                Pendientes de pago
+              </p>
+              <ul className="flex flex-col gap-3">
+                {pendingPayment.map((walk) => (
+                  <WalkCard key={walk.id} walk={walk} showPayCta />
+                ))}
+              </ul>
+            </div>
+          )}
 
-            return (
-              <li key={walk.id}>
-                <Link href={`/walks/${walk.id}`} className="block">
-                  <Card interactive className="flex flex-col gap-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-semibold text-brand-text-body">
-                        {walk.walkType.label}
-                      </span>
-                      <Badge
-                        variant={STATUS_VARIANT[walk.status] ?? "default"}
-                        className="shrink-0"
-                      >
-                        {STATUS_LABEL[walk.status] ?? walk.status}
-                      </Badge>
-                    </div>
-                    <p className="text-xs text-brand-text-muted">{dateStr}</p>
-                    <p className="text-xs text-brand-text-muted">
-                      Paseador: {walkerName}
-                    </p>
-                  </Card>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+          {history.length > 0 && (
+            <div className="flex flex-col gap-3">
+              {pendingPayment.length > 0 && (
+                <p className="text-xs font-semibold text-brand-text-muted uppercase tracking-wide">
+                  Historial
+                </p>
+              )}
+              <ul className="flex flex-col gap-3">
+                {history.map((walk) => (
+                  <WalkCard key={walk.id} walk={walk} />
+                ))}
+              </ul>
+
+              {meta && meta.page < meta.totalPages && (
+                <button
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  className="self-center text-sm font-semibold text-brand-primary disabled:opacity-50"
+                >
+                  {loadingMore ? "Cargando…" : "Cargar más"}
+                </button>
+              )}
+
+              {meta && (
+                <p className="text-xs text-brand-text-muted text-center">
+                  Mostrando tus paseos de los últimos {meta.days} días.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </Container>
+  );
+}
+
+function WalkCard({ walk, showPayCta }: { walk: Walk; showPayCta?: boolean }) {
+  const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
+    dateStyle: "long",
+    timeStyle: "short",
+  });
+  const walkerName = `${walk.walker.user.firstName} ${walk.walker.user.lastName}`;
+
+  return (
+    <li>
+      <Link href={`/walks/${walk.id}`} className="block">
+        <Card interactive className="flex flex-col gap-2">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-sm font-semibold text-brand-text-body">
+              {walk.walkType.label}
+            </span>
+            <Badge
+              variant={STATUS_VARIANT[walk.status] ?? "default"}
+              className="shrink-0"
+            >
+              {STATUS_LABEL[walk.status] ?? walk.status}
+            </Badge>
+          </div>
+          <p className="text-xs text-brand-text-muted">{dateStr}</p>
+          <p className="text-xs text-brand-text-muted">
+            Paseador: {walkerName}
+          </p>
+          {showPayCta && (
+            <span className={buttonStyles({ size: "sm", className: "mt-1 w-fit" })}>
+              Pagar ${walk.totalAmount.toLocaleString("es-AR")}
+            </span>
+          )}
+        </Card>
+      </Link>
+    </li>
   );
 }
