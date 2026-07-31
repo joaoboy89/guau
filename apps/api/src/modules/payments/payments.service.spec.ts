@@ -46,6 +46,7 @@ const WALK_BASE = {
   mpPaymentId: null as string | null,
   platformFee: 150,
   walkerAmount: 1350,
+  commissionRate: 0.1, // 150 / 1500 — consistente con platformFee/PARTICIPANT.amountPaid de arriba
   mode: 'EXCLUSIVO',
   pickupAddress: 'Palermo',
   scheduledAt: FUTURE_SCHEDULED_AT,
@@ -80,7 +81,7 @@ function buildPrismaMock() {
   return {
     ownerProfile:    { findUnique: jest.fn() },
     walkerProfile:   { findUnique: jest.fn(), update: jest.fn() },
-    walkParticipant: { findFirst: jest.fn() },
+    walkParticipant: { findFirst: jest.fn(), findMany: jest.fn() },
     walk:            { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     payout:          { upsert: jest.fn() },
   };
@@ -169,7 +170,7 @@ describe('PaymentsService', () => {
 
     function setupHappyPath() {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
-      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walkParticipant.findMany.mockResolvedValue([PARTICIPANT]);
       prisma.walk.findUnique.mockResolvedValue({ ...WALK_BASE });
       prisma.walk.update.mockResolvedValue({});
     }
@@ -182,14 +183,14 @@ describe('PaymentsService', () => {
 
     it('lanza ForbiddenException si el owner no es participante del walk', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
-      prisma.walkParticipant.findFirst.mockResolvedValue(null);
+      prisma.walkParticipant.findMany.mockResolvedValue([]);
       await expect(service.createPreference('user-1', DTO))
         .rejects.toThrow(ForbiddenException);
     });
 
     it('lanza NotFoundException si el walk no existe', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
-      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walkParticipant.findMany.mockResolvedValue([PARTICIPANT]);
       prisma.walk.findUnique.mockResolvedValue(null);
       await expect(service.createPreference('user-1', DTO))
         .rejects.toThrow(NotFoundException);
@@ -197,7 +198,7 @@ describe('PaymentsService', () => {
 
     it('lanza BadRequestException si walk.status no es CONFIRMED', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
-      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walkParticipant.findMany.mockResolvedValue([PARTICIPANT]);
       prisma.walk.findUnique.mockResolvedValue({ ...WALK_BASE, status: WalkStatus.PENDING });
       await expect(service.createPreference('user-1', DTO))
         .rejects.toThrow(BadRequestException);
@@ -205,7 +206,7 @@ describe('PaymentsService', () => {
 
     it('lanza BadRequestException si el walk ya tiene un payment id NUMÉRICO (pago real)', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
-      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walkParticipant.findMany.mockResolvedValue([PARTICIPANT]);
       prisma.walk.findUnique.mockResolvedValue({ ...WALK_BASE, mpPaymentId: '99999' });
       await expect(service.createPreference('user-1', DTO))
         .rejects.toThrow(BadRequestException);
@@ -213,7 +214,7 @@ describe('PaymentsService', () => {
 
     it('lanza BadRequestException si el paseo ya venció (scheduledAt en el pasado)', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
-      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walkParticipant.findMany.mockResolvedValue([PARTICIPANT]);
       prisma.walk.findUnique.mockResolvedValue({
         ...WALK_BASE,
         scheduledAt: new Date(Date.now() - 60_000),
@@ -231,7 +232,7 @@ describe('PaymentsService', () => {
 
     it('permite re-crear la preferencia si mpPaymentId es no numérico (pago no completado)', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
-      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walkParticipant.findMany.mockResolvedValue([PARTICIPANT]);
       prisma.walk.findUnique.mockResolvedValue({
         ...WALK_BASE,
         mpPaymentId: '3541787996-9905f4f5-abc', // preference id anterior, no es pago real
@@ -243,7 +244,7 @@ describe('PaymentsService', () => {
 
     it('lanza BadRequestException si el walker no tiene mpAccessToken', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
-      prisma.walkParticipant.findFirst.mockResolvedValue(PARTICIPANT);
+      prisma.walkParticipant.findMany.mockResolvedValue([PARTICIPANT]);
       prisma.walk.findUnique.mockResolvedValue({
         ...WALK_BASE,
         walker: { mpAccessToken: null },
@@ -252,13 +253,57 @@ describe('PaymentsService', () => {
         .rejects.toThrow(BadRequestException);
     });
 
-    it('camino feliz: llama a Preference.create con marketplace_fee = walk.platformFee', async () => {
+    // Con UN solo participante, unit_price y marketplace_fee coinciden con lo
+    // que el código daba antes del fix (participant.amountPaid / walk.platformFee).
+    // Demuestra que sumar participantes es neutro para el camino que ya funciona.
+    it('camino feliz — 1 perro: unit_price y marketplace_fee no cambian respecto de antes', async () => {
       setupHappyPath();
       await service.createPreference('user-1', DTO);
 
       expect(mockPreferenceCreate).toHaveBeenCalledTimes(1);
       const callBody = mockPreferenceCreate.mock.calls[0][0].body;
+      expect(callBody.items[0].unit_price).toBe(PARTICIPANT.amountPaid);
       expect(callBody.marketplace_fee).toBe(WALK_BASE.platformFee);
+    });
+
+    // El bug: con 3 perros del mismo dueño, antes se cobraba PARTICIPANT.amountPaid
+    // (la parte de uno solo, ~$333) en vez de la suma de los 3 (~$1000). Hoy el
+    // DTO tapa este camino con ArrayMaxSize(1), pero el servicio tiene que ser
+    // correcto igual — no depender solo de la validación de entrada.
+    it('cobra la suma de TODOS los participantes del dueño, no la parte de uno solo (el bug)', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
+      prisma.walkParticipant.findMany.mockResolvedValue([
+        { amountPaid: 333.33 },
+        { amountPaid: 333.33 },
+        { amountPaid: 333.33 },
+      ]);
+      prisma.walk.findUnique.mockResolvedValue({ ...WALK_BASE });
+      prisma.walk.update.mockResolvedValue({});
+
+      await service.createPreference('user-1', DTO);
+
+      const callBody = mockPreferenceCreate.mock.calls[0][0].body;
+      expect(callBody.items[0].unit_price).toBeCloseTo(999.99, 2); // 333.33 × 3 — no $333,33
+      expect(callBody.items[0].unit_price).not.toBeCloseTo(333.33, 2);
+    });
+
+    // El marketplace_fee tiene que ser proporcional a lo cobrado (ownerTotal),
+    // no walk.platformFee (la comisión del paseo entero) — acá se ve la
+    // diferencia con números que no coinciden por casualidad.
+    it('marketplace_fee es proporcional a lo cobrado, no a walk.platformFee', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(OWNER);
+      prisma.walkParticipant.findMany.mockResolvedValue([
+        { amountPaid: 300 },
+        { amountPaid: 300 },
+        { amountPaid: 400 },
+      ]);
+      prisma.walk.findUnique.mockResolvedValue({ ...WALK_BASE }); // platformFee: 150, commissionRate: 0.1
+      prisma.walk.update.mockResolvedValue({});
+
+      await service.createPreference('user-1', DTO);
+
+      const callBody = mockPreferenceCreate.mock.calls[0][0].body;
+      expect(callBody.marketplace_fee).toBe(100); // 1000 × 0.1 — NO 150 (walk.platformFee)
     });
 
     it('camino feliz: notification_url incluye walkId como query param', async () => {

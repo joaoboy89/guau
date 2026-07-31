@@ -44,10 +44,21 @@ export class PaymentsService {
     const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
     if (!owner) throw new NotFoundException("Perfil de dueño no encontrado");
 
-    const participant = await this.prisma.walkParticipant.findFirst({
+    const participants = await this.prisma.walkParticipant.findMany({
       where: { walkId: dto.walkId, ownerId: owner.id },
+      select: { amountPaid: true },
     });
-    if (!participant) throw new ForbiddenException("No sos participante de este paseo");
+    if (participants.length === 0) {
+      throw new ForbiddenException("No sos participante de este paseo");
+    }
+    // Suma de TODOS los perros de este dueño en el paseo — no walk.totalAmount.
+    // Hoy un Walk tiene un solo dueño (walkParticipant.createMany en
+    // WalksService.create() los crea todos con el mismo ownerId), así que da
+    // lo mismo (ver test de equivalencia). El día que un paseo se comparta
+    // entre dueños, totalAmount va a ser el total del paseo completo y
+    // cobrarle eso a cada uno sería el error inverso — más caro y más grave.
+    // La suma por dueño es correcta en los dos modelos.
+    const ownerTotal = participants.reduce((acc, p) => acc + p.amountPaid, 0);
 
     const walk = await this.prisma.walk.findUnique({
       where: { id: dto.walkId },
@@ -92,11 +103,15 @@ export class PaymentsService {
             title: `Güau — Paseo ${walk.walkType.label}`,
             description: `Paseo ${walk.mode === "EXCLUSIVO" ? "exclusivo" : "grupal"} — ${walk.pickupAddress}`,
             quantity: 1,
-            unit_price: participant.amountPaid,
+            unit_price: ownerTotal,
             currency_id: "ARS",
           },
         ],
-        marketplace_fee: walk.platformFee,
+        // Proporcional a lo que se cobra, no a walk.platformFee (la comisión
+        // del paseo entero) — con un solo dueño da lo mismo, pero si se
+        // cobrara walk.platformFee acá se le pediría a MP una comisión sobre
+        // plata que este dueño en particular no está pagando.
+        marketplace_fee: ownerTotal * walk.commissionRate,
         external_reference: `${walk.id}|${owner.id}`,
         notification_url: `${apiUrl}/payments/webhook?walkId=${walk.id}`,
         back_urls: {
