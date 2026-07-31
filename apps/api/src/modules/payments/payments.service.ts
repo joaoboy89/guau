@@ -21,6 +21,13 @@ import { isWalkPaid } from "../walks/walk-payment.util";
 
 const MP_CONNECT_STATE_PURPOSE = "mp-connect";
 
+// Invariante: un Walk tiene un solo dueño. No es una convención de
+// WalksService.create() (que hoy crea todos los WalkParticipant con el mismo
+// ownerId) — está impuesto por el modelo de pagos: Walk.mpPaymentId y
+// Walk.mpRefundId son columnas únicas, así que un Walk solo puede tener UN
+// pago de MercadoPago, y un pago viene de un createPreference() de un solo
+// dueño. Soportar varios dueños por Walk no es tocar create() — requiere un
+// pago por dueño, es decir un cambio de schema.
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -52,12 +59,11 @@ export class PaymentsService {
       throw new ForbiddenException("No sos participante de este paseo");
     }
     // Suma de TODOS los perros de este dueño en el paseo — no walk.totalAmount.
-    // Hoy un Walk tiene un solo dueño (walkParticipant.createMany en
-    // WalksService.create() los crea todos con el mismo ownerId), así que da
-    // lo mismo (ver test de equivalencia). El día que un paseo se comparta
-    // entre dueños, totalAmount va a ser el total del paseo completo y
-    // cobrarle eso a cada uno sería el error inverso — más caro y más grave.
-    // La suma por dueño es correcta en los dos modelos.
+    // Hoy da lo mismo (un Walk tiene un solo dueño, ver comentario de la
+    // clase), pero el día que un paseo se comparta entre dueños, totalAmount
+    // va a ser el total del paseo completo y cobrarle eso a cada uno sería
+    // el error inverso — más caro y más grave. La suma por dueño es correcta
+    // en los dos modelos.
     const ownerTotal = participants.reduce((acc, p) => acc + p.amountPaid, 0);
 
     const walk = await this.prisma.walk.findUnique({
@@ -108,9 +114,10 @@ export class PaymentsService {
           },
         ],
         // Proporcional a lo que se cobra, no a walk.platformFee (la comisión
-        // del paseo entero) — con un solo dueño da lo mismo, pero si se
-        // cobrara walk.platformFee acá se le pediría a MP una comisión sobre
-        // plata que este dueño en particular no está pagando.
+        // del paseo entero) — hoy da lo mismo (un Walk tiene un solo dueño,
+        // ver comentario de la clase), pero si se cobrara walk.platformFee
+        // acá se le pediría a MP una comisión sobre plata que este dueño en
+        // particular no está pagando.
         marketplace_fee: ownerTotal * walk.commissionRate,
         external_reference: `${walk.id}|${owner.id}`,
         notification_url: `${apiUrl}/payments/webhook?walkId=${walk.id}`,
@@ -198,13 +205,14 @@ export class PaymentsService {
       },
     });
 
-    // Notificar al dueño — no bloquea la respuesta si el walk no tiene participantes cargados.
-    // El monto del aviso sale de la suma de lo que ESE dueño efectivamente
-    // pagó (amountPaid de sus WalkParticipant), no de walk.totalAmount — un
-    // texto sobre plata se calcula de lo que pasó, no de lo que se esperaba
-    // (mismo criterio que el mensaje de cancelación). Con un solo dueño por
-    // Walk hoy da lo mismo, pero si en algún momento totalAmount deja de ser
-    // lo que este dueño pagó, este aviso no se rompe.
+    // Notifica al primer participante del paseo — no bloquea la respuesta si
+    // el walk no tiene participantes cargados. Sin filtrar por dueño: esta
+    // función recibe solo walkId y reembolsa un único pago, que por el
+    // modelo de pagos (ver comentario de la clase) es de un solo dueño —
+    // cualquier participante que traiga apunta al mismo owner.
+    // El monto sale de la suma de amountPaid de esos participantes, no de
+    // walk.totalAmount — un texto sobre plata se calcula de lo que pasó, no
+    // de lo que se esperaba (mismo criterio que el mensaje de cancelación).
     const participants = await this.prisma.walkParticipant.findMany({
       where: { walkId },
       include: { owner: { include: { user: { select: { id: true } } } } },
