@@ -521,20 +521,69 @@ describe('WalksService', () => {
         .rejects.toThrow(NotFoundException);
     });
 
-    it('OWNER: camino feliz — devuelve walks a partir de walkIds de WalkParticipant, con isPaid e isExpired', async () => {
+    it('OWNER: camino feliz — filtra walks por participants.some(ownerId), con isPaid e isExpired', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
-      prisma.walkParticipant.findMany.mockResolvedValue([{ walkId: WALK_ID }]);
       prisma.walk.findMany.mockResolvedValue([WALK_FULL]);
       prisma.walk.count.mockResolvedValue(1);
 
       const result = await service.findMyWalks(OWNER_USER_ID, UserRole.OWNER, {});
 
+      // El where ya no arma un id: { in: [...] } a partir de una consulta
+      // previa de WalkParticipant — filtra directo por la relación.
       expect(prisma.walk.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: { in: [WALK_ID] }, scheduledAt: { gte: expect.any(Date) } },
+          where: {
+            participants: { some: { ownerId: OWNER_PROFILE_ID } },
+            scheduledAt: { gte: expect.any(Date) },
+          },
         }),
       );
       expect(result.data).toEqual([expectedPublicWalk(WALK_FULL, false)]);
+    });
+
+    it('OWNER: findMyWalks ya no hace la consulta previa de walkParticipant.findMany', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
+
+      await service.findMyWalks(OWNER_USER_ID, UserRole.OWNER, {});
+
+      expect(prisma.walkParticipant.findMany).not.toHaveBeenCalled();
+    });
+
+    it('OWNER: un paseo con dos participantes del mismo dueño (dos perros) aparece una sola vez', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      // El mock ya representa lo que Prisma devolvería con participants.some:
+      // el walk aparece UNA vez en el array, con los dos participantes
+      // adentro — some() es un WHERE EXISTS, no un join que duplica filas.
+      const sameOwner = { id: OWNER_PROFILE_ID, user: { firstName: 'Ana', lastName: 'Gómez', avatarUrl: null } };
+      prisma.walk.findMany.mockResolvedValue([{
+        ...WALK_FULL,
+        participants: [
+          { dog: { id: 'd1', name: 'Toto', size: 'MEDIANO' }, owner: sameOwner },
+          { dog: { id: 'd2', name: 'Luna', size: 'PEQUEÑO' }, owner: sameOwner },
+        ],
+      }]);
+      prisma.walk.count.mockResolvedValue(1);
+
+      const result = await service.findMyWalks(OWNER_USER_ID, UserRole.OWNER, {});
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].participants).toHaveLength(2);
+    });
+
+    it('OWNER: aplica los defaults (limit 50, ventana de 30 días) sin parámetros', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
+
+      await service.findMyWalks(OWNER_USER_ID, UserRole.OWNER, {});
+
+      expect(prisma.walk.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 0, take: 50 }),
+      );
+      const calledWhere = prisma.walk.findMany.mock.calls[0][0].where;
+      expect(calledWhere).toHaveProperty('scheduledAt.gte');
     });
 
     it('WALKER: isPaid es true cuando mpPaymentId es numérico', async () => {

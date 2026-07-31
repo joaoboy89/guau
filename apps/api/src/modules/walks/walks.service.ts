@@ -354,14 +354,13 @@ export class WalksService {
     const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
     if (!owner) throw new NotFoundException("Perfil de dueño no encontrado");
 
-    const participants = await this.prisma.walkParticipant.findMany({
-      where: { ownerId: owner.id },
-      select: { walkId: true },
-      distinct: ["walkId"],
-    });
-    const walkIds = participants.map((p) => p.walkId);
-
-    const where = { id: { in: walkIds }, ...statusFilter, ...dateFilter };
+    // Una sola consulta acotada por skip/take, sin paso intermedio ni IN
+    // gigante: "paseos donde este dueño tiene al menos un participante" es
+    // exactamente lo que calculaba el findMany + map de walkIds de antes.
+    // El distinct de esa consulta ya no hace falta — acá se filtran paseos,
+    // no participantes, así que un paseo con dos perros del mismo dueño no
+    // se duplica.
+    const where = { participants: { some: { ownerId: owner.id } }, ...statusFilter, ...dateFilter };
     const [walks, total] = await Promise.all([
       this.prisma.walk.findMany({
         where,
