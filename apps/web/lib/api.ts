@@ -107,7 +107,8 @@ export const dogsAPI = {
 
 export const walksAPI = {
   create:    (data: unknown) => api.post("/walks", data),
-  list:      ()              => api.get("/walks"),
+  list:      (params?: { status?: string; page?: number; limit?: number; days?: number }) =>
+                          api.get("/walks", { params }),
   getById:   (id: string)    => api.get(`/walks/${id}`),
   locations: (id: string)    => api.get(`/walks/${id}/locations`),
   confirm:   (id: string)    => api.put(`/walks/${id}/confirm`),

@@ -136,6 +136,7 @@ function buildPrismaMock() {
       findUnique: jest.fn(),
       findMany:   jest.fn(),
       update:     jest.fn(),
+      count:      jest.fn(),
     },
     walkLocation: { findMany: jest.fn() },
   };
@@ -500,15 +501,18 @@ describe('WalksService', () => {
     it('WALKER: camino feliz — devuelve walks filtrados por walkerId del perfil, con isPaid e isExpired', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
       prisma.walk.findMany.mockResolvedValue([WALK_FULL]);
+      prisma.walk.count.mockResolvedValue(1);
 
       const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
 
       expect(prisma.walk.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { walkerId: WALKER_PROFILE_ID } }),
+        expect.objectContaining({
+          where: { walkerId: WALKER_PROFILE_ID, scheduledAt: { gte: expect.any(Date) } },
+        }),
       );
       // WALK_FULL no tiene mpPaymentId (undefined) → isPaid false;
       // scheduledAt 2026-07-06 ya pasó → isExpired true.
-      expect(result).toEqual([expectedPublicWalk(WALK_FULL, false)]);
+      expect(result.data).toEqual([expectedPublicWalk(WALK_FULL, false)]);
     });
 
     it('OWNER: lanza NotFoundException si no existe ownerProfile', async () => {
@@ -521,22 +525,26 @@ describe('WalksService', () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
       prisma.walkParticipant.findMany.mockResolvedValue([{ walkId: WALK_ID }]);
       prisma.walk.findMany.mockResolvedValue([WALK_FULL]);
+      prisma.walk.count.mockResolvedValue(1);
 
       const result = await service.findMyWalks(OWNER_USER_ID, UserRole.OWNER, {});
 
       expect(prisma.walk.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: [WALK_ID] } } }),
+        expect.objectContaining({
+          where: { id: { in: [WALK_ID] }, scheduledAt: { gte: expect.any(Date) } },
+        }),
       );
-      expect(result).toEqual([expectedPublicWalk(WALK_FULL, false)]);
+      expect(result.data).toEqual([expectedPublicWalk(WALK_FULL, false)]);
     });
 
     it('WALKER: isPaid es true cuando mpPaymentId es numérico', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
       prisma.walk.findMany.mockResolvedValue([{ ...WALK_FULL, mpPaymentId: '99999' }]);
+      prisma.walk.count.mockResolvedValue(1);
 
       const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
 
-      expect(result[0].isPaid).toBe(true);
+      expect(result.data[0].isPaid).toBe(true);
     });
 
     it('OWNER: isExpired es false cuando scheduledAt es futuro', async () => {
@@ -544,18 +552,22 @@ describe('WalksService', () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
       prisma.walkParticipant.findMany.mockResolvedValue([{ walkId: WALK_ID }]);
       prisma.walk.findMany.mockResolvedValue([futureWalk]);
+      prisma.walk.count.mockResolvedValue(1);
 
       const result = await service.findMyWalks(OWNER_USER_ID, UserRole.OWNER, {});
 
-      expect(result[0].isExpired).toBe(false);
+      expect(result.data[0].isExpired).toBe(false);
     });
 
     it('con query.status aplica filtro adicional en el where', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
       prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
 
       await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, { status: WalkStatus.PENDING });
 
+      // PENDING no lleva filtro de fecha (ver test dedicado más abajo) —
+      // el where acá es solo walkerId + status.
       expect(prisma.walk.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { walkerId: WALKER_PROFILE_ID, status: WalkStatus.PENDING },
@@ -568,11 +580,12 @@ describe('WalksService', () => {
       prisma.walk.findMany.mockResolvedValue([
         { ...WALK_FULL, mpPaymentId: '99999', mpRefundId: 'refund-1' },
       ]);
+      prisma.walk.count.mockResolvedValue(1);
 
       const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
 
-      expect(result[0]).not.toHaveProperty('mpPaymentId');
-      expect(result[0]).not.toHaveProperty('mpRefundId');
+      expect(result.data[0]).not.toHaveProperty('mpPaymentId');
+      expect(result.data[0]).not.toHaveProperty('mpRefundId');
     });
 
     it('el walker de findMyWalks no arrastra mpAccessToken aunque venga en el dato crudo', async () => {
@@ -580,11 +593,12 @@ describe('WalksService', () => {
       prisma.walk.findMany.mockResolvedValue([
         { ...WALK_FULL, walker: { ...WALK_FULL.walker, mpAccessToken: 'no-es-un-token-real', mpUserId: 'fake-123' } },
       ]);
+      prisma.walk.count.mockResolvedValue(1);
 
       const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
 
-      expect(result[0].walker).not.toHaveProperty('mpAccessToken');
-      expect(result[0].walker).not.toHaveProperty('mpUserId');
+      expect(result.data[0].walker).not.toHaveProperty('mpAccessToken');
+      expect(result.data[0].walker).not.toHaveProperty('mpUserId');
     });
 
     it('el owner de un participante en findMyWalks no expone domicilio ni coordenadas', async () => {
@@ -600,14 +614,124 @@ describe('WalksService', () => {
           },
         }],
       }]);
+      prisma.walk.count.mockResolvedValue(1);
 
       const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
 
-      const owner = result[0].participants[0].owner;
+      const owner = result.data[0].participants[0].owner;
       expect(owner).not.toHaveProperty('address');
       expect(owner).not.toHaveProperty('neighborhood');
       expect(owner).not.toHaveProperty('lat');
       expect(owner).not.toHaveProperty('lng');
+    });
+
+    // ─── Paginación (Ventana 4) ──────────────────────────────────────────────
+
+    it('aplica take y skip según page/limit, en las dos ramas', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
+
+      await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, { page: 3, limit: 20 });
+
+      expect(prisma.walk.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 40, take: 20 }), // (page 3 - 1) * 20
+      );
+    });
+
+    it('OWNER: aplica take y skip según page/limit', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walkParticipant.findMany.mockResolvedValue([{ walkId: WALK_ID }]);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
+
+      await service.findMyWalks(OWNER_USER_ID, UserRole.OWNER, { page: 2, limit: 10 });
+
+      expect(prisma.walk.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 10, take: 10 }),
+      );
+    });
+
+    // Fail closed: el que no manda page/limit/days no queda sin protección —
+    // queda con los defaults (limit 50, ventana de 30 días). Este test es la
+    // garantía de que "no pedir nada" no es lo mismo que "pedir todo".
+    it('sin parámetros, aplica los defaults: limit 50 y ventana de 30 días', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
+
+      const before = Date.now();
+      const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {});
+      const after = Date.now();
+
+      expect(prisma.walk.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 0, take: 50 }),
+      );
+      const calledWhere = prisma.walk.findMany.mock.calls[0][0].where;
+      const gte = calledWhere.scheduledAt.gte.getTime();
+      const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+      // El threshold tiene que caer en la ventana [ahora-30d antes de la
+      // llamada, ahora-30d después de la llamada] — con margen de milisegundos
+      // por el tiempo real que tarda en ejecutar el test.
+      expect(gte).toBeGreaterThanOrEqual(before - THIRTY_DAYS_MS);
+      expect(gte).toBeLessThanOrEqual(after - THIRTY_DAYS_MS);
+      expect(result.meta).toEqual({ total: 0, page: 1, limit: 50, totalPages: 0, days: 30 });
+    });
+
+    it('status=PENDING NO aplica el filtro de fecha — un pendiente viejo aparece igual', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
+
+      await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, { status: WalkStatus.PENDING });
+
+      const calledWhere = prisma.walk.findMany.mock.calls[0][0].where;
+      expect(calledWhere).not.toHaveProperty('scheduledAt');
+    });
+
+    it('status=PENDING SÍ aplica el techo de limit — la excepción es de producto, no de defensa', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
+
+      await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, {
+        status: WalkStatus.PENDING,
+        limit: 5,
+      });
+
+      expect(prisma.walk.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 5 }),
+      );
+    });
+
+    it('sin status, usa el threshold de scheduledAt derivado de days (por defecto 30)', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(0);
+
+      await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, { days: 10 });
+
+      const calledWhere = prisma.walk.findMany.mock.calls[0][0].where;
+      const gte = calledWhere.scheduledAt.gte as Date;
+      const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
+      // Un walk de hace 60 días quedaría antes de este threshold (no viene);
+      // uno de hace 5 días, después (sí viene) — es lo que Prisma filtraría
+      // con este gte en una base real.
+      const sixtyDaysAgo = Date.now() - 60 * 24 * 60 * 60 * 1000;
+      const fiveDaysAgo = Date.now() - 5 * 24 * 60 * 60 * 1000;
+      expect(sixtyDaysAgo).toBeLessThan(gte.getTime());
+      expect(fiveDaysAgo).toBeGreaterThan(gte.getTime());
+      expect(gte.getTime()).toBeGreaterThan(Date.now() - TEN_DAYS_MS - 5000);
+    });
+
+    it('meta.totalPages se calcula bien y meta.days refleja la ventana usada', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findMany.mockResolvedValue([]);
+      prisma.walk.count.mockResolvedValue(45);
+
+      const result = await service.findMyWalks(WALKER_USER_ID, UserRole.WALKER, { limit: 20, days: 15 });
+
+      expect(result.meta).toEqual({ total: 45, page: 1, limit: 20, totalPages: 3, days: 15 });
     });
   });
 
