@@ -198,16 +198,23 @@ export class PaymentsService {
       },
     });
 
-    // Notificar al dueño — no bloquea la respuesta si el walk no tiene participantes cargados
-    const participant = await this.prisma.walkParticipant.findFirst({
+    // Notificar al dueño — no bloquea la respuesta si el walk no tiene participantes cargados.
+    // El monto del aviso sale de la suma de lo que ESE dueño efectivamente
+    // pagó (amountPaid de sus WalkParticipant), no de walk.totalAmount — un
+    // texto sobre plata se calcula de lo que pasó, no de lo que se esperaba
+    // (mismo criterio que el mensaje de cancelación). Con un solo dueño por
+    // Walk hoy da lo mismo, pero si en algún momento totalAmount deja de ser
+    // lo que este dueño pagó, este aviso no se rompe.
+    const participants = await this.prisma.walkParticipant.findMany({
       where: { walkId },
       include: { owner: { include: { user: { select: { id: true } } } } },
     });
-    if (participant) {
+    if (participants.length > 0) {
+      const ownerTotal = participants.reduce((acc, p) => acc + p.amountPaid, 0);
       await this.notificationsService.create({
-        userId: participant.owner.user.id,
+        userId: participants[0].owner.user.id,
         title: "Te devolvimos el dinero del paseo",
-        body: `El paseo no se realizó — reembolsamos $${walk.totalAmount.toLocaleString("es-AR")} a tu cuenta de MercadoPago.`,
+        body: `El paseo no se realizó — reembolsamos $${ownerTotal.toLocaleString("es-AR")} a tu cuenta de MercadoPago.`,
         type: NOTIFICATION_TYPES.WALK_CANCELLED_WALKER,
         data: { walkId, refundId },
       });
