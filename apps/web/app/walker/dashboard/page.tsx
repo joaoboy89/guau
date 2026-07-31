@@ -74,11 +74,32 @@ interface WalkItem {
   status: string;
   scheduledAt: string;
   isPaid: boolean;
+  isExpired: boolean;
   walkType: { label: string };
   participants: Array<{
     dog:   { name: string };
     owner: { user: { firstName: string; lastName: string } };
   }>;
+}
+
+interface WalksMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  days: number;
+}
+
+// Combina dos listas de walks por id (último gana) y reordena por fecha —
+// necesario porque el historial se arma con datos de dos llamadas distintas
+// (pendientes vencidos + páginas del historial) que pueden resolver en
+// cualquier orden.
+function mergeWalksById(a: WalkItem[], b: WalkItem[]): WalkItem[] {
+  const map = new Map(a.map((w) => [w.id, w]));
+  for (const w of b) map.set(w.id, w);
+  return Array.from(map.values()).sort(
+    (x, y) => new Date(y.scheduledAt).getTime() - new Date(x.scheduledAt).getTime()
+  );
 }
 
 const BADGE: Record<
@@ -98,7 +119,17 @@ export default function WalkerDashboardPage() {
   const [availError, setAvailError] = useState<string | null>(null);
   const [connectLoading, setConnectLoading] = useState(false);
 
-  const [walks, setWalks]           = useState<WalkItem[]>([]);
+  // "Requieren confirmación" y el historial son dos preguntas distintas que
+  // comparten un endpoint por casualidad: si se pidieran con una sola
+  // llamada paginada, un PENDING que cayera fuera de la primera página
+  // desaparecería de "Requieren confirmación" y el dueño se quedaría
+  // esperando una respuesta que nunca llega. Por eso son dos llamadas: los
+  // pendientes (sin límite de fecha, siempre completos) y el historial
+  // (paginado, ventana de 30 días).
+  const [pendingWalks, setPendingWalks] = useState<WalkItem[]>([]);
+  const [historyWalks, setHistoryWalks] = useState<WalkItem[]>([]);
+  const [historyMeta, setHistoryMeta]   = useState<WalksMeta | null>(null);
+  const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
   const [actioning, setActioning]   = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -115,6 +146,27 @@ export default function WalkerDashboardPage() {
 
   const [days, setDays] = useState<DayRow[]>(buildDefaultDays());
   const [schedulesSaving, setSchedulesSaving] = useState(false);
+
+  // Dos llamadas, no una: PENDING sin filtro de fecha (siempre completos) y
+  // el historial paginado (30 días por defecto). Los PENDING vencidos que
+  // trae la primera llamada se descartan de "Requieren confirmación" y se
+  // suman al historial — confirmar un paseo cuya fecha ya pasó no tiene
+  // sentido, pero siguen siendo parte de lo que pasó.
+  const fetchWalks = async () => {
+    const [pendingRes, historyRes] = await Promise.all([
+      walksAPI.list({ status: "PENDING" }),
+      walksAPI.list(),
+    ]);
+    const pendingItems: WalkItem[] = pendingRes.data.data;
+    const expired = pendingItems.filter((w) => w.isExpired);
+    setPendingWalks(pendingItems.filter((w) => !w.isExpired));
+
+    const historyItems: WalkItem[] = historyRes.data.data.filter(
+      (w: WalkItem) => w.status !== "PENDING"
+    );
+    setHistoryWalks(mergeWalksById(historyItems, expired));
+    setHistoryMeta(historyRes.data.meta);
+  };
 
   useEffect(() => {
     if (!ready) return;
@@ -135,8 +187,24 @@ export default function WalkerDashboardPage() {
         })
       );
     });
-    walksAPI.list().then((res) => setWalks(res.data));
+    fetchWalks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  const handleLoadMoreHistory = async () => {
+    if (!historyMeta || loadingMoreHistory) return;
+    const nextPage = historyMeta.page + 1;
+    if (nextPage > historyMeta.totalPages) return;
+    setLoadingMoreHistory(true);
+    try {
+      const res = await walksAPI.list({ page: nextPage });
+      const items: WalkItem[] = res.data.data.filter((w: WalkItem) => w.status !== "PENDING");
+      setHistoryWalks((prev) => mergeWalksById(prev, items));
+      setHistoryMeta(res.data.meta);
+    } finally {
+      setLoadingMoreHistory(false);
+    }
+  };
 
   useEffect(() => {
     const handlePageShow = (event: PageTransitionEvent) => {
@@ -276,9 +344,11 @@ export default function WalkerDashboardPage() {
     setActionError(null);
     try {
       await walksAPI.confirm(walkId);
-      setWalks((prev) =>
-        prev.map((w) => (w.id === walkId ? { ...w, status: "CONFIRMED" } : w))
-      );
+      const walk = pendingWalks.find((w) => w.id === walkId);
+      setPendingWalks((prev) => prev.filter((w) => w.id !== walkId));
+      if (walk) {
+        setHistoryWalks((prev) => mergeWalksById(prev, [{ ...walk, status: "CONFIRMED" }]));
+      }
     } catch (err: unknown) {
       const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
       setActionError(msg ?? "No se pudo confirmar el paseo. Intentá de nuevo.");
@@ -293,9 +363,11 @@ export default function WalkerDashboardPage() {
     setActionError(null);
     try {
       await walksAPI.reject(walkId);
-      setWalks((prev) =>
-        prev.map((w) => (w.id === walkId ? { ...w, status: "CANCELLED_WALKER" } : w))
-      );
+      const walk = pendingWalks.find((w) => w.id === walkId);
+      setPendingWalks((prev) => prev.filter((w) => w.id !== walkId));
+      if (walk) {
+        setHistoryWalks((prev) => mergeWalksById(prev, [{ ...walk, status: "CANCELLED_WALKER" }]));
+      }
     } catch (err: unknown) {
       const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
       setActionError(msg ?? "No se pudo rechazar el paseo. Intentá de nuevo.");
@@ -321,8 +393,7 @@ export default function WalkerDashboardPage() {
         cancelReason.trim() ? { cancellationReason: cancelReason.trim() } : undefined
       );
       // Se refresca desde el servidor, no se muta el estado local a mano.
-      const res = await walksAPI.list();
-      setWalks(res.data);
+      await fetchWalks();
       setCancelDialogWalkId(null);
       setCancelReason("");
     } catch (err: unknown) {
@@ -337,9 +408,6 @@ export default function WalkerDashboardPage() {
 
   const badge    = BADGE[profile.verificationStatus];
   const fullName = `${profile.user.firstName} ${profile.user.lastName}`;
-
-  const pendingWalks = walks.filter((w) => w.status === "PENDING");
-  const otherWalks   = walks.filter((w) => w.status !== "PENDING");
 
   const hasZone         = profile.centerLat != null && profile.centerLng != null && profile.radiusKm != null;
   const hasUnsavedDays   = days.some(isDayDirty);
@@ -657,15 +725,15 @@ export default function WalkerDashboardPage() {
           </div>
         )}
 
-        {/* Resto de paseos */}
-        {otherWalks.length > 0 && (
+        {/* Historial */}
+        {historyWalks.length > 0 && (
           <div className="flex flex-col gap-2">
             {pendingWalks.length > 0 && (
               <p className="text-xs font-semibold text-brand-text-muted uppercase tracking-wide">
                 Historial
               </p>
             )}
-            {otherWalks.map((walk) => {
+            {historyWalks.map((walk) => {
               const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
                 dateStyle: "long",
                 timeStyle: "short",
@@ -704,10 +772,28 @@ export default function WalkerDashboardPage() {
                 </div>
               );
             })}
+
+            {historyMeta && historyMeta.page < historyMeta.totalPages && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-fit self-center mt-1"
+                onClick={handleLoadMoreHistory}
+                loading={loadingMoreHistory}
+              >
+                Cargar más
+              </Button>
+            )}
+
+            {historyMeta && (
+              <p className="text-xs text-brand-text-muted text-center mt-1">
+                Mostrando tus paseos de los últimos {historyMeta.days} días.
+              </p>
+            )}
           </div>
         )}
 
-        {walks.length === 0 && (
+        {pendingWalks.length === 0 && historyWalks.length === 0 && (
           <div className="flex items-center justify-center rounded-3xl border border-dashed border-brand-border min-h-40">
             <p className="text-sm text-brand-text-muted">
               Todavía no tenés paseos asignados.
