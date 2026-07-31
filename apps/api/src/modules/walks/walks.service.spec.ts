@@ -1395,5 +1395,20 @@ describe('WalksService', () => {
       );
       expect(result).toEqual(LOCATIONS);
     });
+
+    // Techo de seguridad, no paginación — una ruta es un objeto único. Sin
+    // esto, un paseo con muestreo mal configurado (o un cliente enviando de
+    // más) trae toda la tabla en una sola respuesta.
+    it('aplica un techo de seguridad (take) a la consulta de ubicaciones', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ id: WALK_ID, walkerId: WALKER_PROFILE_ID });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walkLocation.findMany.mockResolvedValue(LOCATIONS);
+
+      await service.getLocations(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+
+      expect(prisma.walkLocation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 5000 }),
+      );
+    });
   });
 });
