@@ -81,7 +81,7 @@ function buildPrismaMock() {
   return {
     ownerProfile:    { findUnique: jest.fn() },
     walkerProfile:   { findUnique: jest.fn(), update: jest.fn() },
-    walkParticipant: { findFirst: jest.fn(), findMany: jest.fn() },
+    walkParticipant: { findMany: jest.fn() },
     walk:            { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     payout:          { upsert: jest.fn() },
   };
@@ -392,7 +392,7 @@ describe('PaymentsService', () => {
     it('camino feliz: llama a MP con el token del walker y X-Idempotency-Key derivado del walkId', async () => {
       prisma.walk.findUnique.mockResolvedValue(buildRefundWalk());
       prisma.walk.update.mockResolvedValue({});
-      prisma.walkParticipant.findFirst.mockResolvedValue({ owner: { user: { id: 'owner-user-1' } } });
+      prisma.walkParticipant.findMany.mockResolvedValue([{ amountPaid: 1500, owner: { user: { id: 'owner-user-1' } } }]);
       (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ id: 555 }) });
 
       await service.refundWalkPayment(REFUND_WALK_ID);
@@ -412,7 +412,7 @@ describe('PaymentsService', () => {
     it('camino feliz: guarda mpRefundId + refundedAt y transiciona a CANCELLED_WALKER', async () => {
       prisma.walk.findUnique.mockResolvedValue(buildRefundWalk());
       prisma.walk.update.mockResolvedValue({});
-      prisma.walkParticipant.findFirst.mockResolvedValue({ owner: { user: { id: 'owner-user-1' } } });
+      prisma.walkParticipant.findMany.mockResolvedValue([{ amountPaid: 1500, owner: { user: { id: 'owner-user-1' } } }]);
       (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ id: 555 }) });
 
       await service.refundWalkPayment(REFUND_WALK_ID);
@@ -430,7 +430,7 @@ describe('PaymentsService', () => {
     it('camino feliz: no pisa el status si el walk ya estaba cancelado', async () => {
       prisma.walk.findUnique.mockResolvedValue(buildRefundWalk({ status: WalkStatus.CANCELLED_OWNER }));
       prisma.walk.update.mockResolvedValue({});
-      prisma.walkParticipant.findFirst.mockResolvedValue({ owner: { user: { id: 'owner-user-1' } } });
+      prisma.walkParticipant.findMany.mockResolvedValue([{ amountPaid: 1500, owner: { user: { id: 'owner-user-1' } } }]);
       (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ id: 555 }) });
 
       await service.refundWalkPayment(REFUND_WALK_ID);
@@ -447,7 +447,7 @@ describe('PaymentsService', () => {
     it('camino feliz: notifica al dueño que le devolvimos la plata', async () => {
       prisma.walk.findUnique.mockResolvedValue(buildRefundWalk());
       prisma.walk.update.mockResolvedValue({});
-      prisma.walkParticipant.findFirst.mockResolvedValue({ owner: { user: { id: 'owner-user-1' } } });
+      prisma.walkParticipant.findMany.mockResolvedValue([{ amountPaid: 1500, owner: { user: { id: 'owner-user-1' } } }]);
       (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ id: 555 }) });
 
       await service.refundWalkPayment(REFUND_WALK_ID);
