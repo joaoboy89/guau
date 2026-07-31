@@ -492,6 +492,12 @@ export class WalksService {
       where: { walkId },
       orderBy: { recordedAt: "asc" },
       select: { lat: true, lng: true, recordedAt: true },
+      // Techo de seguridad, no paginación: una ruta es un objeto único y
+      // media ruta dibuja un mapa engañoso. 5.000 puntos son ~7 horas a una
+      // muestra por cada 5 segundos — muy por encima de cualquier paseo
+      // real. Si alguna vez se toca este límite, el problema no es la
+      // consulta: es la frecuencia de muestreo del cliente.
+      take: 5000,
     });
   }
 
