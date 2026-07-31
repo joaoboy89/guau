@@ -24,7 +24,11 @@ export class CreateWalkDto {
   @ApiProperty({ description: "IDs de los perros que van al paseo", type: [String] })
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(6)
+  // Multi-perro: el precio no lo contempla (amountPaid sale de basePrice sin
+  // mirar la cantidad — WalksService.create() reparte basePrice / N en vez de
+  // cobrar basePrice * N). Subir este número recién cuando exista la
+  // política de precio por N perros — ver docs/guau-pendientes.md.
+  @ArrayMaxSize(1)
   @IsString({ each: true })
   dogIds: string[];
 
