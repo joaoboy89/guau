@@ -316,18 +316,38 @@ export class WalksService {
   // ─── Mis paseos ──────────────────────────────────────────
 
   async findMyWalks(userId: string, role: string, query: QueryWalksDto) {
-    const statusFilter = query.status ? { status: query.status as WalkStatus } : {};
+    const { status, page = 1, limit = 50, days = 30 } = query;
+    const skip = (page - 1) * limit;
+    const statusFilter = status ? { status: status as WalkStatus } : {};
+
+    // La ventana de 30 días es de producto (evita mandar un año de historial
+    // que nadie lee), no de defensa — por eso PENDING queda afuera: son
+    // pocos por definición y cada uno es alguien esperando una respuesta. El
+    // techo de `limit` SÍ aplica siempre, sin excepción — esa es la defensa.
+    const dateFilter =
+      status === "PENDING"
+        ? {}
+        : { scheduledAt: { gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) } };
 
     if (role === UserRole.WALKER) {
       const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
       if (!walker) throw new NotFoundException("Perfil de paseador no encontrado");
 
-      const walks = await this.prisma.walk.findMany({
-        where: { walkerId: walker.id, ...statusFilter },
-        include: WALK_INCLUDE,
-        orderBy: { scheduledAt: "desc" },
-      });
-      return walks.map(toPublicWalk);
+      const where = { walkerId: walker.id, ...statusFilter, ...dateFilter };
+      const [walks, total] = await Promise.all([
+        this.prisma.walk.findMany({
+          where,
+          include: WALK_INCLUDE,
+          orderBy: { scheduledAt: "desc" },
+          skip,
+          take: limit,
+        }),
+        this.prisma.walk.count({ where }),
+      ]);
+      return {
+        data: walks.map(toPublicWalk),
+        meta: { total, page, limit, totalPages: Math.ceil(total / limit), days },
+      };
     }
 
     // OWNER — busca por WalkParticipant
@@ -341,12 +361,21 @@ export class WalksService {
     });
     const walkIds = participants.map((p) => p.walkId);
 
-    const walks = await this.prisma.walk.findMany({
-      where: { id: { in: walkIds }, ...statusFilter },
-      include: WALK_INCLUDE,
-      orderBy: { scheduledAt: "desc" },
-    });
-    return walks.map(toPublicWalk);
+    const where = { id: { in: walkIds }, ...statusFilter, ...dateFilter };
+    const [walks, total] = await Promise.all([
+      this.prisma.walk.findMany({
+        where,
+        include: WALK_INCLUDE,
+        orderBy: { scheduledAt: "desc" },
+        skip,
+        take: limit,
+      }),
+      this.prisma.walk.count({ where }),
+    ]);
+    return {
+      data: walks.map(toPublicWalk),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit), days },
+    };
   }
 
   // ─── Detalle de un paseo ─────────────────────────────────
