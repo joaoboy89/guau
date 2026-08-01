@@ -70,11 +70,14 @@ function Hero() {
           </div>
 
           <div className="overflow-hidden rounded-3xl shadow-float">
+            {/* -temp: imagen provisoria hasta la sesión de fotos con la paseadora
+                real. El `nota` de abajo sigue siendo el brief de la foto final. */}
             <PhotoSlot
-              alt="Paseador caminando con dos perros por una vereda arbolada de Buenos Aires"
+              src="/landing/hero-temp.jpg"
+              alt="Paseadora sonriendo, agachada junto a un perro mestizo en una vereda de Buenos Aires"
               width={1000}
               height={1100}
-              nota="Foto principal: paseador real con perros, luz cálida de tarde. Vertical."
+              nota="Foto principal: retrato de paseador/a con un perro, cara visible y mirada a cámara — es la que engancha. Vertical."
               priority
             />
           </div>
@@ -231,11 +234,13 @@ function ParaPaseadores() {
       <Container width="wide">
         <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
           <div className="order-2 overflow-hidden rounded-3xl shadow-card lg:order-1">
+            {/* -temp: imagen provisoria, ver comentario del hero. */}
             <PhotoSlot
-              alt="Paseadora sonriendo mientras sostiene la correa de un perro"
+              src="/landing/accion-temp.jpg"
+              alt="Paseador caminando con tres perros por una vereda arbolada de Buenos Aires"
               width={900}
               height={700}
-              nota="Retrato de paseador/a en la calle, cálido y cercano. Horizontal."
+              nota="Foto de acción: paseador caminando con perros, plano abierto con calle de fondo. Contrasta con el hero, que es cercano y estático. Horizontal."
             />
           </div>
 
