@@ -80,7 +80,12 @@ jobs:
           gcloud run deploy guau-backend-staging \
             --image=us-central1-docker.pkg.dev/project-ab69c1ce-8ed0-433a-b1a/guau-staging-repo/guau-backend:staging-${{ github.sha }} \
             --region=us-central1 \
-            --cpu=2 \
-            --memory=2Gi \
+            --cpu=1 \
+            --memory=1Gi \
+            --min-instances=0 \
+            --max-instances=3 \
+            --concurrency=80 \
             --platform=managed \
+            --add-cloudsql-instances=project-ab69c1ce-8ed0-433a-b1a:us-central1:guau-db-staging \
+            --set-secrets=DATABASE_URL=DATABASE_URL_STAGING:latest \
             --allow-unauthenticated
