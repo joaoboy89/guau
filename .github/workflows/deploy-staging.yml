@@ -71,14 +71,14 @@ jobs:
           file: Dockerfile
           push: true
           platforms: linux/amd64
-          tags: us-central1-docker.pkg.dev/project-ab69c1ce-8ed0-433a-b1a/guau-repo/guau-backend:staging-${{ github.sha }}
+          tags: us-central1-docker.pkg.dev/project-ab69c1ce-8ed0-433a-b1a/guau-staging-repo/guau-backend:staging-${{ github.sha }}
           cache-from: type=gha,scope=api-staging
           cache-to: type=gha,mode=max,scope=api-staging
 
       - name: Deploy API a Cloud Run
         run: |
           gcloud run deploy guau-backend-staging \
-            --image=us-central1-docker.pkg.dev/project-ab69c1ce-8ed0-433a-b1a/guau-repo/guau-backend:staging-${{ github.sha }} \
+            --image=us-central1-docker.pkg.dev/project-ab69c1ce-8ed0-433a-b1a/guau-staging-repo/guau-backend:staging-${{ github.sha }} \
             --region=us-central1 \
             --cpu=2 \
             --memory=2Gi \
