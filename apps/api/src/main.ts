@@ -69,5 +69,3 @@ bootstrap().catch((err) => {
   console.error("Error fatal al arrancar la API:", err);
   process.exit(1);
 });
-
-// CI/CD verification commit - staging trigger test
