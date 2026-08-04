@@ -87,5 +87,23 @@ jobs:
             --concurrency=80 \
             --platform=managed \
             --add-cloudsql-instances=project-ab69c1ce-8ed0-433a-b1a:us-central1:guau-db-staging \
-            --set-secrets=DATABASE_URL=DATABASE_URL_STAGING:latest \
-            --allow-unauthenticated
+            --allow-unauthenticated \
+            --set-secrets=DATABASE_URL=DATABASE_URL_STAGING:latest,\
+            POSTGRES_PASSWORD=POSTGRES_PASSWORD:latest,\
+            JWT_SECRET=JWT_SECRET:latest,\
+            JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,\
+            JWT_EMAIL_SECRET=JWT_EMAIL_SECRET:latest,\
+            RESEND_API_KEY=RESEND_API_KEY:latest,\
+            FRONTEND_URL=FRONTEND_URL:latest,\
+            MP_ACCESS_TOKEN=MP_ACCESS_TOKEN:latest,\
+            MERCADOPAGO_PUBLIC_KEY=MERCADOPAGO_PUBLIC_KEY:latest,\
+            MP_WEBHOOK_SECRET=MP_WEBHOOK_SECRET:latest,\
+            MP_CLIENT_ID=MP_CLIENT_ID:latest,\
+            MP_CLIENT_SECRET=MP_CLIENT_SECRET:latest,\
+            CLOUDFLARE_TUNNEL_TOKEN=CLOUDFLARE_TUNNEL_TOKEN:latest,\
+            EMAIL_FROM=EMAIL_FROM:latest,\
+            API_URL=API_URL:latest,\
+            SWAGGER_USER=SWAGGER_USER:latest,\
+            SWAGGER_PASSWORD=SWAGGER_PASSWORD:latest,\
+            ENCRYPTION_KEY=ENCRYPTION_KEY:latest,\
+            GH_TOKEN=GH_TOKEN:latest
