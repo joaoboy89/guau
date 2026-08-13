@@ -260,6 +260,28 @@ export default function WalkDetailPage() {
           </div>
         )}
 
+        {/* Paseo en curso — el dueño no tiene nada que hacer, pero tampoco
+            puede quedarse sin ver nada. Hasta hoy estos tres estados eran
+            inalcanzables, asi que el bloque de acciones solo contemplaba
+            PENDING y CONFIRMED: un paseo que arranca dejaba la pantalla sin
+            una sola linea debajo de los datos, incluido el "Pago completado"
+            que se veia un segundo antes. Es un mensaje neutro, no
+            funcionalidad nueva del lado del dueño. */}
+        {(walk.status === "WALKER_ON_WAY" || walk.status === "IN_PROGRESS") && (
+          <div className="px-4 py-3 rounded-xl bg-brand-primary-soft border border-brand-primary/20 text-sm text-brand-primary">
+            {walk.status === "WALKER_ON_WAY"
+              ? "El paseador está yendo a buscar a tu perro."
+              : "El paseo está en curso."}
+            {walk.isPaid && " Ya está pagado."}
+          </div>
+        )}
+
+        {walk.status === "COMPLETED" && (
+          <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
+            Paseo completado.
+          </div>
+        )}
+
         {/* Cancelar — un solo botón, dos comportamientos: si no está pagado,
             cancela; si está pagado, la cancelación con devolución todavía no
             existe en la app y no hay ningún canal de contacto al que mandar

@@ -3,12 +3,20 @@
 import { useEffect, useState } from "react";
 import { useRequireAuth } from "@/lib/auth";
 import { walkersAPI, paymentsAPI, walksAPI } from "@/lib/api";
-import { STATUS_LABEL, canCancelWalk } from "@/lib/walk-status";
+import {
+  STATUS_LABEL,
+  STATUS_VARIANT,
+  canCancelWalk,
+  isActiveWalk,
+  nextWalkAction,
+  type WalkTransition,
+} from "@/lib/walk-status";
 import { DAY_LABELS } from "@/lib/schedule";
 import { findNearestBarrio, type Barrio } from "@/lib/barrios";
 import BarrioSelect from "@/components/BarrioSelect";
-import { Button } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import CancelWalkDialog from "@/components/CancelWalkDialog";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { AxiosError } from "axios";
 
 interface WalkerSchedule {
@@ -102,6 +110,39 @@ function mergeWalksById(a: WalkItem[], b: WalkItem[]): WalkItem[] {
   );
 }
 
+// Los activos se ordenan al reves que el historial: lo que viene primero va
+// arriba. En el historial la pregunta es "que paso recien"; en los activos,
+// "que tengo que hacer ahora".
+function sortByScheduledAsc(walks: WalkItem[]): WalkItem[] {
+  return [...walks].sort(
+    (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
+  );
+}
+
+// Un paseo activo es el que todavia tiene una accion pendiente del paseador
+// (CONFIRMED / WALKER_ON_WAY / IN_PROGRESS). Deliberadamente NO se mira
+// `isExpired`: es `scheduledAt <= now`, asi que marca vencido a todo paseo en
+// curso — filtrarlo por ahi le sacaria el boton al paseador exactamente
+// mientras trabaja.
+function splitActive(items: WalkItem[]): { active: WalkItem[]; past: WalkItem[] } {
+  const active: WalkItem[] = [];
+  const past:   WalkItem[] = [];
+  for (const w of items) (isActiveWalk(w.status) ? active : past).push(w);
+  return { active, past };
+}
+
+const TRANSITION_CALL: Record<WalkTransition, (id: string) => Promise<unknown>> = {
+  onWay:  walksAPI.onWay,
+  start:  walksAPI.start,
+  finish: walksAPI.finish,
+};
+
+const TRANSITION_ERROR: Record<WalkTransition, string> = {
+  onWay:  "No se pudo avisar que vas en camino. Intentá de nuevo.",
+  start:  "No se pudo iniciar el paseo. Intentá de nuevo.",
+  finish: "No se pudo finalizar el paseo. Intentá de nuevo.",
+};
+
 const BADGE: Record<
   WalkerProfile["verificationStatus"],
   { label: string; className: string }
@@ -127,11 +168,17 @@ export default function WalkerDashboardPage() {
   // pendientes (sin límite de fecha, siempre completos) y el historial
   // (paginado, ventana de 30 días).
   const [pendingWalks, setPendingWalks] = useState<WalkItem[]>([]);
+  // Tercera seccion, no una vista del historial: un CONFIRMED dejo de ser
+  // algo que ya paso — significa que el paseador tiene que salir.
+  const [activeWalks, setActiveWalks]   = useState<WalkItem[]>([]);
   const [historyWalks, setHistoryWalks] = useState<WalkItem[]>([]);
   const [historyMeta, setHistoryMeta]   = useState<WalksMeta | null>(null);
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
   const [actioning, setActioning]   = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const [finishDialogWalkId, setFinishDialogWalkId] = useState<string | null>(null);
+  const [finishError, setFinishError] = useState<string | null>(null);
 
   const [cancelDialogWalkId, setCancelDialogWalkId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
@@ -161,10 +208,12 @@ export default function WalkerDashboardPage() {
     const expired = pendingItems.filter((w) => w.isExpired);
     setPendingWalks(pendingItems.filter((w) => !w.isExpired));
 
-    const historyItems: WalkItem[] = historyRes.data.data.filter(
+    const rest: WalkItem[] = historyRes.data.data.filter(
       (w: WalkItem) => w.status !== "PENDING"
     );
-    setHistoryWalks(mergeWalksById(historyItems, expired));
+    const { active, past } = splitActive(rest);
+    setActiveWalks(sortByScheduledAsc(active));
+    setHistoryWalks(mergeWalksById(past, expired));
     setHistoryMeta(historyRes.data.meta);
   };
 
@@ -199,7 +248,12 @@ export default function WalkerDashboardPage() {
     try {
       const res = await walksAPI.list({ page: nextPage });
       const items: WalkItem[] = res.data.data.filter((w: WalkItem) => w.status !== "PENDING");
-      setHistoryWalks((prev) => mergeWalksById(prev, items));
+      // Los activos caen en la primera pagina por el orden descendente, pero
+      // se separan igual en cada una: si alguno aparece mas abajo tiene que ir
+      // a su seccion, no al historial.
+      const { active, past } = splitActive(items);
+      setActiveWalks((prev) => sortByScheduledAsc(mergeWalksById(prev, active)));
+      setHistoryWalks((prev) => mergeWalksById(prev, past));
       setHistoryMeta(res.data.meta);
     } finally {
       setLoadingMoreHistory(false);
@@ -338,42 +392,98 @@ export default function WalkerDashboardPage() {
     }
   };
 
-  const handleConfirm = async (walkId: string) => {
-    if (actioning) return;
+  /**
+   * Todas las transiciones pasan por aca, y todas terminan refrescando desde
+   * el servidor.
+   *
+   * `handleConfirm` y `handleReject` mutaban el estado local a mano
+   * (`setHistoryWalks(prev => ...)` con el status escrito del lado del
+   * cliente). Con dos transiciones eso todavia se sostenia; con cinco, el
+   * estado local y el del backend se despegan enseguida — y el bug que sale
+   * de ahi, una tarjeta mostrando un estado que el backend no tiene, es de
+   * los mas dificiles de reproducir. Una request de mas por accion es barata
+   * al lado de eso.
+   *
+   * Devuelve si la transicion salio bien, para que quien abrio un dialogo
+   * sepa si cerrarlo.
+   */
+  const runWalkAction = async (
+    walkId: string,
+    call: () => Promise<unknown>,
+    fallbackMsg: string,
+    onError: (msg: string) => void,
+  ): Promise<boolean> => {
+    if (actioning) return false;
     setActioning(walkId);
-    setActionError(null);
     try {
-      await walksAPI.confirm(walkId);
-      const walk = pendingWalks.find((w) => w.id === walkId);
-      setPendingWalks((prev) => prev.filter((w) => w.id !== walkId));
-      if (walk) {
-        setHistoryWalks((prev) => mergeWalksById(prev, [{ ...walk, status: "CONFIRMED" }]));
-      }
+      await call();
+      await fetchWalks();
+      return true;
     } catch (err: unknown) {
       const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
-      setActionError(msg ?? "No se pudo confirmar el paseo. Intentá de nuevo.");
+      onError(msg ?? fallbackMsg);
+      return false;
     } finally {
       setActioning(null);
     }
   };
 
-  const handleReject = async (walkId: string) => {
-    if (actioning) return;
-    setActioning(walkId);
+  const handleConfirm = (walkId: string) => {
     setActionError(null);
-    try {
-      await walksAPI.reject(walkId);
-      const walk = pendingWalks.find((w) => w.id === walkId);
-      setPendingWalks((prev) => prev.filter((w) => w.id !== walkId));
-      if (walk) {
-        setHistoryWalks((prev) => mergeWalksById(prev, [{ ...walk, status: "CANCELLED_WALKER" }]));
-      }
-    } catch (err: unknown) {
-      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
-      setActionError(msg ?? "No se pudo rechazar el paseo. Intentá de nuevo.");
-    } finally {
-      setActioning(null);
+    void runWalkAction(
+      walkId,
+      () => walksAPI.confirm(walkId),
+      "No se pudo confirmar el paseo. Intentá de nuevo.",
+      setActionError,
+    );
+  };
+
+  const handleReject = (walkId: string) => {
+    setActionError(null);
+    void runWalkAction(
+      walkId,
+      () => walksAPI.reject(walkId),
+      "No se pudo rechazar el paseo. Intentá de nuevo.",
+      setActionError,
+    );
+  };
+
+  // Un solo boton por tarjeta y el estado decide cual: nextWalkAction devuelve
+  // la unica transicion disponible. "Finalizar" abre dialogo porque COMPLETED
+  // es terminal; los otros dos salen directo.
+  const handleWalkAction = (walk: WalkItem) => {
+    const next = nextWalkAction(walk.status);
+    if (!next) return;
+    if (next.needsConfirm) {
+      setFinishError(null);
+      setFinishDialogWalkId(walk.id);
+      return;
     }
+    setActionError(null);
+    void runWalkAction(
+      walk.id,
+      () => TRANSITION_CALL[next.action](walk.id),
+      TRANSITION_ERROR[next.action],
+      setActionError,
+    );
+  };
+
+  const dismissFinishDialog = () => {
+    if (actioning) return;
+    setFinishDialogWalkId(null);
+    setFinishError(null);
+  };
+
+  const handleFinishConfirm = async () => {
+    if (!finishDialogWalkId) return;
+    setFinishError(null);
+    const ok = await runWalkAction(
+      finishDialogWalkId,
+      () => walksAPI.finish(finishDialogWalkId),
+      TRANSITION_ERROR.finish,
+      setFinishError,
+    );
+    if (ok) setFinishDialogWalkId(null);
   };
 
   const dismissCancelDialog = () => {
@@ -384,23 +494,20 @@ export default function WalkerDashboardPage() {
   };
 
   const handleCancel = async (walkId: string) => {
-    if (actioning) return;
-    setActioning(walkId);
     setCancelError(null);
-    try {
-      await walksAPI.cancel(
-        walkId,
-        cancelReason.trim() ? { cancellationReason: cancelReason.trim() } : undefined
-      );
-      // Se refresca desde el servidor, no se muta el estado local a mano.
-      await fetchWalks();
+    const ok = await runWalkAction(
+      walkId,
+      () =>
+        walksAPI.cancel(
+          walkId,
+          cancelReason.trim() ? { cancellationReason: cancelReason.trim() } : undefined
+        ),
+      "No se pudo cancelar la reserva. Intentá de nuevo.",
+      setCancelError,
+    );
+    if (ok) {
       setCancelDialogWalkId(null);
       setCancelReason("");
-    } catch (err: unknown) {
-      const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
-      setCancelError(msg ?? "No se pudo cancelar la reserva. Intentá de nuevo.");
-    } finally {
-      setActioning(null);
     }
   };
 
@@ -725,10 +832,84 @@ export default function WalkerDashboardPage() {
           </div>
         )}
 
+        {/* Paseos activos — lo unico de esta pantalla que es trabajo por
+            hacer ahora. Antes vivian mezclados en el historial y sin ninguna
+            accion: por eso ningun paseo llego nunca a COMPLETED. */}
+        {activeWalks.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs font-semibold text-brand-text-muted uppercase tracking-wide">
+              Paseos activos
+            </p>
+            {activeWalks.map((walk) => {
+              const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
+                dateStyle: "long",
+                timeStyle: "short",
+              });
+              const first     = walk.participants[0];
+              const dogName   = first?.dog.name ?? "—";
+              const ownerName = first
+                ? `${first.owner.user.firstName} ${first.owner.user.lastName}`
+                : "—";
+              const next        = nextWalkAction(walk.status);
+              const isActioning = actioning === walk.id;
+
+              return (
+                <div
+                  key={walk.id}
+                  className="bg-brand-surface rounded-2xl p-4 border border-brand-primary/30 flex flex-col gap-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-semibold text-brand-text-body">
+                        {walk.walkType.label}
+                      </span>
+                      <span className="text-xs text-brand-text-muted">{dateStr}</span>
+                    </div>
+                    <Badge variant={STATUS_VARIANT[walk.status] ?? "default"} className="shrink-0">
+                      {STATUS_LABEL[walk.status] ?? walk.status}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-brand-text-muted flex gap-4">
+                    <span>Perro: <strong className="text-brand-text-body">{dogName}</strong></span>
+                    <span>Dueño: <strong className="text-brand-text-body">{ownerName}</strong></span>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    {next && (
+                      <Button
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => handleWalkAction(walk)}
+                        disabled={!!actioning}
+                        loading={isActioning}
+                      >
+                        {next.label}
+                      </Button>
+                    )}
+                    {/* Cancelar sigue apareciendo donde ya aparecia: CONFIRMED
+                        sin pagar. Un paseo ya arrancado no se cancela — el
+                        backend tampoco lo permite. */}
+                    {canCancelWalk(walk.status, walk.isPaid) && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => setCancelDialogWalkId(walk.id)}
+                        disabled={!!actioning}
+                      >
+                        Cancelar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Historial */}
         {historyWalks.length > 0 && (
           <div className="flex flex-col gap-2">
-            {pendingWalks.length > 0 && (
+            {(pendingWalks.length > 0 || activeWalks.length > 0) && (
               <p className="text-xs font-semibold text-brand-text-muted uppercase tracking-wide">
                 Historial
               </p>
@@ -749,9 +930,15 @@ export default function WalkerDashboardPage() {
                     <span className="text-sm font-semibold text-brand-text-body">
                       {walk.walkType.label}
                     </span>
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-brand-primary-soft text-brand-primary shrink-0">
+                    {/* Pasa a Badge con STATUS_VARIANT recien ahora porque
+                        recien ahora importa: hasta hoy el historial del
+                        paseador solo podia tener cancelados, y pintarlos a
+                        todos del mismo terracota daba igual. Con COMPLETED
+                        alcanzable por primera vez, "completado" y "cancelado"
+                        no pueden verse iguales. */}
+                    <Badge variant={STATUS_VARIANT[walk.status] ?? "default"} className="shrink-0">
                       {STATUS_LABEL[walk.status] ?? walk.status}
-                    </span>
+                    </Badge>
                   </div>
                   <p className="text-xs text-brand-text-muted">{dateStr}</p>
                   <p className="text-xs text-brand-text-muted">Perro: {dogName}</p>
@@ -793,7 +980,7 @@ export default function WalkerDashboardPage() {
           </div>
         )}
 
-        {pendingWalks.length === 0 && historyWalks.length === 0 && (
+        {pendingWalks.length === 0 && activeWalks.length === 0 && historyWalks.length === 0 && (
           <div className="flex items-center justify-center rounded-3xl border border-dashed border-brand-border min-h-40">
             <p className="text-sm text-brand-text-muted">
               Todavía no tenés paseos asignados.
@@ -801,6 +988,17 @@ export default function WalkerDashboardPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={finishDialogWalkId !== null}
+        title="¿Terminaste el paseo?"
+        description="El dueño recibe el aviso de paseo completado. No se puede deshacer."
+        confirmLabel="Si, finalizar"
+        onDismiss={dismissFinishDialog}
+        onConfirm={handleFinishConfirm}
+        confirming={actioning === finishDialogWalkId}
+        error={finishError}
+      />
 
       <CancelWalkDialog
         open={cancelDialogWalkId !== null}
