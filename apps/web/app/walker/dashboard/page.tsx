@@ -759,7 +759,7 @@ export default function WalkerDashboardPage() {
 
       {/* Paseos */}
       <div className="flex flex-col gap-4">
-        <h2 className="text-base font-serif font-bold text-brand-text">Mis paseos</h2>
+        <h2 id="mis-paseos" tabIndex={-1} className="text-base font-serif font-bold text-brand-text">Mis paseos</h2>
 
         {actionError && (
           <div className="text-sm px-4 py-3 rounded-xl bg-red-50 text-red-700 border border-red-200">
@@ -998,6 +998,7 @@ export default function WalkerDashboardPage() {
         onConfirm={handleFinishConfirm}
         confirming={actioning === finishDialogWalkId}
         error={finishError}
+        fallbackFocusId="mis-paseos"
       />
 
       <CancelWalkDialog

@@ -12,6 +12,7 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   confirming: boolean;
   error?: string | null;
+  fallbackFocusId?: string;
 }
 
 const TITLE_ID = "confirm-dialog-title";
@@ -30,6 +31,15 @@ const TITLE_ID = "confirm-dialog-title";
  * Mismos primitivos, mismo estilo y mismo comportamiento de foco/Escape que
  * `CancelWalkDialog`, a proposito: el usuario no tiene que notar que son dos
  * componentes.
+ *
+ * **`fallbackFocusId`:** el trigger que abrio el dialogo puede desmontarse
+ * mientras esta abierto (por ejemplo, la tarjeta de un paseo que paso a
+ * COMPLETED y salio de la lista de activos). `focus()` sobre un nodo
+ * desconectado del DOM no falla ni avisa: el navegador manda el foco al
+ * `<body>` y un usuario de teclado arranca de nuevo desde el principio de la
+ * pagina. Si se pasa `fallbackFocusId`, el cleanup verifica que el trigger
+ * siga en el documento antes de enfocarlo, y si no esta, enfoca ese elemento
+ * (necesita `tabIndex={-1}` para ser enfocable).
  */
 export default function ConfirmDialog({
   open,
@@ -40,6 +50,7 @@ export default function ConfirmDialog({
   onConfirm,
   confirming,
   error,
+  fallbackFocusId,
 }: ConfirmDialogProps) {
   const panelRef   = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -57,9 +68,14 @@ export default function ConfirmDialog({
     panelRef.current?.focus();
 
     return () => {
-      triggerRef.current?.focus();
+      const back = triggerRef.current;
+      if (back && document.contains(back)) {
+        back.focus();
+        return;
+      }
+      if (fallbackFocusId) document.getElementById(fallbackFocusId)?.focus();
     };
-  }, [open]);
+  }, [open, fallbackFocusId]);
 
   useEffect(() => {
     if (!open) return;
