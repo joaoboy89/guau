@@ -9,8 +9,10 @@ import {
   canCancelWalk,
   isActiveWalk,
   nextWalkAction,
+  walkActionAvailability,
   type WalkTransition,
 } from "@/lib/walk-status";
+import { formatDateTimeBA, formatTimeBA } from "@/lib/format-date";
 import { DAY_LABELS } from "@/lib/schedule";
 import { findNearestBarrio, type Barrio } from "@/lib/barrios";
 import BarrioSelect from "@/components/BarrioSelect";
@@ -81,9 +83,10 @@ interface WalkItem {
   id: string;
   status: string;
   scheduledAt: string;
+  startedAt: string | null;
   isPaid: boolean;
   isExpired: boolean;
-  walkType: { label: string };
+  walkType: { label: string; durationMinutes: number };
   participants: Array<{
     dog:   { name: string };
     owner: { user: { firstName: string; lastName: string } };
@@ -177,6 +180,13 @@ export default function WalkerDashboardPage() {
   const [actioning, setActioning]   = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Reevalua la disponibilidad de los botones de accion cada 30s mientras
+  // haya al menos un paseo activo. Sin esto, el paseador parado en la puerta
+  // a T-6m ve "Iniciar paseo" apagado hasta que recarga la pagina a mano —
+  // friccion en el peor momento, con el dueño y el perro esperando. Nada de
+  // polling al servidor: solo se vuelve a mirar el reloj local y redibuja.
+  const [nowTick, setNowTick] = useState(() => new Date());
+
   const [finishDialogWalkId, setFinishDialogWalkId] = useState<string | null>(null);
   const [finishError, setFinishError] = useState<string | null>(null);
 
@@ -269,6 +279,12 @@ export default function WalkerDashboardPage() {
     window.addEventListener("pageshow", handlePageShow);
     return () => window.removeEventListener("pageshow", handlePageShow);
   }, []);
+
+  useEffect(() => {
+    if (activeWalks.length === 0) return;
+    const id = setInterval(() => setNowTick(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, [activeWalks.length]);
 
   const toggleAvailability = async () => {
     if (!profile || toggling) return;
@@ -774,10 +790,7 @@ export default function WalkerDashboardPage() {
               Requieren confirmación
             </p>
             {pendingWalks.map((walk) => {
-              const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
-                dateStyle: "long",
-                timeStyle: "short",
-              });
+              const dateStr = formatDateTimeBA(new Date(walk.scheduledAt));
               const first = walk.participants[0];
               const dogName   = first?.dog.name ?? "—";
               const ownerName = first
@@ -841,16 +854,21 @@ export default function WalkerDashboardPage() {
               Paseos activos
             </p>
             {activeWalks.map((walk) => {
-              const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
-                dateStyle: "long",
-                timeStyle: "short",
-              });
+              const dateStr = formatDateTimeBA(new Date(walk.scheduledAt));
               const first     = walk.participants[0];
               const dogName   = first?.dog.name ?? "—";
               const ownerName = first
                 ? `${first.owner.user.firstName} ${first.owner.user.lastName}`
                 : "—";
               const next        = nextWalkAction(walk.status);
+              const availability = next
+                ? walkActionAvailability(next.action, {
+                    scheduledAt: new Date(walk.scheduledAt),
+                    startedAt: walk.startedAt ? new Date(walk.startedAt) : null,
+                    durationMinutes: walk.walkType.durationMinutes,
+                    now: nowTick,
+                  })
+                : null;
               const isActioning = actioning === walk.id;
 
               return (
@@ -875,15 +893,27 @@ export default function WalkerDashboardPage() {
                   </div>
                   <div className="flex gap-2 pt-1">
                     {next && (
-                      <Button
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => handleWalkAction(walk)}
-                        disabled={!!actioning}
-                        loading={isActioning}
-                      >
-                        {next.label}
-                      </Button>
+                      <div className="flex-1 flex flex-col gap-1">
+                        <Button
+                          size="sm"
+                          className="w-full"
+                          onClick={() => handleWalkAction(walk)}
+                          disabled={!!actioning || !(availability?.available ?? false)}
+                          loading={isActioning}
+                        >
+                          {next.label}
+                        </Button>
+                        {/* Boton visible pero apagado desde que el paseo entra
+                            en el estado que lo habilita, no solo desde que se
+                            abre la ventana — asi el paseador ve que tiene algo
+                            pendiente y sabe cuando va a poder, en vez de una
+                            tarjeta muda de la que brota un boton de golpe. */}
+                        {availability && !availability.available && availability.availableAt && (
+                          <span className="text-xs text-brand-text-muted text-center">
+                            Se habilita a las {formatTimeBA(availability.availableAt)}
+                          </span>
+                        )}
+                      </div>
                     )}
                     {/* Cancelar sigue apareciendo donde ya aparecia: CONFIRMED
                         sin pagar. Un paseo ya arrancado no se cancela — el
@@ -915,10 +945,7 @@ export default function WalkerDashboardPage() {
               </p>
             )}
             {historyWalks.map((walk) => {
-              const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
-                dateStyle: "long",
-                timeStyle: "short",
-              });
+              const dateStr = formatDateTimeBA(new Date(walk.scheduledAt));
               const first = walk.participants[0];
               const dogName = first?.dog.name ?? "—";
               return (

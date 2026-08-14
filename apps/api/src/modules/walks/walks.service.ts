@@ -18,6 +18,7 @@ import { ChatService } from "../chat/chat.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { toBusinessDayAndTime } from "../../common/utils/schedule-timezone";
 import { isWalkPaid } from "./walk-payment.util";
+import { WALK_TIMING, canMarkOnWay, canStart, canFinish, expectedEndAt } from "@guau/shared";
 
 // Incluye las relaciones que siempre se devuelven con un Walk
 const WALK_INCLUDE = {
@@ -131,6 +132,7 @@ function toPublicWalk(walk: WalkWithInclude) {
     id: walk.id,
     status: walk.status,
     scheduledAt: walk.scheduledAt,
+    startedAt: walk.startedAt,
     pickupAddress: walk.pickupAddress,
     totalAmount: walk.totalAmount,
     walkType: toPublicWalkType(walk.walkType),
@@ -418,8 +420,9 @@ export class WalksService {
   async markOnWay(userId: string, walkId: string) {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.CONFIRMED, "marcar en camino");
+    this.assertCanMarkOnWay(walk.scheduledAt);
 
-    return this.updateStatus(walkId, WalkStatus.WALKER_ON_WAY);
+    return this.updateStatus(walkId, WalkStatus.WALKER_ON_WAY, { onWayAt: new Date() });
   }
 
   // ─── Iniciar paseo (paseador) ────────────────────────────
@@ -427,6 +430,7 @@ export class WalksService {
   async start(userId: string, walkId: string) {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.WALKER_ON_WAY, "iniciar");
+    this.assertCanStart(walk.scheduledAt);
 
     return this.updateStatus(walkId, WalkStatus.IN_PROGRESS, { startedAt: new Date() });
   }
@@ -436,6 +440,9 @@ export class WalksService {
   async finish(userId: string, walkId: string) {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.IN_PROGRESS, "finalizar");
+    // walk.startedAt siempre esta seteado en este punto: start() es el unico
+    // camino hacia IN_PROGRESS y es quien lo escribe.
+    this.assertCanFinish(walk.startedAt as Date, walk.walkType.durationMinutes);
 
     return this.updateStatus(walkId, WalkStatus.COMPLETED, { endedAt: new Date() });
   }
@@ -507,13 +514,68 @@ export class WalksService {
     const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
     if (!walker) throw new ForbiddenException("Perfil de paseador no encontrado");
 
-    const walk = await this.prisma.walk.findUnique({ where: { id: walkId } });
+    // include walkType: finish() necesita durationMinutes para calcular el
+    // fin esperado. confirm/reject/markOnWay/start lo ignoran — es el mismo
+    // costo (un join) para los cinco caminos que pasan por acá, a cambio de
+    // no duplicar esta consulta.
+    const walk = await this.prisma.walk.findUnique({
+      where: { id: walkId },
+      include: { walkType: true },
+    });
     if (!walk) throw new NotFoundException("Paseo no encontrado");
     if (walk.walkerId !== walker.id) {
       throw new ForbiddenException("No tenés acceso a este paseo");
     }
 
     return walk;
+  }
+
+  // ─── Guards de tiempo — el reloj habilita, nunca mueve el estado ────────
+  // Las cuatro reglas exactas viven en @guau/shared (canMarkOnWay/canStart/
+  // canFinish/expectedEndAt) y las comparte el frontend, para que un botón
+  // habilitado del lado del front nunca choque con un 400 acá. El mensaje de
+  // error siempre dice CUÁNDO se va a poder, no solo que no se puede — un
+  // paseador no tiene forma de adivinar la ventana exacta.
+
+  private assertCanMarkOnWay(scheduledAt: Date) {
+    const now = new Date();
+    if (canMarkOnWay(scheduledAt, now)) return;
+
+    const availableAt = new Date(scheduledAt.getTime() - WALK_TIMING.ON_WAY_OPENS_MIN_BEFORE * 60_000);
+    throw new BadRequestException(
+      `Todavía no podés marcar que vas en camino. Vas a poder a partir de las ${toBusinessDayAndTime(availableAt).timeStr}.`,
+    );
+  }
+
+  private assertCanStart(scheduledAt: Date) {
+    const now = new Date();
+    if (canStart(scheduledAt, now)) return;
+
+    const opensAt = new Date(scheduledAt.getTime() - WALK_TIMING.START_OPENS_MIN_BEFORE * 60_000);
+    const closesAt = new Date(scheduledAt.getTime() + WALK_TIMING.START_CLOSES_MIN_AFTER * 60_000);
+
+    // Después del cierre no hay "vas a poder": prometer un horario futuro
+    // que no existe sería peor que el mensaje genérico.
+    if (now.getTime() > closesAt.getTime()) {
+      throw new BadRequestException(
+        `Ya pasó la ventana para iniciar este paseo. Se cerró a las ${toBusinessDayAndTime(closesAt).timeStr}.`,
+      );
+    }
+    throw new BadRequestException(
+      `Todavía no podés iniciar el paseo. Vas a poder a partir de las ${toBusinessDayAndTime(opensAt).timeStr}.`,
+    );
+  }
+
+  private assertCanFinish(startedAt: Date, durationMinutes: number) {
+    const now = new Date();
+    if (canFinish(startedAt, durationMinutes, now)) return;
+
+    const availableAt = new Date(
+      expectedEndAt(startedAt, durationMinutes).getTime() - WALK_TIMING.FINISH_OPENS_MIN_BEFORE_END * 60_000,
+    );
+    throw new BadRequestException(
+      `Todavía no podés finalizar el paseo. Vas a poder a partir de las ${toBusinessDayAndTime(availableAt).timeStr}.`,
+    );
   }
 
   private async assertWalkAccess(

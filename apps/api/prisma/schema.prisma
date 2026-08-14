@@ -169,6 +169,7 @@ model Walk {
   mode               WalkMode      @default(GRUPAL)
   status             WalkStatus    @default(PENDING)
   scheduledAt        DateTime
+  onWayAt            DateTime?
   startedAt          DateTime?
   endedAt            DateTime?
   pickupLat          Float

@@ -1,3 +1,5 @@
+import { WALK_TIMING, canMarkOnWay, canStart, canFinish, expectedEndAt } from "@guau/shared";
+
 export const STATUS_LABEL: Record<string, string> = {
   PENDING:          "Pendiente de confirmación",
   CONFIRMED:        "Confirmado",
@@ -101,10 +103,68 @@ export function nextWalkAction(status: string): NextWalkAction | null {
  * vencido en el instante en que llega su hora. Filtrar los activos por esa
  * bandera le sacaria el boton al paseador justo cuando lo necesita —un
  * IN_PROGRESS esta vencido siempre, por definicion— y dejaria afuera al que
- * llega cinco minutos tarde. El backend tampoco mira la fecha en ninguna de
- * las tres transiciones. La tolerancia y el no-show del dueño son un bloque
- * propio, todavia sin diseñar (ver backlog).
+ * llega cinco minutos tarde. El backend SI mira la fecha ahora (ver
+ * `walkActionAvailability` mas abajo): la tarjeta se sigue mostrando igual,
+ * pero el boton nace deshabilitado hasta que se abre su ventana. El no-show
+ * del dueño sigue siendo un bloque propio, todavia sin diseñar (ver backlog).
  */
 export function isActiveWalk(status: string): boolean {
   return nextWalkAction(status) !== null;
+}
+
+export interface WalkActionAvailability {
+  available: boolean;
+  /** Instante en que se habilita. `null` si ya esta disponible. */
+  availableAt: Date | null;
+}
+
+export interface WalkActionTiming {
+  scheduledAt: Date;
+  startedAt: Date | null;
+  durationMinutes: number;
+  now: Date;
+}
+
+const MINUTE_MS = 60_000;
+
+/**
+ * Separada de `nextWalkAction` a proposito: esa decide QUE boton mostrar (una
+ * funcion de estado, sin reloj); esta decide si ESE boton ya se puede
+ * apretar (una funcion de tiempo). Combinarlas hubiera obligado a los tests
+ * de "que boton va en que estado" a inventar horarios que no les importan.
+ *
+ * Las reglas exactas viven en `@guau/shared` (canMarkOnWay/canStart/
+ * canFinish) — el mismo paquete que usa el backend, asi que un boton
+ * habilitado del lado del front nunca choca con un 400 del backend.
+ */
+export function walkActionAvailability(
+  action: WalkTransition,
+  timing: WalkActionTiming,
+): WalkActionAvailability {
+  const { scheduledAt, startedAt, durationMinutes, now } = timing;
+
+  if (action === "onWay") {
+    const availableAt = new Date(scheduledAt.getTime() - WALK_TIMING.ON_WAY_OPENS_MIN_BEFORE * MINUTE_MS);
+    return canMarkOnWay(scheduledAt, now)
+      ? { available: true, availableAt: null }
+      : { available: false, availableAt };
+  }
+
+  if (action === "start") {
+    const availableAt = new Date(scheduledAt.getTime() - WALK_TIMING.START_OPENS_MIN_BEFORE * MINUTE_MS);
+    return canStart(scheduledAt, now)
+      ? { available: true, availableAt: null }
+      : { available: false, availableAt };
+  }
+
+  // "finish": IN_PROGRESS siempre trae startedAt (start() lo escribe y es el
+  // unico camino a ese estado). Si llegara null igual, no hay fin esperado
+  // que calcular todavia.
+  if (!startedAt) return { available: false, availableAt: null };
+  const availableAt = new Date(
+    expectedEndAt(startedAt, durationMinutes).getTime() - WALK_TIMING.FINISH_OPENS_MIN_BEFORE_END * MINUTE_MS,
+  );
+  return canFinish(startedAt, durationMinutes, now)
+    ? { available: true, availableAt: null }
+    : { available: false, availableAt };
 }

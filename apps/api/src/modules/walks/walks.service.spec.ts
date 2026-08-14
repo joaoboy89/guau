@@ -65,6 +65,7 @@ const BASE_WALK = {
 // ya en la forma que devuelve Prisma con select — no include — en owner y dog)
 const WALK_FULL = {
   ...BASE_WALK,
+  startedAt: null,
   walkType: { id: WALK_TYPE_ID, label: 'Paseo básico', durationMinutes: 30 },
   walker: {
     id:                  WALKER_PROFILE_ID,
@@ -89,6 +90,7 @@ function expectedPublicWalk(walk: typeof WALK_FULL, isPaid: boolean) {
     id:            walk.id,
     status:        walk.status,
     scheduledAt:   walk.scheduledAt,
+    startedAt:     walk.startedAt,
     pickupAddress: walk.pickupAddress,
     totalAmount:   walk.totalAmount,
     walkType:      walk.walkType,
@@ -1071,15 +1073,34 @@ describe('WalksService', () => {
       await expect(service.markOnWay(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
     });
 
-    it('camino feliz: pasa a WALKER_ON_WAY', async () => {
-      setupWalkerWalk(WalkStatus.CONFIRMED);
+    it('camino feliz: pasa a WALKER_ON_WAY y setea onWayAt', async () => {
+      setupWalkerWalk(WalkStatus.CONFIRMED); // BASE_WALK.scheduledAt ya pasó — canMarkOnWay no tiene techo, sigue true
       prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.WALKER_ON_WAY });
 
       await service.markOnWay(WALKER_USER_ID, WALK_ID);
 
       expect(prisma.walk.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: WalkStatus.WALKER_ON_WAY } }),
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status:  WalkStatus.WALKER_ON_WAY,
+            onWayAt: expect.any(Date),
+          }),
+        }),
       );
+    });
+
+    // ─── Guard de tiempo: "voy en camino" recién desde T-3h ────────────────
+
+    it('BadRequestException si todavía no llegó a T-3h, con el horario en el mensaje', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      const scheduledAt = new Date(Date.now() + 4 * 60 * 60 * 1000); // 4h en el futuro — antes de T-3h
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.CONFIRMED, scheduledAt, walkType: WALK_FULL.walkType,
+      });
+
+      await expect(service.markOnWay(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.markOnWay(WALKER_USER_ID, WALK_ID)).rejects.toThrow(/Vas a poder/);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
     });
   });
 
@@ -1109,7 +1130,11 @@ describe('WalksService', () => {
     });
 
     it('camino feliz: pasa a IN_PROGRESS y setea startedAt', async () => {
-      setupWalkerWalk(WalkStatus.WALKER_ON_WAY);
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      // scheduledAt = ahora — bien adentro de la ventana T-5m a T+10m
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt: new Date(),
+      });
       prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
 
       await service.start(WALKER_USER_ID, WALK_ID);
@@ -1122,6 +1147,32 @@ describe('WalksService', () => {
           }),
         }),
       );
+    });
+
+    // ─── Guard de tiempo: ventana T-5m a T+10m ──────────────────────────────
+
+    it('BadRequestException si todavía no llegó a T-5m, con el horario en el mensaje', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      const scheduledAt = new Date(Date.now() + 30 * 60 * 1000); // 30min en el futuro — antes de T-5m
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt,
+      });
+
+      await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(/Vas a poder/);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('BadRequestException si ya pasó T+10m, con mensaje distinto (ventana cerrada, no "vas a poder")', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      const scheduledAt = new Date(Date.now() - 60 * 60 * 1000); // 1h en el pasado — después de T+10m
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt,
+      });
+
+      await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(/Ya pasó la ventana/);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
     });
   });
 
@@ -1151,7 +1202,15 @@ describe('WalksService', () => {
     });
 
     it('camino feliz: pasa a COMPLETED y setea endedAt', async () => {
-      setupWalkerWalk(WalkStatus.IN_PROGRESS);
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      // Arrancó hace 1h, dura 30min (WALK_FULL.walkType) — el fin esperado
+      // (hace 30min) menos 15min ya quedó bien atrás.
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK,
+        status: WalkStatus.IN_PROGRESS,
+        startedAt: new Date(Date.now() - 60 * 60 * 1000),
+        walkType: WALK_FULL.walkType,
+      });
       prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.COMPLETED });
 
       await service.finish(WALKER_USER_ID, WALK_ID);
@@ -1164,6 +1223,23 @@ describe('WalksService', () => {
           }),
         }),
       );
+    });
+
+    // ─── Guard de tiempo: se habilita fin esperado - 15m ────────────────────
+
+    it('BadRequestException si todavía no llegó a fin esperado - 15m, con el horario en el mensaje', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      // Arrancó hace 5min, dura 30min → fin esperado en 25min, se habilita en 10min — todavía no.
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK,
+        status: WalkStatus.IN_PROGRESS,
+        startedAt: new Date(Date.now() - 5 * 60 * 1000),
+        walkType: WALK_FULL.walkType,
+      });
+
+      await expect(service.finish(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.finish(WALKER_USER_ID, WALK_ID)).rejects.toThrow(/Vas a poder/);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
     });
   });
 
