@@ -182,13 +182,19 @@ flowchart TD
     G & H --> I[cloudflared → dominios públicos]
 ```
 
-Cada `push` a `master` dispara `.github/workflows/docker.yml`: construye las imágenes de `api` y `web`, las publica en GitHub Container Registry, y se conecta por SSH al VPS de producción para bajarlas y levantar los contenedores con Docker Compose. Sin ambiente de staging — lo que se pushea a `master` queda en producción en 2-3 minutos.
+Cada `push` a `master` dispara `.github/workflows/docker.yml`: construye las imágenes de `api` y `web`, las publica en GitHub Container Registry, y se conecta por SSH al VPS de producción para bajarlas y levantar los contenedores con Docker Compose. El deploy de producción es directo — lo que se pushea a `master` queda en producción en 2-3 minutos. Este pipeline no tiene gate de staging; el ambiente de staging separado que se describe abajo corre en su propia rama y su propio camino.
 
 El pipeline corre los tests (backend + frontend) antes de buildear — si algo falla, el deploy no se ejecuta. Las migraciones se aplican solas: el entrypoint del contenedor de la API corre `prisma migrate deploy` en cada arranque, antes de levantar la app — una migración nueva viaja dentro de la imagen y se aplica automáticamente al deployar, sin paso manual.
 
 Backups diarios de Postgres a Cloudflare R2 con retención de 30 días, vía `infra/vps/backup-db.sh` (cron 4:00 AM en el VPS). Restore documentado en `infra/vps/restore-db.sh`.
 
 La conexión al VPS público es únicamente a través de un túnel de Cloudflare. Los puertos de los contenedores están atados a `127.0.0.1` (no accesibles desde la IP pública), y el firewall del proveedor solo permite entrada por SSH — verificado con pruebas reales de conexión externa, no asumido. Acceso SSH solo por clave (autenticación por contraseña deshabilitada), con `fail2ban` activo.
+
+### Ambiente de staging
+
+Un segundo ambiente en Google Cloud Platform (Cloud Run + Cloud SQL) espeja producción para validar cambios antes de que lleguen a usuarios reales — se deploya desde su propia rama y su propio pipeline, totalmente desacoplado del VPS.
+
+Los servicios de Cloud Run ahí son IAM-only: no aceptan tráfico público directo. Una capa de Cloudflare Access por delante maneja el login humano (SSO por código de un solo uso vía email), y un Cloudflare Worker a medida hace de puente de identidad hacia GCP usando **Workload Identity Federation** — el Worker firma su propio JWT de corta duración y lo canjea por un token de Google con audiencia específica, en cada request. No existe ninguna key de service account descargable en ningún punto de esa cadena, lo que elimina una credencial de larga vida que de otro modo habría que guardar y rotar.
 
 ## Documentación adicional
 

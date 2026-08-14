@@ -182,13 +182,19 @@ flowchart TD
     G & H --> I[cloudflared → public domains]
 ```
 
-Every `push` to `master` triggers `.github/workflows/docker.yml`: it builds the `api` and `web` images, publishes them to the GitHub Container Registry, then connects over SSH to the production VPS to pull them and bring up the containers with Docker Compose. There's no staging environment — whatever gets pushed to `master` is live in production within 2-3 minutes.
+Every `push` to `master` triggers `.github/workflows/docker.yml`: it builds the `api` and `web` images, publishes them to the GitHub Container Registry, then connects over SSH to the production VPS to pull them and bring up the containers with Docker Compose. Production deploys are direct — whatever gets pushed to `master` is live within 2-3 minutes. There's no staging gate in this pipeline; the separate staging environment described below runs on its own path and branch.
 
 The pipeline runs the tests (backend + frontend) before building — if anything fails, the deploy never runs. Migrations are self-applying: the API container's entrypoint runs `prisma migrate deploy` on every boot, before starting the app — a new migration ships inside the image and gets applied automatically on deploy, with no manual step.
 
 Daily Postgres backups to Cloudflare R2 with 30-day retention, via `infra/vps/backup-db.sh` (cron at 4:00 AM on the VPS). Restore documented in `infra/vps/restore-db.sh`.
 
 The VPS is only reachable through a Cloudflare Tunnel. Container ports are bound to `127.0.0.1` (not reachable from the public IP), and the provider's firewall only allows inbound SSH — verified with real external connection tests, not assumed. SSH access is key-only (password auth disabled), with `fail2ban` active.
+
+### Staging environment
+
+A second environment on Google Cloud Platform (Cloud Run + Cloud SQL) mirrors production for validating changes before they go live — deployed from its own branch and pipeline, fully decoupled from the VPS.
+
+Cloud Run services there are IAM-only: they don't accept public traffic directly. A Cloudflare Access layer in front handles human login (SSO via one-time email codes), and a purpose-built Cloudflare Worker bridges authenticated requests into GCP using **Workload Identity Federation** — the Worker signs its own short-lived JWT and exchanges it for a Google-issued token scoped to a single audience, on every request. No downloadable service-account key exists anywhere in that chain, which removes a long-lived credential that would otherwise need storage and rotation.
 
 ## Additional documentation
 
