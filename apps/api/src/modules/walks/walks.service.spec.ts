@@ -1241,6 +1241,27 @@ describe('WalksService', () => {
       await expect(service.finish(WALKER_USER_ID, WALK_ID)).rejects.toThrow(/Vas a poder/);
       expect(prisma.walk.update).not.toHaveBeenCalled();
     });
+
+    // ─── Estado inconsistente: IN_PROGRESS sin startedAt ────────────────────
+    // No debería pasar por la app (start() siempre lo escribe), pero el
+    // backlog registra intervenciones manuales por SQL en producción — un
+    // UPDATE a mano puede dejar el paseo así. Tiene que dar una excepción
+    // clara, no un crash por leer .getTime() de null.
+
+    it('UnprocessableEntityException si IN_PROGRESS pero startedAt es null (estado inconsistente), y lo loguea como error', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK,
+        status: WalkStatus.IN_PROGRESS,
+        startedAt: null,
+        walkType: WALK_FULL.walkType,
+      });
+      const loggerErrorSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => {});
+
+      await expect(service.finish(WALKER_USER_ID, WALK_ID)).rejects.toThrow(UnprocessableEntityException);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+      expect(loggerErrorSpy).toHaveBeenCalledWith(expect.stringContaining(WALK_ID));
+    });
   });
 
   // ─── cancel() ─────────────────────────────────────────────────────────────

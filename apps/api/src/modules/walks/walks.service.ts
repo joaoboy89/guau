@@ -440,9 +440,23 @@ export class WalksService {
   async finish(userId: string, walkId: string) {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.IN_PROGRESS, "finalizar");
-    // walk.startedAt siempre esta seteado en este punto: start() es el unico
-    // camino hacia IN_PROGRESS y es quien lo escribe.
-    this.assertCanFinish(walk.startedAt as Date, walk.walkType.durationMinutes);
+    // En teoria walk.startedAt siempre esta seteado aca: start() es el unico
+    // camino hacia IN_PROGRESS y es quien lo escribe. Pero este proyecto
+    // tiene mas de una intervencion manual por SQL en produccion (ver
+    // backlog) — un UPDATE a mano puede dejar un paseo en IN_PROGRESS sin
+    // startedAt. Guard explicito en vez de "as Date": si el dato
+    // inconsistente existe, mejor una excepcion clara que un crash generico,
+    // y el error queda logueado porque es un estado que el codigo considera
+    // imposible.
+    if (!walk.startedAt) {
+      this.logger.error(
+        `finish(): walk ${walkId} esta IN_PROGRESS sin startedAt — estado inconsistente, revisar en la base`,
+      );
+      throw new UnprocessableEntityException(
+        "Este paseo no tiene registrado cuando arrancó. No es un problema tuyo — contactanos para resolverlo.",
+      );
+    }
+    this.assertCanFinish(walk.startedAt, walk.walkType.durationMinutes);
 
     return this.updateStatus(walkId, WalkStatus.COMPLETED, { endedAt: new Date() });
   }
