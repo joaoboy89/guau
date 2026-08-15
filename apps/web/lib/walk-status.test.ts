@@ -92,10 +92,12 @@ describe("isActiveWalk", () => {
 describe("walkActionAvailability", () => {
   const SCHEDULED_AT = new Date("2026-08-14T18:00:00.000Z"); // T
 
-  describe("onWay — se habilita desde T-3h, sin techo", () => {
-    const opensAt = new Date("2026-08-14T15:00:00.000Z"); // T-3h
+  // Bloque B: bajado de T-3h a T-2h — la dirección exacta se revela recién
+  // al apretar este botón (anti-desintermediación).
+  describe("onWay — se habilita desde T-2h, sin techo", () => {
+    const opensAt = new Date("2026-08-14T16:00:00.000Z"); // T-2h
 
-    it("antes de T-3h: no disponible, availableAt apunta a la apertura", () => {
+    it("antes de T-2h: no disponible, availableAt apunta a la apertura", () => {
       const result = walkActionAvailability("onWay", {
         scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30,
         now: new Date(opensAt.getTime() - 1),
@@ -103,7 +105,7 @@ describe("walkActionAvailability", () => {
       expect(result).toEqual({ available: false, availableAt: opensAt });
     });
 
-    it("exactamente en T-3h: disponible", () => {
+    it("exactamente en T-2h: disponible", () => {
       const result = walkActionAvailability("onWay", {
         scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30, now: opensAt,
       });

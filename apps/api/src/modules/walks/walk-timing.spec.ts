@@ -1,4 +1,4 @@
-import { WALK_TIMING, canMarkOnWay, canStart, canFinish, expectedEndAt } from '@guau/shared';
+import { WALK_TIMING, canMarkOnWay, canStart, canFinish, canReportWalkerNoShow, expectedEndAt } from '@guau/shared';
 
 // Tests de las funciones puras del bloque A (docs/guau-politicas.md §2).
 // Viven acá y no en packages/shared porque ese paquete no tiene jest
@@ -8,18 +8,21 @@ import { WALK_TIMING, canMarkOnWay, canStart, canFinish, expectedEndAt } from '@
 
 const SCHEDULED_AT = new Date('2026-08-14T18:00:00.000Z'); // T
 
-describe('canMarkOnWay (@guau/shared)', () => {
-  const opensAt = new Date(SCHEDULED_AT.getTime() - WALK_TIMING.ON_WAY_OPENS_MIN_BEFORE * 60_000); // T-3h
+// Bloque B: bajado de T-3h a T-2h — la dirección exacta se revela recién al
+// apretar este botón (anti-desintermediación), y dos horas alcanzan de sobra
+// para reacomodarse los ~200m de la zona aproximada.
+describe('canMarkOnWay (@guau/shared) — T-2h desde el bloque B', () => {
+  const opensAt = new Date(SCHEDULED_AT.getTime() - WALK_TIMING.ON_WAY_OPENS_MIN_BEFORE * 60_000); // T-2h
 
-  it('justo antes de T-3h: false', () => {
+  it('justo antes de T-2h: false', () => {
     expect(canMarkOnWay(SCHEDULED_AT, new Date(opensAt.getTime() - 1))).toBe(false);
   });
 
-  it('exactamente en T-3h: true (límite inclusive)', () => {
+  it('exactamente en T-2h: true (límite inclusive)', () => {
     expect(canMarkOnWay(SCHEDULED_AT, opensAt)).toBe(true);
   });
 
-  it('justo después de T-3h: true', () => {
+  it('justo después de T-2h: true', () => {
     expect(canMarkOnWay(SCHEDULED_AT, new Date(opensAt.getTime() + 1))).toBe(true);
   });
 
@@ -90,5 +93,30 @@ describe('canFinish (@guau/shared)', () => {
   it('no tiene techo superior: sigue true mucho después del fin esperado', () => {
     const muchoDespues = new Date(expectedEnd.getTime() + 5 * 60 * 60 * 1000);
     expect(canFinish(startedAt, durationMinutes, muchoDespues)).toBe(true);
+  });
+});
+
+// Bloque B: el botón del dueño "el paseador no se presentó". Se habilita
+// desde T+10m y NO tiene techo — un botón para reportar un problema no
+// necesita vencimiento (si el paseo se hizo, está en COMPLETED y el botón
+// no se muestra).
+describe('canReportWalkerNoShow (@guau/shared)', () => {
+  const opensAt = new Date(SCHEDULED_AT.getTime() + WALK_TIMING.OWNER_NO_SHOW_BUTTON_MIN_AFTER * 60_000); // T+10m
+
+  it('justo antes de T+10m: false', () => {
+    expect(canReportWalkerNoShow(SCHEDULED_AT, new Date(opensAt.getTime() - 1))).toBe(false);
+  });
+
+  it('exactamente en T+10m: true (límite inclusive)', () => {
+    expect(canReportWalkerNoShow(SCHEDULED_AT, opensAt)).toBe(true);
+  });
+
+  it('justo después de T+10m: true', () => {
+    expect(canReportWalkerNoShow(SCHEDULED_AT, new Date(opensAt.getTime() + 1))).toBe(true);
+  });
+
+  it('no tiene techo superior: sigue true mucho después de T (no vence)', () => {
+    const muchoDespues = new Date(SCHEDULED_AT.getTime() + 30 * 24 * 60 * 60 * 1000);
+    expect(canReportWalkerNoShow(SCHEDULED_AT, muchoDespues)).toBe(true);
   });
 });

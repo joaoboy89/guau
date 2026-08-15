@@ -44,11 +44,20 @@ export class WalkRemindersService {
     const onWay2 = await this.remindWalker(now, WALK_TIMING.ONWAY_REMINDER_2_MIN_BEFORE, NOTIFICATION_TYPES.WALK_ONWAY_REMINDER_2);
     const notStarted1 = await this.remindOwner(now, WALK_TIMING.NOT_STARTED_ALERT_1_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_1);
     const notStarted2 = await this.remindOwner(now, WALK_TIMING.NOT_STARTED_ALERT_2_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_2);
+    const close1 = await this.remindClose(
+      now, WALK_TIMING.CLOSE_REMINDER_1_MIN_AFTER,
+      NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_1_WALKER, NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_1_OWNER,
+    );
+    const close2 = await this.remindClose(
+      now, WALK_TIMING.CLOSE_REMINDER_2_MIN_AFTER,
+      NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_2_WALKER, NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_2_OWNER,
+    );
 
-    const total = onWay1 + onWay2 + notStarted1 + notStarted2;
+    const total = onWay1 + onWay2 + notStarted1 + notStarted2 + close1 + close2;
     if (total > 0) {
       this.logger.log(
-        `sendReminders: ${total} recordatorios (paseador T-1h15=${onWay1} T-1h10=${onWay2}, dueño T+5m=${notStarted1} T+10m=${notStarted2})`,
+        `sendReminders: ${total} recordatorios (paseador T-1h15=${onWay1} T-1h10=${onWay2}, ` +
+          `dueño T+5m=${notStarted1} T+10m=${notStarted2}, cierre fin+0=${close1} fin+30m=${close2})`,
       );
     }
   }
@@ -117,6 +126,81 @@ export class WalkRemindersService {
       sent++;
     }
     return sent;
+  }
+
+  // ─── A las DOS partes: el paseo llegó a su fin esperado y sigue abierto ──
+  // Bloque B — "el paseo que arranca y nunca se cierra". Al paseador,
+  // "acordate de cerrar"; al dueño, "¿ya te devolvieron a tu perro?" — hoy
+  // su pantalla dice "El paseo está en curso" indefinidamente, sin este
+  // aviso a las 3 de la mañana su perro sigue figurando paseando. Ningún
+  // estado se mueve acá — el bloqueo de aceptar reservas nuevas vive en
+  // WalksService.assertNoOverdueInProgress, con el mismo umbral
+  // (END_LATE_THRESHOLD_MIN_AFTER) pero disparado desde otro lado.
+
+  private async remindClose(
+    now: Date,
+    minutesAfterExpectedEnd: number,
+    walkerType: NotificationType,
+    ownerType: NotificationType,
+  ): Promise<number> {
+    // IN_PROGRESS implica startedAt <= now por construcción (no se puede
+    // iniciar en el futuro) — a diferencia de los otros pases, acá no hace
+    // falta un filtro de fecha barato en el WHERE para descartar futuros.
+    const candidates = await this.prisma.walk.findMany({
+      where: { status: WalkStatus.IN_PROGRESS },
+      select: {
+        id: true,
+        startedAt: true,
+        walkType: { select: { durationMinutes: true } },
+        walker: { select: { user: { select: { id: true } } } },
+        participants: {
+          select: { owner: { select: { user: { select: { id: true } } } }, dog: { select: { name: true } } },
+          take: 1,
+        },
+      },
+      orderBy: { startedAt: "asc" },
+      take: BATCH_SIZE,
+    });
+
+    const overdue = candidates.filter((walk) => {
+      if (!walk.startedAt) return false;
+      const expectedEnd = walk.startedAt.getTime() + walk.walkType.durationMinutes * 60_000;
+      return now.getTime() >= expectedEnd + minutesAfterExpectedEnd * 60_000;
+    });
+
+    // Dos chequeos de idempotencia, no uno: paseador y dueño usan `type`
+    // distintos (ver NOTIFICATION_TYPES) — si compartieran uno, la
+    // notificación del primero en crearse taparía al segundo.
+    const walkerPending = await this.filterAlreadyNotified(walkerType, overdue);
+    const ownerPending = await this.filterAlreadyNotified(ownerType, overdue);
+
+    for (const walk of walkerPending) {
+      const dogName = walk.participants[0]?.dog.name;
+      await this.notifications.create({
+        userId: walk.walker.user.id,
+        title: "Acordate de cerrar el paseo",
+        body: dogName ? `Acordate de cerrar el paseo de ${dogName}.` : "Acordate de cerrar el paseo.",
+        type: walkerType,
+        data: { walkId: walk.id },
+      });
+    }
+
+    let ownerSent = 0;
+    for (const walk of ownerPending) {
+      const ownerId = walk.participants[0]?.owner.user.id;
+      if (!ownerId) continue;
+      const dogName = walk.participants[0]?.dog.name;
+      await this.notifications.create({
+        userId: ownerId,
+        title: "¿Ya te devolvieron a tu perro?",
+        body: dogName ? `¿Ya te devolvieron a ${dogName}?` : "¿Ya te devolvieron a tu perro?",
+        type: ownerType,
+        data: { walkId: walk.id },
+      });
+      ownerSent++;
+    }
+
+    return walkerPending.length + ownerSent;
   }
 
   // ─── Idempotencia ────────────────────────────────────────────────────────

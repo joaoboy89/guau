@@ -126,4 +126,29 @@ export class WalksController {
   ) {
     return this.walks.cancel(user.id, user.role, id, dto);
   }
+
+  // ─── Reclamos y cierre (solo dueño) ──────────────────────
+
+  @Put(":id/report-walker-no-show")
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Dueño reporta que el paseador no se presentó (CONFIRMED/WALKER_ON_WAY → NOT_PERFORMED). Desde T+10m, no vence.",
+  })
+  reportWalkerNoShow(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.walks.reportWalkerNoShow(user.id, id);
+  }
+
+  @Put(":id/confirm-receipt")
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Dueño confirma que recibió a su perro (IN_PROGRESS → COMPLETED). Llave de escape del bloqueo.",
+  })
+  confirmReceipt(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.walks.confirmReceipt(user.id, id);
+  }
 }

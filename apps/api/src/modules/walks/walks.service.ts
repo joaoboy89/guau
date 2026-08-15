@@ -9,16 +9,34 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../../database/prisma.service";
-import { Prisma, WalkStatus, WalkMode, VerificationStatus, UserRole } from "@prisma/client";
+import {
+  Prisma,
+  WalkStatus,
+  WalkMode,
+  VerificationStatus,
+  UserRole,
+  NotPerformedReason,
+  ClosedBy,
+} from "@prisma/client";
 import { CreateWalkDto } from "./dto/create-walk.dto";
 import { CancelWalkDto } from "./dto/cancel-walk.dto";
 import { QueryWalksDto } from "./dto/query-walks.dto";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { ChatService } from "../chat/chat.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { MailService } from "../../common/services/mail.service";
 import { toBusinessDayAndTime } from "../../common/utils/schedule-timezone";
 import { isWalkPaid } from "./walk-payment.util";
-import { WALK_TIMING, canMarkOnWay, canStart, canFinish, expectedEndAt } from "@guau/shared";
+import {
+  WALK_TIMING,
+  NOTIFICATION_TYPES,
+  canMarkOnWay,
+  canStart,
+  canFinish,
+  canReportWalkerNoShow,
+  expectedEndAt,
+  approximatePickupPoint,
+} from "@guau/shared";
 
 // Incluye las relaciones que siempre se devuelven con un Walk
 const WALK_INCLUDE = {
@@ -126,14 +144,32 @@ function toPublicParticipant(participant: ParticipantWithInclude) {
  * cambie WALK_INCLUDE de `select` a `include` (como pasaba antes con
  * participants.owner) para que vuelva a viajar todo. Con dos capas, cambiar
  * el include no alcanza para filtrar algo nuevo.
+ *
+ * `isWalkerView`: true cuando quien pregunta es el paseador asignado a ESTE
+ * walk (cada caller lo calcula porque ya lo sabe — ver assertWalkAccess /
+ * getWalkerWalkOrThrow, que validan esa pertenencia antes de llegar acá).
+ * Mientras sea true y `walk.onWayAt` sea null, el punto de encuentro se
+ * ofusca: anti-desintermediación (docs/guau-politicas.md, "Revelación de la
+ * dirección"). La ofuscación vive ACÁ, en el backend — mandar la coordenada
+ * real y ocultarla en el front no protege nada, cualquiera lee la respuesta
+ * cruda desde las herramientas de desarrollador.
  */
-function toPublicWalk(walk: WalkWithInclude) {
+function toPublicWalk(walk: WalkWithInclude, isWalkerView: boolean) {
+  const revealExactLocation = !isWalkerView || walk.onWayAt !== null;
+  const approx = revealExactLocation
+    ? null
+    : approximatePickupPoint(walk.id, walk.pickupLat, walk.pickupLng);
+
   return {
     id: walk.id,
     status: walk.status,
     scheduledAt: walk.scheduledAt,
     startedAt: walk.startedAt,
-    pickupAddress: walk.pickupAddress,
+    // null (no calle, no altura) hasta que el paseador aprieta "voy en
+    // camino" — "solo la zona" no se puede derivar de un texto libre.
+    pickupAddress: revealExactLocation ? walk.pickupAddress : null,
+    pickupLat: revealExactLocation ? walk.pickupLat : approx!.lat,
+    pickupLng: revealExactLocation ? walk.pickupLng : approx!.lng,
     totalAmount: walk.totalAmount,
     walkType: toPublicWalkType(walk.walkType),
     walker: toPublicWalker(walk.walker),
@@ -158,6 +194,7 @@ export class WalksService {
     @Optional() private trackingGateway?: TrackingGateway,
     @Optional() private chatService?: ChatService,
     @Optional() private notificationsService?: NotificationsService,
+    @Optional() private mail?: MailService,
   ) {
     this.commissionRate = this.validateCommissionRate();
   }
@@ -312,7 +349,8 @@ export class WalksService {
       include: WALK_INCLUDE,
     });
     if (!created) throw new NotFoundException("Paseo no encontrado");
-    return toPublicWalk(created);
+    // create() es solo para dueños (@Roles(OWNER) en el controller).
+    return toPublicWalk(created, /* isWalkerView */ false);
   }
 
   // ─── Mis paseos ──────────────────────────────────────────
@@ -347,7 +385,7 @@ export class WalksService {
         this.prisma.walk.count({ where }),
       ]);
       return {
-        data: walks.map(toPublicWalk),
+        data: walks.map((w) => toPublicWalk(w, /* isWalkerView */ true)),
         meta: { total, page, limit, totalPages: Math.ceil(total / limit), days },
       };
     }
@@ -374,7 +412,7 @@ export class WalksService {
       this.prisma.walk.count({ where }),
     ]);
     return {
-      data: walks.map(toPublicWalk),
+      data: walks.map((w) => toPublicWalk(w, /* isWalkerView */ false)),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit), days },
     };
   }
@@ -389,7 +427,9 @@ export class WalksService {
     if (!walk) throw new NotFoundException("Paseo no encontrado");
 
     await this.assertWalkAccess(userId, role, walk);
-    return toPublicWalk(walk);
+    // assertWalkAccess ya validó que, si el rol es WALKER, walk.walkerId es
+    // el de quien pregunta — no hace falta una consulta aparte para saberlo.
+    return toPublicWalk(walk, /* isWalkerView */ role === UserRole.WALKER);
   }
 
   // ─── Confirmar (paseador) ────────────────────────────────
@@ -397,8 +437,13 @@ export class WalksService {
   async confirm(userId: string, walkId: string) {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.PENDING, "confirmar");
+    // Aceptar una reserva nueva es "trabajo futuro" — lo único que bloquea
+    // un IN_PROGRESS vencido (ver assertNoOverdueInProgress). confirm() es
+    // la única acción bloqueada en todo este bloque: iniciar, marcar en
+    // camino y cerrar NUNCA se bloquean (ver el comentario del método).
+    await this.assertNoOverdueInProgress(walk.walkerId);
 
-    const updated = await this.updateStatus(walkId, WalkStatus.CONFIRMED);
+    const updated = await this.updateStatus(walkId, WalkStatus.CONFIRMED, {}, /* isWalkerView */ true);
 
     // Crear conversación entre paseador y dueño al confirmar
     await this.chatService?.ensureConversationForWalk(walkId);
@@ -412,7 +457,7 @@ export class WalksService {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.PENDING, "rechazar");
 
-    return this.updateStatus(walkId, WalkStatus.CANCELLED_WALKER);
+    return this.updateStatus(walkId, WalkStatus.CANCELLED_WALKER, {}, /* isWalkerView */ true);
   }
 
   // ─── En camino (paseador) ────────────────────────────────
@@ -422,7 +467,9 @@ export class WalksService {
     this.assertStatus(walk.status, WalkStatus.CONFIRMED, "marcar en camino");
     this.assertCanMarkOnWay(walk.scheduledAt);
 
-    return this.updateStatus(walkId, WalkStatus.WALKER_ON_WAY, { onWayAt: new Date() });
+    return this.updateStatus(
+      walkId, WalkStatus.WALKER_ON_WAY, { onWayAt: new Date() }, /* isWalkerView */ true,
+    );
   }
 
   // ─── Iniciar paseo (paseador) ────────────────────────────
@@ -431,6 +478,10 @@ export class WalksService {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.WALKER_ON_WAY, "iniciar");
     this.assertCanStart(walk.scheduledAt);
+    // NUNCA se bloquea por tener otro IN_PROGRESS vencido: Güau es un
+    // negocio multi-perro, un paseador con tres perros en la mano tiene que
+    // poder retirar el cuarto — eso es el producto, no una anomalía. Lo
+    // único que gobierna start() es su propia ventana de tiempo.
 
     const startedAt = new Date();
     // Se calcula una sola vez, acá, y se persiste — no se deriva en lectura
@@ -440,7 +491,9 @@ export class WalksService {
     const lateThreshold = walk.scheduledAt.getTime() + WALK_TIMING.START_LATE_THRESHOLD_MIN_AFTER * 60_000;
     const startedLate = startedAt.getTime() > lateThreshold;
 
-    return this.updateStatus(walkId, WalkStatus.IN_PROGRESS, { startedAt, startedLate });
+    return this.updateStatus(
+      walkId, WalkStatus.IN_PROGRESS, { startedAt, startedLate }, /* isWalkerView */ true,
+    );
   }
 
   // ─── Finalizar paseo (paseador) ──────────────────────────
@@ -448,25 +501,18 @@ export class WalksService {
   async finish(userId: string, walkId: string) {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.IN_PROGRESS, "finalizar");
-    // En teoria walk.startedAt siempre esta seteado aca: start() es el unico
-    // camino hacia IN_PROGRESS y es quien lo escribe. Pero este proyecto
-    // tiene mas de una intervencion manual por SQL en produccion (ver
-    // backlog) — un UPDATE a mano puede dejar un paseo en IN_PROGRESS sin
-    // startedAt. Guard explicito en vez de "as Date": si el dato
-    // inconsistente existe, mejor una excepcion clara que un crash generico,
-    // y el error queda logueado porque es un estado que el codigo considera
-    // imposible.
-    if (!walk.startedAt) {
-      this.logger.error(
-        `finish(): walk ${walkId} esta IN_PROGRESS sin startedAt — estado inconsistente, revisar en la base`,
-      );
-      throw new UnprocessableEntityException(
-        "Este paseo no tiene registrado cuando arrancó. No es un problema tuyo — contactanos para resolverlo.",
-      );
-    }
+    this.assertHasStartedAt(walkId, walk.startedAt);
     this.assertCanFinish(walk.startedAt, walk.walkType.durationMinutes);
 
-    return this.updateStatus(walkId, WalkStatus.COMPLETED, { endedAt: new Date() });
+    const endedAt = new Date();
+    const endedLate = this.computeEndedLate(walk.startedAt, walk.walkType.durationMinutes, endedAt);
+
+    return this.updateStatus(
+      walkId,
+      WalkStatus.COMPLETED,
+      { endedAt, endedLate, closedBy: ClosedBy.WALKER },
+      /* isWalkerView */ true,
+    );
   }
 
   // ─── Cancelar (dueño o paseador) ────────────────────────
@@ -504,9 +550,150 @@ export class WalksService {
       );
     }
 
-    return this.updateStatus(walkId, targetStatus, {
-      cancellationReason: dto.cancellationReason ?? null,
+    return this.updateStatus(
+      walkId,
+      targetStatus,
+      { cancellationReason: dto.cancellationReason ?? null },
+      /* isWalkerView */ role === UserRole.WALKER,
+    );
+  }
+
+  // ─── Reportar "el paseador no se presentó" (dueño) ───────
+  // Primera superficie HTTP nueva del rediseño (bloque B). No mueve plata:
+  // registra qué pasó y quién lo declaró. El dinero es del bloque E.
+
+  async reportWalkerNoShow(userId: string, walkId: string) {
+    const owner = await this.prisma.ownerProfile.findUnique({
+      where: { userId },
+      select: { id: true, user: { select: { firstName: true, lastName: true, email: true } } },
     });
+    // 404 gate: si no hay OwnerProfile, no hay forma de ser participante de
+    // nada. Mismo criterio que el resto del módulo (ver assertWalkAccess).
+    if (!owner) throw new ForbiddenException("No tenés acceso a este paseo");
+
+    const walk = await this.prisma.walk.findUnique({
+      where: { id: walkId },
+      select: {
+        id: true,
+        status: true,
+        scheduledAt: true,
+        mpPaymentId: true,
+        totalAmount: true,
+        walker: { select: { user: { select: { id: true, firstName: true, lastName: true } } } },
+        participants: { select: { ownerId: true, dog: { select: { name: true } } } },
+      },
+    });
+    if (!walk) throw new NotFoundException("Paseo no encontrado");
+
+    // Pertenencia — DENTRO del service, como getWalkerWalkOrThrow del otro
+    // lado: que otro dueño no pueda reportar un paseo que no es suyo.
+    const participant = walk.participants.find((p) => p.ownerId === owner.id);
+    if (!participant) throw new ForbiddenException("No tenés acceso a este paseo");
+
+    if (walk.status !== WalkStatus.CONFIRMED && walk.status !== WalkStatus.WALKER_ON_WAY) {
+      throw new BadRequestException(
+        `No se puede reportar un paseo en estado "${walk.status}". Se requiere "CONFIRMED" o "WALKER_ON_WAY".`,
+      );
+    }
+    // Desde T+10m, sin vencimiento — ver canReportWalkerNoShow.
+    if (!canReportWalkerNoShow(walk.scheduledAt, new Date())) {
+      const opensAt = new Date(
+        walk.scheduledAt.getTime() + WALK_TIMING.OWNER_NO_SHOW_BUTTON_MIN_AFTER * 60_000,
+      );
+      throw new BadRequestException(
+        `Todavía no podés reportar esto. Vas a poder a partir de las ${toBusinessDayAndTime(opensAt).timeStr}.`,
+      );
+    }
+
+    const notPerformedAt = new Date();
+    const updated = await this.updateStatus(
+      walkId,
+      WalkStatus.NOT_PERFORMED,
+      { notPerformedReason: NotPerformedReason.WALKER_NO_SHOW, notPerformedAt },
+      /* isWalkerView */ false,
+    );
+
+    const dogName = participant.dog.name;
+    void this.notificationsService
+      ?.create({
+        userId: walk.walker.user.id,
+        title: "El dueño reportó que no llegaste al paseo",
+        body: `Se marcó como no realizado el paseo${dogName ? ` de ${dogName}` : ""}.`,
+        type: NOTIFICATION_TYPES.WALK_WALKER_NO_SHOW_REPORTED,
+        data: { walkId },
+      })
+      .catch((err) => this.logger.warn(`No se pudo notificar el reporte de no-show: ${err}`));
+
+    // Alerta a Joa, misma vía que el job (WalkExpirationService): solo si
+    // había plata adentro — un NOT_PERFORMED sin pagar no necesita que
+    // nadie intervenga.
+    if (isWalkPaid(walk.mpPaymentId)) {
+      this.mail?.sendNotPerformedAlert({
+        walkId,
+        reason: "el dueño reportó que el paseador no se presentó",
+        scheduledAt: walk.scheduledAt,
+        totalAmount: walk.totalAmount,
+        ownerName: `${owner.user.firstName} ${owner.user.lastName}`,
+        ownerEmail: owner.user.email,
+        walkerName: `${walk.walker.user.firstName} ${walk.walker.user.lastName}`,
+      });
+    }
+
+    return updated;
+  }
+
+  // ─── Confirmar recepción (dueño) ──────────────────────────
+  // La llave de escape del bloqueo del punto 4: si al paseador se le apagó
+  // el celular, el dueño destraba. El que tiene el perro en la mano es el
+  // que puede decir que llegó.
+
+  async confirmReceipt(userId: string, walkId: string) {
+    const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
+    if (!owner) throw new ForbiddenException("No tenés acceso a este paseo");
+
+    const walk = await this.prisma.walk.findUnique({
+      where: { id: walkId },
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        walkType: { select: { durationMinutes: true } },
+        walker: { select: { user: { select: { id: true } } } },
+        participants: { select: { ownerId: true } },
+      },
+    });
+    if (!walk) throw new NotFoundException("Paseo no encontrado");
+
+    const isParticipant = walk.participants.some((p) => p.ownerId === owner.id);
+    if (!isParticipant) throw new ForbiddenException("No tenés acceso a este paseo");
+
+    this.assertStatus(walk.status, WalkStatus.IN_PROGRESS, "confirmar la recepción de");
+    this.assertHasStartedAt(walkId, walk.startedAt);
+
+    const endedAt = new Date();
+    const endedLate = this.computeEndedLate(walk.startedAt, walk.walkType.durationMinutes, endedAt);
+
+    const updated = await this.updateStatus(
+      walkId,
+      WalkStatus.COMPLETED,
+      { endedAt, endedLate, closedBy: ClosedBy.OWNER },
+      /* isWalkerView */ false,
+    );
+
+    // El paseador tiene que enterarse de que esta acción no se puede
+    // olvidar — closedBy = OWNER queda en su historial como dato de
+    // prolijidad (distinto de la puntualidad, de la misma familia).
+    void this.notificationsService
+      ?.create({
+        userId: walk.walker.user.id,
+        title: "El dueño confirmó que recibió a su perro",
+        body: "Cerró el paseo por vos. Acordate de finalizarlo la próxima — no se puede olvidar.",
+        type: NOTIFICATION_TYPES.WALK_CLOSED_BY_OWNER,
+        data: { walkId },
+      })
+      .catch((err) => this.logger.warn(`No se pudo notificar el cierre por el dueño: ${err}`));
+
+    return updated;
   }
 
   // ─── Ruta GPS ────────────────────────────────────────────
@@ -674,10 +861,66 @@ export class WalksService {
     }
   }
 
+  // Bloqueo del bloque B: con un IN_PROGRESS VENCIDO (pasó el fin esperado
+  // + WALK_TIMING.END_LATE_THRESHOLD_MIN_AFTER — no un IN_PROGRESS abierto
+  // y normal, eso es lo esperado en un negocio multi-perro), el paseador no
+  // puede aceptar reservas nuevas. Es la ÚNICA acción bloqueada: cerrar
+  // cualquier paseo, iniciar otro y marcar "en camino" nunca se frenan —
+  // frenarlos convertiría un olvido administrativo en un problema real con
+  // animales, o bloquearía justo la acción que resuelve el problema.
+  private async assertNoOverdueInProgress(walkerId: string) {
+    const inProgress = await this.prisma.walk.findMany({
+      where: { walkerId, status: WalkStatus.IN_PROGRESS },
+      select: {
+        startedAt: true,
+        walkType: { select: { durationMinutes: true } },
+        participants: { select: { dog: { select: { name: true } } }, take: 1 },
+      },
+    });
+
+    const now = Date.now();
+    const overdue = inProgress.find((w) => {
+      if (!w.startedAt) return false;
+      const expectedEnd = w.startedAt.getTime() + w.walkType.durationMinutes * 60_000;
+      return now >= expectedEnd + WALK_TIMING.END_LATE_THRESHOLD_MIN_AFTER * 60_000;
+    });
+    if (!overdue) return;
+
+    const dogName = overdue.participants[0]?.dog.name ?? "un perro";
+    throw new BadRequestException(
+      `Cerrá primero el paseo de ${dogName} antes de aceptar reservas nuevas.`,
+    );
+  }
+
+  // Mismo guard que ya usaba finish(): en teoría walk.startedAt siempre está
+  // seteado en IN_PROGRESS (start() es el único camino hacia ahí y es quien
+  // lo escribe), pero este proyecto tiene más de una intervención manual
+  // por SQL en producción (ver backlog) — un UPDATE a mano puede dejar un
+  // paseo en IN_PROGRESS sin startedAt. Comparte el guard finish() y
+  // confirmReceipt(), los dos únicos caminos hacia COMPLETED.
+  private assertHasStartedAt(walkId: string, startedAt: Date | null): asserts startedAt is Date {
+    if (startedAt) return;
+    this.logger.error(
+      `walk ${walkId} esta IN_PROGRESS sin startedAt — estado inconsistente, revisar en la base`,
+    );
+    throw new UnprocessableEntityException(
+      "Este paseo no tiene registrado cuando arrancó. No es un problema tuyo — contactanos para resolverlo.",
+    );
+  }
+
+  // Mismo criterio que startedLate: se persiste, no se deriva (ver el
+  // comentario en el schema). Compartido por finish() y confirmReceipt() —
+  // los dos caminos a COMPLETED tienen que marcar tardío con la misma regla.
+  private computeEndedLate(startedAt: Date, durationMinutes: number, endedAt: Date): boolean {
+    const expectedEnd = startedAt.getTime() + durationMinutes * 60_000;
+    return endedAt.getTime() > expectedEnd + WALK_TIMING.END_LATE_THRESHOLD_MIN_AFTER * 60_000;
+  }
+
   private async updateStatus(
     walkId: string,
     status: WalkStatus,
     extra: Record<string, unknown> = {},
+    isWalkerView: boolean = false,
   ) {
     const updated = await this.prisma.walk.update({
       where: { id: walkId },
@@ -695,6 +938,6 @@ export class WalksService {
       ?.notifyWalkStatusChange(walkId, status)
       .catch((err) => this.logger.warn(`No se pudo notificar cambio de estado: ${err}`));
 
-    return toPublicWalk(updated);
+    return toPublicWalk(updated, isWalkerView);
   }
 }

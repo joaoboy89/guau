@@ -6,12 +6,14 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { WalkStatus, WalkMode, VerificationStatus, UserRole } from '@prisma/client';
+import { WalkStatus, WalkMode, VerificationStatus, UserRole, NotPerformedReason, ClosedBy } from '@prisma/client';
 import { WalksService } from './walks.service';
 import { PrismaService } from '../../database/prisma.service';
 import { TrackingGateway } from '../tracking/tracking.gateway';
 import { ChatService } from '../chat/chat.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../../common/services/mail.service';
+import { NOTIFICATION_TYPES } from '@guau/shared';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -57,8 +59,16 @@ const BASE_WALK = {
   walkerId:      WALKER_PROFILE_ID,
   status:        WalkStatus.PENDING,
   scheduledAt:   new Date('2026-07-06T12:00:00.000Z'),
+  // "Ya en camino" por defecto (no null): la mayoría de estos tests no le
+  // interesa la ofuscación del punto de encuentro, así que el default deja
+  // ver la dirección real y coincide con expectedPublicWalk() sin que cada
+  // test tenga que pensar en esto. Los tests de ofuscación (más abajo) lo
+  // pisan a null a propósito.
+  onWayAt:       new Date('2026-07-06T09:00:00.000Z') as Date | null,
   totalAmount:   1000,
   pickupAddress: 'Av. Santa Fe 1234, Palermo',
+  pickupLat:     -34.5885,
+  pickupLng:     -58.4233,
 };
 
 // Versión extendida con relaciones (equivalente al WALK_INCLUDE del servicio,
@@ -92,6 +102,8 @@ function expectedPublicWalk(walk: typeof WALK_FULL, isPaid: boolean) {
     scheduledAt:   walk.scheduledAt,
     startedAt:     walk.startedAt,
     pickupAddress: walk.pickupAddress,
+    pickupLat:     walk.pickupLat,
+    pickupLng:     walk.pickupLng,
     totalAmount:   walk.totalAmount,
     walkType:      walk.walkType,
     walker:        walk.walker,
@@ -160,7 +172,8 @@ describe('WalksService', () => {
   let prisma:                ReturnType<typeof buildPrismaMock>;
   let trackingGateway:       { emitStatusChanged: jest.Mock };
   let chatService:           { ensureConversationForWalk: jest.Mock };
-  let notificationsService:  { notifyWalkStatusChange: jest.Mock; notifyNewWalkRequest: jest.Mock };
+  let notificationsService:  { notifyWalkStatusChange: jest.Mock; notifyNewWalkRequest: jest.Mock; create: jest.Mock };
+  let mail:                  { sendNotPerformedAlert: jest.Mock };
 
   beforeEach(async () => {
     prisma = buildPrismaMock();
@@ -174,7 +187,9 @@ describe('WalksService', () => {
     notificationsService = {
       notifyWalkStatusChange: jest.fn().mockResolvedValue({}),
       notifyNewWalkRequest:   jest.fn().mockResolvedValue({}),
+      create:                 jest.fn().mockResolvedValue({}),
     };
+    mail = { sendNotPerformedAlert: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -184,6 +199,7 @@ describe('WalksService', () => {
         { provide: TrackingGateway,        useValue: trackingGateway },
         { provide: ChatService,            useValue: chatService },
         { provide: NotificationsService,   useValue: notificationsService },
+        { provide: MailService,            useValue: mail },
       ],
     }).compile();
 
@@ -214,6 +230,10 @@ describe('WalksService', () => {
     prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
     prisma.walk.findUnique.mockResolvedValue({ ...BASE_WALK, status });
     prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status });
+    // confirm() consulta walk.findMany para assertNoOverdueInProgress — sin
+    // esto, un test que no lo necesita (todos salvo los de bloqueo) rompe
+    // con "undefined no tiene .find()". Default: sin IN_PROGRESS vencidos.
+    prisma.walk.findMany.mockResolvedValue([]);
   }
 
   // ─── constructor — validación de MP_MARKETPLACE_FEE ────────────────────────
@@ -1089,11 +1109,11 @@ describe('WalksService', () => {
       );
     });
 
-    // ─── Guard de tiempo: "voy en camino" recién desde T-3h ────────────────
+    // ─── Guard de tiempo: "voy en camino" recién desde T-2h ────────────────
 
-    it('BadRequestException si todavía no llegó a T-3h, con el horario en el mensaje', async () => {
+    it('BadRequestException si todavía no llegó a T-2h, con el horario en el mensaje', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
-      const scheduledAt = new Date(Date.now() + 4 * 60 * 60 * 1000); // 4h en el futuro — antes de T-3h
+      const scheduledAt = new Date(Date.now() + 4 * 60 * 60 * 1000); // 4h en el futuro — antes de T-2h
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.CONFIRMED, scheduledAt, walkType: WALK_FULL.walkType,
       });
@@ -1460,6 +1480,310 @@ describe('WalksService', () => {
           }),
         }),
       );
+    });
+  });
+
+  // ─── reportWalkerNoShow() ───────────────────────────────────────────────
+
+  describe('reportWalkerNoShow()', () => {
+    const REPORTABLE_WALK = {
+      id: WALK_ID,
+      status: WalkStatus.CONFIRMED as WalkStatus,
+      scheduledAt: new Date(Date.now() - 15 * 60 * 1000), // T+10m ya pasó
+      mpPaymentId: null as string | null,
+      totalAmount: 1000,
+      walker: { user: { id: WALKER_USER_ID, firstName: 'Juan', lastName: 'Pérez' } },
+      participants: [{ ownerId: OWNER_PROFILE_ID, dog: { name: 'Lolo' } }],
+    };
+
+    function setupReport(overrides: Partial<typeof REPORTABLE_WALK> = {}) {
+      prisma.ownerProfile.findUnique.mockResolvedValue({
+        id: OWNER_PROFILE_ID,
+        user: { firstName: 'Ana', lastName: 'Gómez', email: 'ana@test.com' },
+      });
+      prisma.walk.findUnique.mockResolvedValue({ ...REPORTABLE_WALK, ...overrides });
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.NOT_PERFORMED });
+    }
+
+    it('ForbiddenException si no existe ownerProfile', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(null);
+      await expect(service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('NotFoundException si el walk no existe', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue({
+        id: OWNER_PROFILE_ID, user: { firstName: 'Ana', lastName: 'Gómez', email: 'ana@test.com' },
+      });
+      prisma.walk.findUnique.mockResolvedValue(null);
+      await expect(service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('IDOR: ForbiddenException si el dueño no es participante de este paseo', async () => {
+      setupReport({ participants: [{ ownerId: 'otro-owner', dog: { name: 'Fido' } }] });
+      await expect(service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('BadRequestException en un estado no válido (ej. PENDING)', async () => {
+      setupReport({ status: WalkStatus.PENDING });
+      await expect(service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+    });
+
+    it('BadRequestException antes de T+10m, con el horario en el mensaje', async () => {
+      setupReport({ scheduledAt: new Date(Date.now() + 60 * 60 * 1000) }); // 1h en el futuro
+      await expect(service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID)).rejects.toThrow(/Vas a poder/);
+    });
+
+    it('no vence: mucho después de T+10m sigue permitiendo reportar', async () => {
+      setupReport({ scheduledAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }); // hace un mes
+      await expect(service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID)).resolves.toBeDefined();
+    });
+
+    it('camino feliz desde CONFIRMED: marca NOT_PERFORMED/WALKER_NO_SHOW y notifica al paseador', async () => {
+      setupReport();
+      await service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID);
+
+      expect(prisma.walk.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: WalkStatus.NOT_PERFORMED,
+            notPerformedReason: NotPerformedReason.WALKER_NO_SHOW,
+            notPerformedAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(notificationsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: WALKER_USER_ID,
+          type: NOTIFICATION_TYPES.WALK_WALKER_NO_SHOW_REPORTED,
+          data: { walkId: WALK_ID },
+        }),
+      );
+    });
+
+    it('camino feliz desde WALKER_ON_WAY: también válido', async () => {
+      setupReport({ status: WalkStatus.WALKER_ON_WAY });
+      await expect(service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID)).resolves.toBeDefined();
+    });
+
+    it('paseo pagado (mpPaymentId numérico) → alerta al admin', async () => {
+      setupReport({ mpPaymentId: '99999' });
+      await service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID);
+      expect(mail.sendNotPerformedAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('paseo sin pagar → NO alerta al admin', async () => {
+      setupReport({ mpPaymentId: null });
+      await service.reportWalkerNoShow(OWNER_USER_ID, WALK_ID);
+      expect(mail.sendNotPerformedAlert).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── confirmReceipt() ────────────────────────────────────────────────────
+
+  describe('confirmReceipt()', () => {
+    const RECEIPT_WALK = {
+      id: WALK_ID,
+      status: WalkStatus.IN_PROGRESS as WalkStatus,
+      startedAt: new Date(Date.now() - 60 * 60 * 1000) as Date | null,
+      walkType: { durationMinutes: 30 },
+      walker: { user: { id: WALKER_USER_ID } },
+      participants: [{ ownerId: OWNER_PROFILE_ID }],
+    };
+
+    function setupReceipt(overrides: Partial<typeof RECEIPT_WALK> = {}) {
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walk.findUnique.mockResolvedValue({ ...RECEIPT_WALK, ...overrides });
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.COMPLETED });
+    }
+
+    it('ForbiddenException si no existe ownerProfile', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(null);
+      await expect(service.confirmReceipt(OWNER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('NotFoundException si el walk no existe', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walk.findUnique.mockResolvedValue(null);
+      await expect(service.confirmReceipt(OWNER_USER_ID, WALK_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('IDOR: ForbiddenException si el dueño no es participante', async () => {
+      setupReceipt({ participants: [{ ownerId: 'otro-owner' }] });
+      await expect(service.confirmReceipt(OWNER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('BadRequestException si el walk no está en IN_PROGRESS', async () => {
+      setupReceipt({ status: WalkStatus.CONFIRMED });
+      await expect(service.confirmReceipt(OWNER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+    });
+
+    it('UnprocessableEntityException si está IN_PROGRESS sin startedAt (estado inconsistente)', async () => {
+      setupReceipt({ startedAt: null });
+      await expect(service.confirmReceipt(OWNER_USER_ID, WALK_ID)).rejects.toThrow(UnprocessableEntityException);
+    });
+
+    it('camino feliz: pasa a COMPLETED con closedBy OWNER y notifica al paseador', async () => {
+      setupReceipt();
+      await service.confirmReceipt(OWNER_USER_ID, WALK_ID);
+
+      expect(prisma.walk.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: WalkStatus.COMPLETED,
+            closedBy: ClosedBy.OWNER,
+            endedAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(notificationsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: WALKER_USER_ID, type: NOTIFICATION_TYPES.WALK_CLOSED_BY_OWNER }),
+      );
+    });
+
+    // endedLate = endedAt > (startedAt + duración + 60min). Duración 30min,
+    // así que el borde exacto es 90min desde que arrancó.
+    it('endedLate: false justo antes del umbral (90m), true justo después', async () => {
+      const notLate = new Date(Date.now() - 90 * 60 * 1000 + 1000);
+      setupReceipt({ startedAt: notLate });
+      await service.confirmReceipt(OWNER_USER_ID, WALK_ID);
+      expect(prisma.walk.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ endedLate: false }) }),
+      );
+
+      const late = new Date(Date.now() - 90 * 60 * 1000 - 1000);
+      setupReceipt({ startedAt: late });
+      await service.confirmReceipt(OWNER_USER_ID, WALK_ID);
+      expect(prisma.walk.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ endedLate: true }) }),
+      );
+    });
+  });
+
+  // ─── Ofuscación del punto de encuentro (anti-desintermediación) ─────────
+
+  describe('ofuscación del punto de encuentro (findById)', () => {
+    const WALK_NO_ONWAY = { ...WALK_FULL, onWayAt: null };
+
+    it('WALKER, onWayAt null: pickupAddress viene null y las coordenadas NO son las reales', async () => {
+      prisma.walk.findUnique.mockResolvedValue(WALK_NO_ONWAY);
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+
+      expect(result.pickupAddress).toBeNull();
+      expect(result.pickupLat).not.toBe(WALK_FULL.pickupLat);
+      expect(result.pickupLng).not.toBe(WALK_FULL.pickupLng);
+    });
+
+    it('el desplazamiento es determinista: dos consultas del mismo walk dan el mismo punto aproximado', async () => {
+      prisma.walk.findUnique.mockResolvedValue(WALK_NO_ONWAY);
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const first  = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+      const second = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+
+      expect(second.pickupLat).toBe(first.pickupLat);
+      expect(second.pickupLng).toBe(first.pickupLng);
+    });
+
+    it('WALKER, onWayAt seteado: dirección y coordenadas reales', async () => {
+      prisma.walk.findUnique.mockResolvedValue(WALK_FULL); // onWayAt no-null por default
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+
+      expect(result.pickupAddress).toBe(WALK_FULL.pickupAddress);
+      expect(result.pickupLat).toBe(WALK_FULL.pickupLat);
+      expect(result.pickupLng).toBe(WALK_FULL.pickupLng);
+    });
+
+    it('OWNER siempre ve la dirección real, aunque onWayAt sea null', async () => {
+      prisma.walk.findUnique.mockResolvedValue(WALK_NO_ONWAY);
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walkParticipant.findFirst.mockResolvedValue({ id: 'p-1', walkId: WALK_ID, ownerId: OWNER_PROFILE_ID });
+
+      const result = await service.findById(OWNER_USER_ID, UserRole.OWNER, WALK_ID);
+
+      expect(result.pickupAddress).toBe(WALK_FULL.pickupAddress);
+      expect(result.pickupLat).toBe(WALK_FULL.pickupLat);
+      expect(result.pickupLng).toBe(WALK_FULL.pickupLng);
+    });
+  });
+
+  // ─── Bloqueo (bloque B): SOLO confirm() se frena, y solo con un ─────────
+  // ─── IN_PROGRESS VENCIDO (nunca uno abierto y normal) ───────────────────
+
+  describe('bloqueo por IN_PROGRESS vencido', () => {
+    it('confirm(): BadRequestException si hay un IN_PROGRESS VENCIDO, con el nombre del perro en el mensaje', async () => {
+      setupWalkerWalk(WalkStatus.PENDING);
+      prisma.walk.findMany.mockResolvedValue([{
+        startedAt: new Date(Date.now() - 120 * 60 * 1000), // arrancó hace 2h
+        walkType: { durationMinutes: 30 }, // fin esperado hace 90m; +60m de margen ⇒ vencido hace 30m
+        participants: [{ dog: { name: 'Lolo' } }],
+      }]);
+
+      await expect(service.confirm(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.confirm(WALKER_USER_ID, WALK_ID)).rejects.toThrow(/Lolo/);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('confirm(): un IN_PROGRESS ABIERTO y normal (todavía no vencido) NO bloquea — es lo esperado en un negocio multi-perro', async () => {
+      setupWalkerWalk(WalkStatus.PENDING);
+      prisma.walk.findMany.mockResolvedValue([{
+        startedAt: new Date(Date.now() - 10 * 60 * 1000), // recién arrancó
+        walkType: { durationMinutes: 30 },
+        participants: [{ dog: { name: 'Fido' } }],
+      }]);
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.CONFIRMED });
+
+      await expect(service.confirm(WALKER_USER_ID, WALK_ID)).resolves.toBeDefined();
+    });
+
+    it('confirm(): sin ningún IN_PROGRESS, funciona normal', async () => {
+      setupWalkerWalk(WalkStatus.PENDING); // deja walk.findMany en []
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.CONFIRMED });
+
+      await expect(service.confirm(WALKER_USER_ID, WALK_ID)).resolves.toBeDefined();
+    });
+
+    // Los dos siguientes son el corazón del punto 4: un refactor futuro que
+    // agregue el chequeo acá "por consistencia" rompería el producto (un
+    // negocio multi-perro necesita poder iniciar y cerrar sin trabas).
+    it('start(): NUNCA se bloquea — ni siquiera consulta otros walks del paseador', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt: new Date(),
+      });
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
+
+      await service.start(WALKER_USER_ID, WALK_ID);
+
+      expect(prisma.walk.findMany).not.toHaveBeenCalled();
+    });
+
+    it('markOnWay(): NUNCA se bloquea — ni siquiera consulta otros walks del paseador', async () => {
+      setupWalkerWalk(WalkStatus.CONFIRMED);
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.WALKER_ON_WAY });
+
+      await service.markOnWay(WALKER_USER_ID, WALK_ID);
+
+      expect(prisma.walk.findMany).not.toHaveBeenCalled();
+    });
+
+    it('finish(): NUNCA se bloquea (cerrar siempre está permitido) — ni siquiera consulta otros walks', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK,
+        status: WalkStatus.IN_PROGRESS,
+        startedAt: new Date(Date.now() - 60 * 60 * 1000),
+        walkType: WALK_FULL.walkType,
+      });
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.COMPLETED });
+
+      await service.finish(WALKER_USER_ID, WALK_ID);
+
+      expect(prisma.walk.findMany).not.toHaveBeenCalled();
     });
   });
 

@@ -12,7 +12,7 @@ const MINUTE_MS = 60_000;
  */
 
 /**
- * "Voy en camino" se habilita desde T-3h y no tiene techo: una vez abierta la
+ * "Voy en camino" se habilita desde T-2h y no tiene techo: una vez abierta la
  * ventana, queda abierta. Ver WALK_TIMING.ON_WAY_OPENS_MIN_BEFORE.
  */
 export function canMarkOnWay(scheduledAt: Date, now: Date): boolean {
@@ -45,4 +45,14 @@ export function expectedEndAt(startedAt: Date, durationMinutes: number): Date {
 export function canFinish(startedAt: Date, durationMinutes: number, now: Date): boolean {
   const opensAt = expectedEndAt(startedAt, durationMinutes).getTime() - WALK_TIMING.FINISH_OPENS_MIN_BEFORE_END * MINUTE_MS;
   return now.getTime() >= opensAt;
+}
+
+/**
+ * El botón del dueño "el paseador no se presentó" — se habilita desde
+ * T+10m y no tiene techo: dura hasta que el paseo llegue a un estado
+ * final. Un botón para reportar un problema no necesita vencimiento — si
+ * el paseo se hizo, está en COMPLETED y el botón no se muestra.
+ */
+export function canReportWalkerNoShow(scheduledAt: Date, now: Date): boolean {
+  return now.getTime() >= scheduledAt.getTime() + WALK_TIMING.OWNER_NO_SHOW_BUTTON_MIN_AFTER * MINUTE_MS;
 }

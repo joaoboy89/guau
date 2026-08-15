@@ -39,9 +39,14 @@ enum WalkStatus {
 // el paseador fue, espero y declaro que el dueño no aparecio — ahi no expiro
 // nada, alguien actuo. El motivo es el que decide la plata (bloque E).
 enum NotPerformedReason {
-  WALKER_NO_SHOW        // nunca marco "en camino" y paso T + duracion del WalkType
+  // Nunca marco "en camino" y paso T + duracion del WalkType. Dos caminos
+  // distintos llegan a este mismo motivo: el job (WalkExpirationService,
+  // automatico) y el boton del dueño "el paseador no se presento"
+  // (bloque B, manual, desde T+10m) — el motivo es el mismo, cambia solo
+  // quien lo detecto.
+  WALKER_NO_SHOW
   ON_WAY_NEVER_STARTED  // marco "en camino" y despues silencio: nunca inicio ni reclamo nada
-  OWNER_NO_SHOW         // el paseador lo declara con GPS (boton, bloque B)
+  OWNER_NO_SHOW         // el paseador lo declara con GPS (boton, bloque D)
   // Canario, no una regla real: si un paseo termina acá es que apareció un
   // estado que el resto del job no supo nombrar (ej. CONFIRMED con onWayAt
   // seteado — no debería poder pasar por la app, pero una intervención
@@ -49,6 +54,18 @@ enum NotPerformedReason {
   // logs, hay un caso sin mapear y hay que investigarlo, no ignorarlo.
   NOBODY_ACTED
   NEVER_CONFIRMED       // job: quedo PENDING y paso la hora pactada
+}
+
+// Quien cerro el paseo (COMPLETED). Dato de prolijidad para el historial del
+// paseador, no de puntualidad: un WALKER que nunca cierra sus propios
+// paseos y depende de que el dueño confirme la recepcion es una señal
+// distinta (y de la misma familia) que llegar tarde. ADMIN queda definido
+// para cuando exista el cierre manual desde el panel (politicas.md lo
+// menciona como "segunda llave") — todavia no hay endpoint que lo setee.
+enum ClosedBy {
+  WALKER
+  OWNER
+  ADMIN
 }
 
 enum WalkMode {
@@ -199,6 +216,19 @@ model Walk {
   // tomada con la regla vigente en ese momento no se reescribe sola).
   startedLate        Boolean              @default(false)
   endedAt            DateTime?
+  // true si endedAt quedo mas de WALK_TIMING.END_LATE_THRESHOLD_MIN_AFTER
+  // despues del fin esperado (startedAt + duracion del WalkType). Mismo
+  // criterio que startedLate y las mismas dos razones: se persiste (no se
+  // deriva) porque alimenta metricas que se agregan por SQL sobre muchos
+  // paseos sin traer cada fila a memoria, y porque envenena cualquier
+  // promedio de duracion si no se puede excluir (un paseo de 2h cerrado 20h
+  // despues da endedAt-startedAt = 20h, un numero que no describe nada real).
+  endedLate          Boolean              @default(false)
+  // Quien confirmo que el paseo termino. WALKER cuando lo cierra el propio
+  // paseador (finish()); OWNER cuando el dueño confirma la recepcion porque
+  // el paseador no lo hizo (confirmReceipt()) — la llave de escape del
+  // bloqueo del bloque B. Null mientras el paseo no llego a COMPLETED.
+  closedBy           ClosedBy?
   notPerformedReason NotPerformedReason?
   notPerformedAt     DateTime?
   pickupLat          Float
