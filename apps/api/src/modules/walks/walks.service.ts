@@ -432,7 +432,15 @@ export class WalksService {
     this.assertStatus(walk.status, WalkStatus.WALKER_ON_WAY, "iniciar");
     this.assertCanStart(walk.scheduledAt);
 
-    return this.updateStatus(walkId, WalkStatus.IN_PROGRESS, { startedAt: new Date() });
+    const startedAt = new Date();
+    // Se calcula una sola vez, acá, y se persiste — no se deriva en lectura
+    // como isExpired (ver el comentario en el schema): alimenta la tasa de
+    // puntualidad del paseador, que necesita agregarse por SQL sobre muchos
+    // paseos sin traer cada fila a memoria.
+    const lateThreshold = walk.scheduledAt.getTime() + WALK_TIMING.START_LATE_THRESHOLD_MIN_AFTER * 60_000;
+    const startedLate = startedAt.getTime() > lateThreshold;
+
+    return this.updateStatus(walkId, WalkStatus.IN_PROGRESS, { startedAt, startedLate });
   }
 
   // ─── Finalizar paseo (paseador) ──────────────────────────
@@ -561,20 +569,14 @@ export class WalksService {
     );
   }
 
+  // Sin rama de "ya pasó la ventana": canStart no tiene techo superior
+  // (evidencia, no candado — ver @guau/shared). Quien llega tarde igual
+  // puede iniciar; start() registra la demora en Walk.startedLate.
   private assertCanStart(scheduledAt: Date) {
     const now = new Date();
     if (canStart(scheduledAt, now)) return;
 
     const opensAt = new Date(scheduledAt.getTime() - WALK_TIMING.START_OPENS_MIN_BEFORE * 60_000);
-    const closesAt = new Date(scheduledAt.getTime() + WALK_TIMING.START_CLOSES_MIN_AFTER * 60_000);
-
-    // Después del cierre no hay "vas a poder": prometer un horario futuro
-    // que no existe sería peor que el mensaje genérico.
-    if (now.getTime() > closesAt.getTime()) {
-      throw new BadRequestException(
-        `Ya pasó la ventana para iniciar este paseo. Se cerró a las ${toBusinessDayAndTime(closesAt).timeStr}.`,
-      );
-    }
     throw new BadRequestException(
       `Todavía no podés iniciar el paseo. Vas a poder a partir de las ${toBusinessDayAndTime(opensAt).timeStr}.`,
     );

@@ -1129,9 +1129,9 @@ describe('WalksService', () => {
       await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
     });
 
-    it('camino feliz: pasa a IN_PROGRESS y setea startedAt', async () => {
+    it('camino feliz: pasa a IN_PROGRESS, setea startedAt y startedLate: false (a tiempo)', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
-      // scheduledAt = ahora — bien adentro de la ventana T-5m a T+10m
+      // scheduledAt = ahora — bien adentro de la ventana, mucho antes de T+10m
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt: new Date(),
       });
@@ -1142,14 +1142,15 @@ describe('WalksService', () => {
       expect(prisma.walk.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status:    WalkStatus.IN_PROGRESS,
-            startedAt: expect.any(Date),
+            status:      WalkStatus.IN_PROGRESS,
+            startedAt:   expect.any(Date),
+            startedLate: false,
           }),
         }),
       );
     });
 
-    // ─── Guard de tiempo: ventana T-5m a T+10m ──────────────────────────────
+    // ─── Guard de tiempo: se habilita desde T-5m, sin techo ─────────────────
 
     it('BadRequestException si todavía no llegó a T-5m, con el horario en el mensaje', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
@@ -1163,16 +1164,47 @@ describe('WalksService', () => {
       expect(prisma.walk.update).not.toHaveBeenCalled();
     });
 
-    it('BadRequestException si ya pasó T+10m, con mensaje distinto (ventana cerrada, no "vas a poder")', async () => {
+    // canStart ya no tiene techo (bloque C, segunda parte): un inicio mucho
+    // despues de T+10m ahora SE PERMITE — evidencia, no candado. Lo unico
+    // que cambia es que queda marcado como tardio.
+    it('mucho despues de T+10m: SÍ permite iniciar (ya no hay ventana cerrada) y marca startedLate: true', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
-      const scheduledAt = new Date(Date.now() - 60 * 60 * 1000); // 1h en el pasado — después de T+10m
+      const scheduledAt = new Date(Date.now() - 60 * 60 * 1000); // 1h en el pasado — muy despues de T+10m
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt,
       });
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
 
-      await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
-      await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(/Ya pasó la ventana/);
-      expect(prisma.walk.update).not.toHaveBeenCalled();
+      await expect(service.start(WALKER_USER_ID, WALK_ID)).resolves.toBeDefined();
+
+      expect(prisma.walk.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ startedLate: true }),
+        }),
+      );
+    });
+
+    it('justo en el límite de T+10m (11 min tarde): startedLate true; a los 9 min: false', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
+
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY,
+        scheduledAt: new Date(Date.now() - 11 * 60 * 1000),
+      });
+      await service.start(WALKER_USER_ID, WALK_ID);
+      expect(prisma.walk.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ startedLate: true }) }),
+      );
+
+      prisma.walk.findUnique.mockResolvedValue({
+        ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY,
+        scheduledAt: new Date(Date.now() - 9 * 60 * 1000),
+      });
+      await service.start(WALKER_USER_ID, WALK_ID);
+      expect(prisma.walk.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ startedLate: false }) }),
+      );
     });
   });
 

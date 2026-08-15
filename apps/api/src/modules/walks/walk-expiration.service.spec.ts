@@ -33,16 +33,20 @@ function buildMailMock() {
   return { sendNotPerformedAlert: jest.fn() };
 }
 
-// markNotPerformed() llama a findMany exactamente 3 veces, siempre en el
-// mismo orden: never-confirmed, walker-no-show, nobody-acted. Encadenar
-// mockResolvedValueOnce en ese orden es más simple y más robusto que
-// inspeccionar la forma del `where` de cada llamada.
-function mockThreePasses(prisma: ReturnType<typeof buildPrismaMock>, passes: unknown[][]) {
-  const [neverConfirmed, walkerNoShow, nobodyActed] = passes;
+// markNotPerformed() llama a findMany exactamente 4 veces, siempre en el
+// mismo orden: never-confirmed, walker-no-show, on-way-never-started,
+// canario. Encadenar mockResolvedValueOnce en ese orden es más simple y más
+// robusto que inspeccionar la forma del `where` de cada llamada.
+function mockFourPasses(
+  prisma: ReturnType<typeof buildPrismaMock>,
+  passes: [unknown[], unknown[], unknown[], unknown[]],
+) {
+  const [neverConfirmed, walkerNoShow, onWayNeverStarted, canary] = passes;
   prisma.walk.findMany
     .mockResolvedValueOnce(neverConfirmed)
     .mockResolvedValueOnce(walkerNoShow)
-    .mockResolvedValueOnce(nobodyActed);
+    .mockResolvedValueOnce(onWayNeverStarted)
+    .mockResolvedValueOnce(canary);
 }
 
 // ─── Suite ────────────────────────────────────────────────────────────────────
@@ -70,11 +74,11 @@ describe('WalkExpirationService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // ─── Las tres condiciones ──────────────────────────────────────────────────
+  // ─── Las condiciones ────────────────────────────────────────────────────
 
-  describe('markNotPerformed() — las tres condiciones', () => {
+  describe('markNotPerformed() — las condiciones', () => {
     it('PENDING vencido → NEVER_CONFIRMED', async () => {
-      mockThreePasses(prisma, [[BASE_CANDIDATE], [], []]);
+      mockFourPasses(prisma, [[BASE_CANDIDATE], [], [], []]);
 
       await service.markNotPerformed();
 
@@ -89,8 +93,10 @@ describe('WalkExpirationService', () => {
       });
     });
 
-    it('CONFIRMED sin onWayAt, vencido T+5m → WALKER_NO_SHOW', async () => {
-      mockThreePasses(prisma, [[], [BASE_CANDIDATE], []]);
+    it('CONFIRMED sin onWayAt, vencido T + duración del WalkType → WALKER_NO_SHOW', async () => {
+      // Agendado hace 2h, dura 30min: T+duración (12:30) quedó bien atrás.
+      const longOverdue = { ...BASE_CANDIDATE, scheduledAt: new Date(Date.now() - 2 * 60 * 60 * 1000) };
+      mockFourPasses(prisma, [[], [longOverdue], [], []]);
 
       await service.markNotPerformed();
 
@@ -100,44 +106,81 @@ describe('WalkExpirationService', () => {
       });
     });
 
-    it('CONFIRMED/WALKER_ON_WAY, vencido T + duración del WalkType → NOBODY_ACTED', async () => {
-      // Agendado hace 2h, dura 30min: el fin esperado (T+30m) ya quedó bien atrás.
-      const longOverdue = {
-        ...BASE_CANDIDATE,
-        scheduledAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      };
-      mockThreePasses(prisma, [[], [], [longOverdue]]);
-
-      await service.markNotPerformed();
-
-      expect(prisma.walk.updateMany).toHaveBeenCalledWith({
-        where: { id: 'walk-1', status: { in: [WalkStatus.CONFIRMED, WalkStatus.WALKER_ON_WAY] } },
-        data: expect.objectContaining({ notPerformedReason: NotPerformedReason.NOBODY_ACTED }),
-      });
-    });
-
-    it('NOBODY_ACTED: un candidato que todavía no llegó a T + duración NO se marca (filtro en memoria)', async () => {
-      const notYetDue = {
-        ...BASE_CANDIDATE,
-        scheduledAt: new Date(Date.now() + 60 * 60 * 1000), // agendado en el futuro
-      };
-      mockThreePasses(prisma, [[], [], [notYetDue]]);
+    it('WALKER_NO_SHOW: un CONFIRMED que ya pasó T pero NO llegó a T+duración todavía NO se marca (ya no es a los 5 min fijos)', async () => {
+      // Agendado hace 6 minutos, dura 30min: pasó T pero falta mucho para T+duración.
+      const recentlyOverdue = { ...BASE_CANDIDATE, scheduledAt: new Date(Date.now() - 6 * 60 * 1000) };
+      mockFourPasses(prisma, [[], [recentlyOverdue], [], []]);
 
       await service.markNotPerformed();
 
       expect(prisma.walk.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('WALKER_ON_WAY vencido T + duración del WalkType → ON_WAY_NEVER_STARTED', async () => {
+      const longOverdue = { ...BASE_CANDIDATE, scheduledAt: new Date(Date.now() - 2 * 60 * 60 * 1000) };
+      mockFourPasses(prisma, [[], [], [longOverdue], []]);
+
+      await service.markNotPerformed();
+
+      expect(prisma.walk.updateMany).toHaveBeenCalledWith({
+        where: { id: 'walk-1', status: { in: [WalkStatus.WALKER_ON_WAY] } },
+        data: expect.objectContaining({ notPerformedReason: NotPerformedReason.ON_WAY_NEVER_STARTED }),
+      });
+    });
+
+    it('ON_WAY_NEVER_STARTED: un candidato que todavía no llegó a T + duración NO se marca (filtro en memoria)', async () => {
+      const notYetDue = { ...BASE_CANDIDATE, scheduledAt: new Date() };
+      mockFourPasses(prisma, [[], [], [notYetDue], []]);
+
+      await service.markNotPerformed();
+
+      expect(prisma.walk.updateMany).not.toHaveBeenCalled();
+    });
+
+    // El bug que se arregla en esta ronda: antes el tercer pase consultaba
+    // status IN (CONFIRMED, WALKER_ON_WAY) — un CONFIRMED que sobraba del
+    // cupo (take: 50) del segundo pase caía acá y se llevaba un motivo
+    // distinto solo por el largo de la cola. Ahora el tercer pase consulta
+    // EXCLUSIVAMENTE WALKER_ON_WAY.
+    it('el pase de ON_WAY_NEVER_STARTED consulta solo WALKER_ON_WAY, nunca CONFIRMED', async () => {
+      mockFourPasses(prisma, [[], [], [], []]);
+
+      await service.markNotPerformed();
+
+      const [, , thirdCall] = prisma.walk.findMany.mock.calls;
+      expect(thirdCall[0]).toEqual(
+        expect.objectContaining({ where: expect.objectContaining({ status: WalkStatus.WALKER_ON_WAY }) }),
+      );
+    });
+  });
+
+  // ─── Filtro de fecha (Ventana 5) ─────────────────────────────────────────
+
+  describe('filtro de fecha en las consultas', () => {
+    it('walker-no-show y on-way-never-started piden scheduledAt <= now en el WHERE (no traen paseos futuros)', async () => {
+      mockFourPasses(prisma, [[], [], [], []]);
+
+      await service.markNotPerformed();
+
+      const [, secondCall, thirdCall] = prisma.walk.findMany.mock.calls;
+      expect(secondCall[0].where).toEqual(
+        expect.objectContaining({ scheduledAt: { lte: expect.any(Date) } }),
+      );
+      expect(thirdCall[0].where).toEqual(
+        expect.objectContaining({ scheduledAt: { lte: expect.any(Date) } }),
+      );
     });
   });
 
   // ─── Ventana 4: techo explícito ──────────────────────────────────────────
 
   describe('take', () => {
-    it('las tres consultas piden take: 50', async () => {
-      mockThreePasses(prisma, [[], [], []]);
+    it('las cuatro consultas piden take: 50', async () => {
+      mockFourPasses(prisma, [[], [], [], []]);
 
       await service.markNotPerformed();
 
-      expect(prisma.walk.findMany).toHaveBeenCalledTimes(3);
+      expect(prisma.walk.findMany).toHaveBeenCalledTimes(4);
       for (const call of prisma.walk.findMany.mock.calls) {
         expect(call[0]).toEqual(expect.objectContaining({ take: 50 }));
       }
@@ -148,7 +191,7 @@ describe('WalkExpirationService', () => {
 
   describe('idempotencia', () => {
     it('si el update no afecta ninguna fila (otra corrida ya lo movió), no cuenta como marcado ni dispara alerta', async () => {
-      mockThreePasses(prisma, [[{ ...BASE_CANDIDATE, mpPaymentId: '99999' }], [], []]);
+      mockFourPasses(prisma, [[{ ...BASE_CANDIDATE, mpPaymentId: '99999' }], [], [], []]);
       prisma.walk.updateMany.mockResolvedValue({ count: 0 });
 
       await service.markNotPerformed();
@@ -157,12 +200,12 @@ describe('WalkExpirationService', () => {
     });
 
     it('correrlo dos veces: la segunda vez el select ya no trae nada (el walk salió de PENDING/CONFIRMED/WALKER_ON_WAY) y no hay updates', async () => {
-      mockThreePasses(prisma, [[BASE_CANDIDATE], [], []]);
+      mockFourPasses(prisma, [[BASE_CANDIDATE], [], [], []]);
       await service.markNotPerformed();
       expect(prisma.walk.updateMany).toHaveBeenCalledTimes(1);
 
       jest.clearAllMocks();
-      mockThreePasses(prisma, [[], [], []]); // ya no está PENDING: no vuelve a aparecer
+      mockFourPasses(prisma, [[], [], [], []]); // ya no está PENDING: no vuelve a aparecer
       await service.markNotPerformed();
 
       expect(prisma.walk.updateMany).not.toHaveBeenCalled();
@@ -174,7 +217,7 @@ describe('WalkExpirationService', () => {
   describe('alerta a Joa', () => {
     it('paseo pagado (mpPaymentId numérico) → dispara sendNotPerformedAlert', async () => {
       const paid = { ...BASE_CANDIDATE, mpPaymentId: '99999' };
-      mockThreePasses(prisma, [[paid], [], []]);
+      mockFourPasses(prisma, [[paid], [], [], []]);
 
       await service.markNotPerformed();
 
@@ -191,7 +234,7 @@ describe('WalkExpirationService', () => {
     });
 
     it('paseo sin pagar (mpPaymentId null) → NO dispara sendNotPerformedAlert', async () => {
-      mockThreePasses(prisma, [[{ ...BASE_CANDIDATE, mpPaymentId: null }], [], []]);
+      mockFourPasses(prisma, [[{ ...BASE_CANDIDATE, mpPaymentId: null }], [], [], []]);
 
       await service.markNotPerformed();
 
@@ -199,15 +242,51 @@ describe('WalkExpirationService', () => {
     });
 
     it('paseo con preference id no numérico (checkout abandonado, no es un pago real) → NO dispara la alerta', async () => {
-      mockThreePasses(prisma, [
+      mockFourPasses(prisma, [
         [{ ...BASE_CANDIDATE, mpPaymentId: '3541787996-9905f4f5-abc' }],
-        [],
-        [],
+        [], [], [],
       ]);
 
       await service.markNotPerformed();
 
       expect(mail.sendNotPerformedAlert).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── El canario ──────────────────────────────────────────────────────────
+
+  describe('pase canario (estado sin mapear)', () => {
+    it('marca NOBODY_ACTED y alerta a Joa AUNQUE el paseo no esté pagado — la señal es "hay un caso sin mapear", no plata en riesgo', async () => {
+      const unpaidAnomaly = { ...BASE_CANDIDATE, scheduledAt: new Date(Date.now() - 2 * 60 * 60 * 1000), mpPaymentId: null };
+      mockFourPasses(prisma, [[], [], [], [unpaidAnomaly]]);
+
+      await service.markNotPerformed();
+
+      expect(prisma.walk.updateMany).toHaveBeenCalledWith({
+        where: { id: 'walk-1', status: WalkStatus.CONFIRMED },
+        data: expect.objectContaining({ notPerformedReason: NotPerformedReason.NOBODY_ACTED }),
+      });
+      expect(mail.sendNotPerformedAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('consulta status CONFIRMED con onWayAt no nulo — el único hueco que las otras reglas no cubren', async () => {
+      mockFourPasses(prisma, [[], [], [], []]);
+
+      await service.markNotPerformed();
+
+      const [, , , fourthCall] = prisma.walk.findMany.mock.calls;
+      expect(fourthCall[0].where).toEqual(
+        expect.objectContaining({ status: WalkStatus.CONFIRMED, onWayAt: { not: null } }),
+      );
+    });
+
+    it('un candidato que todavía no llegó a T + duración NO se marca (mismo filtro en memoria que las otras ramas)', async () => {
+      const notYetDue = { ...BASE_CANDIDATE, scheduledAt: new Date() };
+      mockFourPasses(prisma, [[], [], [], [notYetDue]]);
+
+      await service.markNotPerformed();
+
+      expect(prisma.walk.updateMany).not.toHaveBeenCalled();
     });
   });
 });

@@ -57,7 +57,7 @@ describe('WalkRemindersService', () => {
   afterEach(() => jest.clearAllMocks());
 
   // sendReminders() llama a walk.findMany 4 veces siempre en el mismo orden:
-  // onWay T-1h15, onWay T-1h10, dueño T+5m, dueño T+15m.
+  // onWay T-1h15, onWay T-1h10, dueño T+5m, dueño T+10m.
   function mockFourPasses(passes: [unknown[], unknown[], unknown[], unknown[]]) {
     const [onWay1, onWay2, notStarted1, notStarted2] = passes;
     prisma.walk.findMany

@@ -20,14 +20,16 @@ export function canMarkOnWay(scheduledAt: Date, now: Date): boolean {
 }
 
 /**
- * Ventana de inicio: T-5m a T+10m, los dos bordes inclusive. A diferencia de
- * `canMarkOnWay`, esta SI tiene techo (ver WALK_TIMING.START_CLOSES_MIN_AFTER).
+ * Se habilita desde T-5m y no tiene techo superior — mismo criterio que
+ * `canMarkOnWay`: evidencia, no candado. Un corte duro no evita que el
+ * paseo pase, lo empuja afuera de la app (y ahi se pierde el registro, el
+ * GPS y la comision). Quien llega tarde igual puede iniciar; que llego
+ * tarde queda registrado aparte (ver WALK_TIMING.START_LATE_THRESHOLD_MIN_AFTER
+ * y Walk.startedLate), no bloqueado.
  */
 export function canStart(scheduledAt: Date, now: Date): boolean {
-  const t = scheduledAt.getTime();
-  const opensAt = t - WALK_TIMING.START_OPENS_MIN_BEFORE * MINUTE_MS;
-  const closesAt = t + WALK_TIMING.START_CLOSES_MIN_AFTER * MINUTE_MS;
-  return now.getTime() >= opensAt && now.getTime() <= closesAt;
+  const opensAt = scheduledAt.getTime() - WALK_TIMING.START_OPENS_MIN_BEFORE * MINUTE_MS;
+  return now.getTime() >= opensAt;
 }
 
 /** Fin esperado del paseo: cuando arranco mas la duracion de su WalkType. */

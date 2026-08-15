@@ -16,11 +16,13 @@ export const WALK_TIMING = {
   // personas y un perro de por medio — la flexibilidad va en el diseño, no
   // en el reclamo despues.
   START_OPENS_MIN_BEFORE: 5,
-  // Cierra en T+10m: el paseador tiene otros paseos agendados, asi que
-  // retrasarlo sin techo es malo para el negocio y para los siguientes
-  // clientes. Entre T+5m y T+10m conviven "iniciar" y "el dueño no vino", y
-  // el paseador elige.
-  START_CLOSES_MIN_AFTER: 10,
+  // Ya NO es un cierre — canStart no tiene techo superior (evidencia, no
+  // candado: un corte duro no evita que el paseo pase, lo empuja afuera de
+  // la app, y ahi se pierde el registro, el GPS y la comision). Sigue
+  // siendo el umbral que separa un inicio a tiempo de uno tardio: pasado
+  // T+10m, start() igual deja iniciar pero graba Walk.startedLate = true,
+  // dato que alimenta la tasa de puntualidad del paseador.
+  START_LATE_THRESHOLD_MIN_AFTER: 10,
   // finish se habilita 15 minutos antes del fin esperado (startedAt +
   // duracion del WalkType) — puede cerrar antes si no hay ningun problema,
   // no hay techo superior.
@@ -29,11 +31,18 @@ export const WALK_TIMING = {
   // pueden coincidir, o se llega tarde por diseño: por eso T-1h15 y no T-1h.
   ONWAY_REMINDER_1_MIN_BEFORE: 75,
   ONWAY_REMINDER_2_MIN_BEFORE: 70,
-  // T+5m: desde aca el silencio del paseador empieza a significar algo — es
-  // el mismo instante en que se habilita el motivo WALKER_NO_SHOW y el
-  // primer aviso al dueño ("¿todo bien?").
-  WALKER_NO_SHOW_MIN_AFTER: 5,
-  NOT_STARTED_ALERT_2_MIN_AFTER: 15,
+  // T+5m: primer aviso al dueño ("¿todo bien?"). El job YA NO marca
+  // WALKER_NO_SHOW en este instante — eso paso a T+D (ver
+  // WalkExpirationService.markWalkerNoShow): marcar a los 5 minutos chocaba
+  // con este mismo aviso ("¿todo bien?" y "el paseo no se realizo" llegando
+  // juntos), y era apresurado — el aviso existe para que el paseador
+  // reaccione, no para morir en el mismo instante en que sale.
+  NOT_STARTED_ALERT_1_MIN_AFTER: 5,
+  // T+10m: segundo aviso al dueño. Mismo instante en que el bloque B (no
+  // implementado aca) va a habilitar su boton "el paseador no se presento"
+  // — el dueño tiene que tener exactamente las mismas dos chances de
+  // demorarse (5 y 10 min) que tiene el paseador para marcar "en camino".
+  NOT_STARTED_ALERT_2_MIN_AFTER: 10,
 } as const;
 
 export const WALKER_RESPONSE_TIMEOUT_MINUTES = 15;

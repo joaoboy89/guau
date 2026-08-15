@@ -30,22 +30,25 @@ export class WalkRemindersService {
     private notifications: NotificationsService,
   ) {}
 
-  // T-1h15 y T-1h10 están a 5 min uno del otro — una cadencia más floja los
-  // mezclaría en la misma corrida y perderían sentido como dos avisos
-  // distintos.
+  // 5 minutos, y NO es preferencia — no lo "optimices" a algo más gordo sin
+  // leer esto primero. Los dos avisos al paseador van a T-1h15 y T-1h10,
+  // separados por exactamente 5 minutos: con una cadencia más floja (ej. 15
+  // min) una sola corrida los alcanza a los dos juntos y dejan de ser dos
+  // avisos distintos — el segundo llega pisando al primero o directamente
+  // nunca se distingue de él.
   @Cron("0 */5 * * * *")
   async sendReminders() {
     const now = new Date();
 
     const onWay1 = await this.remindWalker(now, WALK_TIMING.ONWAY_REMINDER_1_MIN_BEFORE, NOTIFICATION_TYPES.WALK_ONWAY_REMINDER_1);
     const onWay2 = await this.remindWalker(now, WALK_TIMING.ONWAY_REMINDER_2_MIN_BEFORE, NOTIFICATION_TYPES.WALK_ONWAY_REMINDER_2);
-    const notStarted1 = await this.remindOwner(now, WALK_TIMING.WALKER_NO_SHOW_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_1);
+    const notStarted1 = await this.remindOwner(now, WALK_TIMING.NOT_STARTED_ALERT_1_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_1);
     const notStarted2 = await this.remindOwner(now, WALK_TIMING.NOT_STARTED_ALERT_2_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_2);
 
     const total = onWay1 + onWay2 + notStarted1 + notStarted2;
     if (total > 0) {
       this.logger.log(
-        `sendReminders: ${total} recordatorios (paseador T-1h15=${onWay1} T-1h10=${onWay2}, dueño T+5m=${notStarted1} T+15m=${notStarted2})`,
+        `sendReminders: ${total} recordatorios (paseador T-1h15=${onWay1} T-1h10=${onWay2}, dueño T+5m=${notStarted1} T+10m=${notStarted2})`,
       );
     }
   }

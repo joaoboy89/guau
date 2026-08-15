@@ -29,9 +29,11 @@ describe('canMarkOnWay (@guau/shared)', () => {
   });
 });
 
-describe('canStart (@guau/shared)', () => {
+// Bloque C (segunda parte): canStart perdió el techo superior. Un inicio
+// tardío ahora se deja pasar (evidencia, no candado) y se registra aparte
+// (Walk.startedLate en walks.service.ts), en vez de bloquearse acá.
+describe('canStart (@guau/shared) — sin techo superior desde el bloque C (segunda parte)', () => {
   const opensAt = new Date(SCHEDULED_AT.getTime() - WALK_TIMING.START_OPENS_MIN_BEFORE * 60_000); // T-5m
-  const closesAt = new Date(SCHEDULED_AT.getTime() + WALK_TIMING.START_CLOSES_MIN_AFTER * 60_000); // T+10m
 
   it('justo antes de T-5m: false', () => {
     expect(canStart(SCHEDULED_AT, new Date(opensAt.getTime() - 1))).toBe(false);
@@ -49,16 +51,9 @@ describe('canStart (@guau/shared)', () => {
     expect(canStart(SCHEDULED_AT, SCHEDULED_AT)).toBe(true);
   });
 
-  it('justo antes de T+10m: true', () => {
-    expect(canStart(SCHEDULED_AT, new Date(closesAt.getTime() - 1))).toBe(true);
-  });
-
-  it('exactamente en T+10m: true (límite inclusive)', () => {
-    expect(canStart(SCHEDULED_AT, closesAt)).toBe(true);
-  });
-
-  it('justo después de T+10m: false', () => {
-    expect(canStart(SCHEDULED_AT, new Date(closesAt.getTime() + 1))).toBe(false);
+  it('no tiene techo superior: sigue true mucho después de T (inicio tardío, no bloqueado)', () => {
+    const muchoDespues = new Date(SCHEDULED_AT.getTime() + 30 * 24 * 60 * 60 * 1000);
+    expect(canStart(SCHEDULED_AT, muchoDespues)).toBe(true);
   });
 });
 
