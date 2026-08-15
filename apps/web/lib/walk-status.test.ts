@@ -83,6 +83,10 @@ describe("isActiveWalk", () => {
     expect(isActiveWalk("CANCELLED_OWNER")).toBe(false);
     expect(isActiveWalk("CANCELLED_WALKER")).toBe(false);
   });
+
+  it("NOT_PERFORMED no es activo — sale de 'Paseos activos' y va al historial", () => {
+    expect(isActiveWalk("NOT_PERFORMED")).toBe(false);
+  });
 });
 
 describe("walkActionAvailability", () => {
@@ -96,14 +100,14 @@ describe("walkActionAvailability", () => {
         scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30,
         now: new Date(opensAt.getTime() - 1),
       });
-      expect(result).toEqual({ available: false, availableAt: opensAt });
+      expect(result).toEqual({ available: false, availableAt: opensAt, closed: false });
     });
 
     it("exactamente en T-3h: disponible", () => {
       const result = walkActionAvailability("onWay", {
         scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30, now: opensAt,
       });
-      expect(result).toEqual({ available: true, availableAt: null });
+      expect(result).toEqual({ available: true, availableAt: null, closed: false });
     });
   });
 
@@ -111,31 +115,59 @@ describe("walkActionAvailability", () => {
     const opensAt = new Date("2026-08-14T17:55:00.000Z");
     const closesAt = new Date("2026-08-14T18:10:00.000Z");
 
-    it("antes de T-5m: no disponible, availableAt apunta a la apertura", () => {
+    it("antes de T-5m: no disponible, availableAt apunta a la apertura, ventana no cerrada", () => {
       const result = walkActionAvailability("start", {
         scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30,
         now: new Date(opensAt.getTime() - 1),
       });
-      expect(result).toEqual({ available: false, availableAt: opensAt });
+      expect(result).toEqual({ available: false, availableAt: opensAt, closed: false });
     });
 
     it("en la zona dulce (exactamente en T): disponible", () => {
       const result = walkActionAvailability("start", {
         scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30, now: SCHEDULED_AT,
       });
-      expect(result).toEqual({ available: true, availableAt: null });
+      expect(result).toEqual({ available: true, availableAt: null, closed: false });
     });
 
-    it("despues de T+10m: no disponible — el front no distingue 'cerrada' de 'todavia no abrio', esa distincion la hace el mensaje del backend", () => {
+    it("justo antes de T+10m: todavia disponible, no cerrada", () => {
+      const result = walkActionAvailability("start", {
+        scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30,
+        now: new Date(closesAt.getTime() - 1),
+      });
+      expect(result).toEqual({ available: true, availableAt: null, closed: false });
+    });
+
+    it("exactamente en T+10m: todavia disponible (limite inclusive)", () => {
+      const result = walkActionAvailability("start", {
+        scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30, now: closesAt,
+      });
+      expect(result).toEqual({ available: true, availableAt: null, closed: false });
+    });
+
+    // Bug real visto en staging: un paseo del 24 de julio mostraba "Se
+    // habilita a las 8:55 a. m." — una hora que ya paso hace semanas y no
+    // va a volver. Antes del fix, walkActionAvailability devolvia
+    // { available: false, availableAt: opensAt } sin importar si la ventana
+    // seguia abierta o ya habia cerrado para siempre.
+    it("justo despues de T+10m: cerrada — NO disponible, SIN availableAt (no hay 'se habilita a las' para una ventana que no vuelve)", () => {
       const result = walkActionAvailability("start", {
         scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30,
         now: new Date(closesAt.getTime() + 1),
       });
-      expect(result).toEqual({ available: false, availableAt: opensAt });
+      expect(result).toEqual({ available: false, availableAt: null, closed: true });
+    });
+
+    it("mucho despues de T+10m (paseo de hace semanas): sigue cerrada, no 'todavia no abrio'", () => {
+      const muchoDespues = new Date(closesAt.getTime() + 21 * 24 * 60 * 60 * 1000);
+      const result = walkActionAvailability("start", {
+        scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes: 30, now: muchoDespues,
+      });
+      expect(result).toEqual({ available: false, availableAt: null, closed: true });
     });
   });
 
-  describe("finish — se habilita fin esperado - 15m", () => {
+  describe("finish — se habilita fin esperado - 15m, sin techo (closed siempre false)", () => {
     const startedAt = new Date("2026-08-14T18:00:00.000Z");
     const durationMinutes = 60;
     const opensAt = new Date("2026-08-14T18:45:00.000Z"); // fin esperado 19:00, menos 15m
@@ -145,21 +177,29 @@ describe("walkActionAvailability", () => {
         scheduledAt: SCHEDULED_AT, startedAt, durationMinutes,
         now: new Date(opensAt.getTime() - 1),
       });
-      expect(result).toEqual({ available: false, availableAt: opensAt });
+      expect(result).toEqual({ available: false, availableAt: opensAt, closed: false });
     });
 
     it("exactamente en fin esperado - 15m: disponible", () => {
       const result = walkActionAvailability("finish", {
         scheduledAt: SCHEDULED_AT, startedAt, durationMinutes, now: opensAt,
       });
-      expect(result).toEqual({ available: true, availableAt: null });
+      expect(result).toEqual({ available: true, availableAt: null, closed: false });
+    });
+
+    it("mucho despues del fin esperado: sigue disponible, nunca 'closed' (finish no tiene techo)", () => {
+      const muchoDespues = new Date(opensAt.getTime() + 21 * 24 * 60 * 60 * 1000);
+      const result = walkActionAvailability("finish", {
+        scheduledAt: SCHEDULED_AT, startedAt, durationMinutes, now: muchoDespues,
+      });
+      expect(result).toEqual({ available: true, availableAt: null, closed: false });
     });
 
     it("sin startedAt (no deberia pasar en la practica — IN_PROGRESS siempre lo tiene): no disponible y sin horario", () => {
       const result = walkActionAvailability("finish", {
         scheduledAt: SCHEDULED_AT, startedAt: null, durationMinutes, now: SCHEDULED_AT,
       });
-      expect(result).toEqual({ available: false, availableAt: null });
+      expect(result).toEqual({ available: false, availableAt: null, closed: false });
     });
   });
 });

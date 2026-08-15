@@ -908,7 +908,12 @@ export default function WalkerDashboardPage() {
                             abre la ventana — asi el paseador ve que tiene algo
                             pendiente y sabe cuando va a poder, en vez de una
                             tarjeta muda de la que brota un boton de golpe. */}
-                        {availability && !availability.available && availability.availableAt && (
+                        {availability && !availability.available && availability.closed && (
+                          <span className="text-xs text-brand-text-muted text-center">
+                            Se cerró la ventana para esta acción
+                          </span>
+                        )}
+                        {availability && !availability.available && !availability.closed && availability.availableAt && (
                           <span className="text-xs text-brand-text-muted text-center">
                             Se habilita a las {formatTimeBA(availability.availableAt)}
                           </span>

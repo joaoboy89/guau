@@ -30,6 +30,19 @@ enum WalkStatus {
   COMPLETED
   CANCELLED_OWNER
   CANCELLED_WALKER
+  NOT_PERFORMED
+}
+
+// La caja (WalkStatus.NOT_PERFORMED) dice QUE paso; el motivo dice QUIEN
+// fallo. Se llama asi y no EXPIRED (como estaba disenado originalmente)
+// porque EXPIRED describe bien "se pudrio solo" y describe mal el caso donde
+// el paseador fue, espero y declaro que el dueño no aparecio — ahi no expiro
+// nada, alguien actuo. El motivo es el que decide la plata (bloque E).
+enum NotPerformedReason {
+  WALKER_NO_SHOW   // nunca marco "en camino" y paso la hora pactada
+  OWNER_NO_SHOW    // el paseador lo declara con GPS (boton, bloque B)
+  NOBODY_ACTED     // job: ninguna de las dos partes aparecio
+  NEVER_CONFIRMED  // job: quedo PENDING y paso la hora pactada
 }
 
 enum WalkMode {
@@ -172,6 +185,8 @@ model Walk {
   onWayAt            DateTime?
   startedAt          DateTime?
   endedAt            DateTime?
+  notPerformedReason NotPerformedReason?
+  notPerformedAt     DateTime?
   pickupLat          Float
   pickupLng          Float
   pickupAddress      String

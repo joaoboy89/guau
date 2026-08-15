@@ -8,6 +8,7 @@ export const STATUS_LABEL: Record<string, string> = {
   COMPLETED:        "Completado",
   CANCELLED_OWNER:  "Cancelado por el dueño",
   CANCELLED_WALKER: "Cancelado por el paseador",
+  NOT_PERFORMED:    "No realizado",
 };
 
 type BadgeVariant = "success" | "warning" | "error" | "info" | "default";
@@ -28,6 +29,7 @@ export const STATUS_VARIANT: Record<string, BadgeVariant> = {
   COMPLETED:        "success",
   CANCELLED_OWNER:  "error",
   CANCELLED_WALKER: "error",
+  NOT_PERFORMED:    "error",
 };
 
 /**
@@ -114,8 +116,22 @@ export function isActiveWalk(status: string): boolean {
 
 export interface WalkActionAvailability {
   available: boolean;
-  /** Instante en que se habilita. `null` si ya esta disponible. */
+  /**
+   * Instante en que se habilita. `null` si ya esta disponible, o si la
+   * ventana se cerro y no va a volver a abrirse (ver `closed`) — un horario
+   * de apertura que ya paso hace tres semanas no es informacion, es ruido.
+   */
   availableAt: Date | null;
+  /**
+   * true si la accion tuvo una ventana con techo y ese techo ya paso (hoy,
+   * solo `start`: `onWay` y `finish` no tienen techo superior). Antes de
+   * este campo, un paseo del 24 de julio mostraba "Se habilita a las 8:55
+   * a. m." — la hora de apertura de una ventana que se cerro hace semanas y
+   * no va a volver. El backend ya distinguia los dos casos
+   * (`assertCanStart` tiene un mensaje propio para "ya paso la ventana");
+   * esto empareja al front.
+   */
+  closed: boolean;
 }
 
 export interface WalkActionTiming {
@@ -146,25 +162,29 @@ export function walkActionAvailability(
   if (action === "onWay") {
     const availableAt = new Date(scheduledAt.getTime() - WALK_TIMING.ON_WAY_OPENS_MIN_BEFORE * MINUTE_MS);
     return canMarkOnWay(scheduledAt, now)
-      ? { available: true, availableAt: null }
-      : { available: false, availableAt };
+      ? { available: true, availableAt: null, closed: false }
+      : { available: false, availableAt, closed: false };
   }
 
   if (action === "start") {
-    const availableAt = new Date(scheduledAt.getTime() - WALK_TIMING.START_OPENS_MIN_BEFORE * MINUTE_MS);
-    return canStart(scheduledAt, now)
-      ? { available: true, availableAt: null }
-      : { available: false, availableAt };
+    const opensAt = new Date(scheduledAt.getTime() - WALK_TIMING.START_OPENS_MIN_BEFORE * MINUTE_MS);
+    const closesAt = new Date(scheduledAt.getTime() + WALK_TIMING.START_CLOSES_MIN_AFTER * MINUTE_MS);
+    if (canStart(scheduledAt, now)) return { available: true, availableAt: null, closed: false };
+    // Despues del cierre no hay "se habilita a las": esa hora ya paso y no
+    // va a volver. Mismo criterio que assertCanStart en el backend.
+    if (now.getTime() > closesAt.getTime()) return { available: false, availableAt: null, closed: true };
+    return { available: false, availableAt: opensAt, closed: false };
   }
 
   // "finish": IN_PROGRESS siempre trae startedAt (start() lo escribe y es el
   // unico camino a ese estado). Si llegara null igual, no hay fin esperado
-  // que calcular todavia.
-  if (!startedAt) return { available: false, availableAt: null };
+  // que calcular todavia. No tiene techo superior, asi que "closed" nunca
+  // aplica.
+  if (!startedAt) return { available: false, availableAt: null, closed: false };
   const availableAt = new Date(
     expectedEndAt(startedAt, durationMinutes).getTime() - WALK_TIMING.FINISH_OPENS_MIN_BEFORE_END * MINUTE_MS,
   );
   return canFinish(startedAt, durationMinutes, now)
-    ? { available: true, availableAt: null }
-    : { available: false, availableAt };
+    ? { available: true, availableAt: null, closed: false }
+    : { available: false, availableAt, closed: false };
 }

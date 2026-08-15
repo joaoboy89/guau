@@ -25,6 +25,15 @@ export const WALK_TIMING = {
   // duracion del WalkType) — puede cerrar antes si no hay ningun problema,
   // no hay techo superior.
   FINISH_OPENS_MIN_BEFORE_END: 15,
+  // Bloque C — recordatorios y vencimiento. El aviso y el momento esperado no
+  // pueden coincidir, o se llega tarde por diseño: por eso T-1h15 y no T-1h.
+  ONWAY_REMINDER_1_MIN_BEFORE: 75,
+  ONWAY_REMINDER_2_MIN_BEFORE: 70,
+  // T+5m: desde aca el silencio del paseador empieza a significar algo — es
+  // el mismo instante en que se habilita el motivo WALKER_NO_SHOW y el
+  // primer aviso al dueño ("¿todo bien?").
+  WALKER_NO_SHOW_MIN_AFTER: 5,
+  NOT_STARTED_ALERT_2_MIN_AFTER: 15,
 } as const;
 
 export const WALKER_RESPONSE_TIMEOUT_MINUTES = 15;
@@ -50,6 +59,15 @@ export const NOTIFICATION_TYPES = {
   WALK_WALKER_ON_WAY:     "walk_walker_on_way",
   WALK_IN_PROGRESS:       "walk_in_progress",
   WALK_COMPLETED:         "walk_completed",
+  // Recordatorios del job de vencimiento (bloque C) — dos avisos distintos
+  // por destinatario, no el mismo tipo repetido: la idempotencia del job
+  // busca "ya existe una notificacion de ESTE tipo para este walk", asi que
+  // dos avisos con el mismo tipo se pisarian entre si y el segundo nunca
+  // saldria.
+  WALK_ONWAY_REMINDER_1:     "walk_onway_reminder_1",   // T-1h15, al paseador
+  WALK_ONWAY_REMINDER_2:     "walk_onway_reminder_2",   // T-1h10, al paseador
+  WALK_NOT_STARTED_ALERT_1:  "walk_not_started_alert_1", // T+5m, al dueño
+  WALK_NOT_STARTED_ALERT_2:  "walk_not_started_alert_2", // T+15m, al dueño
 } as const;
 
 export type NotificationType = typeof NOTIFICATION_TYPES[keyof typeof NOTIFICATION_TYPES];
