@@ -10,6 +10,8 @@ import {
 
 const REAL_LAT = -34.5885;
 const REAL_LNG = -58.4233;
+const SECRET_A = 'test-secret-una-cadena-larga-A';
+const SECRET_B = 'otra-cadena-de-secreto-distinta-B';
 
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const EARTH_RADIUS_METERS = 6371000;
@@ -23,14 +25,23 @@ function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: 
 }
 
 describe('approximatePickupPoint (@guau/shared)', () => {
-  it('determinista: el mismo walkId y el mismo punto real dan siempre el mismo resultado', () => {
-    const first = approximatePickupPoint('walk-1', REAL_LAT, REAL_LNG);
-    const second = approximatePickupPoint('walk-1', REAL_LAT, REAL_LNG);
+  // El test que importa: si esto fallara, el secreto no estaría entrando
+  // de verdad en el cálculo — y sin eso, el desplazamiento sale solo del
+  // walkId (público) con un algoritmo público, reversible con una resta.
+  it('reversibilidad: el mismo walkId y las mismas coordenadas dan puntos DISTINTOS con secretos distintos', () => {
+    const withSecretA = approximatePickupPoint('walk-1', REAL_LAT, REAL_LNG, SECRET_A);
+    const withSecretB = approximatePickupPoint('walk-1', REAL_LAT, REAL_LNG, SECRET_B);
+    expect(withSecretA).not.toEqual(withSecretB);
+  });
+
+  it('determinista: mismo walkId + mismo secreto → siempre el mismo resultado', () => {
+    const first = approximatePickupPoint('walk-1', REAL_LAT, REAL_LNG, SECRET_A);
+    const second = approximatePickupPoint('walk-1', REAL_LAT, REAL_LNG, SECRET_A);
     expect(second).toEqual(first);
   });
 
   it('la distancia al punto real queda entre el mínimo y el máximo configurados', () => {
-    const approx = approximatePickupPoint('walk-1', REAL_LAT, REAL_LNG);
+    const approx = approximatePickupPoint('walk-1', REAL_LAT, REAL_LNG, SECRET_A);
     const d = distanceMeters({ lat: REAL_LAT, lng: REAL_LNG }, approx);
     expect(d).toBeGreaterThanOrEqual(PICKUP_ZONE_MIN_OFFSET_METERS);
     expect(d).toBeLessThan(PICKUP_ZONE_MAX_OFFSET_METERS);
@@ -40,21 +51,21 @@ describe('approximatePickupPoint (@guau/shared)', () => {
     // Barre varios walkIds — el offset depende del hash del id, así que un
     // solo caso no alcanza para confiar en el límite superior.
     for (let i = 0; i < 50; i++) {
-      const approx = approximatePickupPoint(`walk-${i}`, REAL_LAT, REAL_LNG);
+      const approx = approximatePickupPoint(`walk-${i}`, REAL_LAT, REAL_LNG, SECRET_A);
       const d = distanceMeters({ lat: REAL_LAT, lng: REAL_LNG }, approx);
       expect(d).toBeLessThan(200);
     }
   });
 
   it('walkIds distintos dan puntos aproximados distintos (no colapsan al mismo offset)', () => {
-    const a = approximatePickupPoint('walk-a', REAL_LAT, REAL_LNG);
-    const b = approximatePickupPoint('walk-b', REAL_LAT, REAL_LNG);
+    const a = approximatePickupPoint('walk-a', REAL_LAT, REAL_LNG, SECRET_A);
+    const b = approximatePickupPoint('walk-b', REAL_LAT, REAL_LNG, SECRET_A);
     expect(a).not.toEqual(b);
   });
 
   it('walkIds parecidos (UUIDs correlativos) no dan offsets pegados', () => {
-    const a = approximatePickupPoint('walk-00000001', REAL_LAT, REAL_LNG);
-    const b = approximatePickupPoint('walk-00000002', REAL_LAT, REAL_LNG);
+    const a = approximatePickupPoint('walk-00000001', REAL_LAT, REAL_LNG, SECRET_A);
+    const b = approximatePickupPoint('walk-00000002', REAL_LAT, REAL_LNG, SECRET_A);
     const d = distanceMeters(a, b);
     // No es un límite estricto de la política, pero si dos ids consecutivos
     // dieran casi el mismo punto, la "zona" de paseos consecutivos del mismo

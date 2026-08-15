@@ -153,12 +153,18 @@ function toPublicParticipant(participant: ParticipantWithInclude) {
  * dirección"). La ofuscación vive ACÁ, en el backend — mandar la coordenada
  * real y ocultarla en el front no protege nada, cualquiera lee la respuesta
  * cruda desde las herramientas de desarrollador.
+ *
+ * `pickupZoneSecret`: obligatorio, sin default — ver
+ * `WalksService.validatePickupZoneSecret`. Sin un secreto de servidor en el
+ * cálculo, el desplazamiento sale solo del `walkId` (público: es el propio
+ * paseo del paseador) y el algoritmo (público: este repo lo es) — cualquiera
+ * lo recalcula y revierte la ofuscación con una resta.
  */
-function toPublicWalk(walk: WalkWithInclude, isWalkerView: boolean) {
+function toPublicWalk(walk: WalkWithInclude, isWalkerView: boolean, pickupZoneSecret: string) {
   const revealExactLocation = !isWalkerView || walk.onWayAt !== null;
   const approx = revealExactLocation
     ? null
-    : approximatePickupPoint(walk.id, walk.pickupLat, walk.pickupLng);
+    : approximatePickupPoint(walk.id, walk.pickupLat, walk.pickupLng, pickupZoneSecret);
 
   return {
     id: walk.id,
@@ -185,8 +191,10 @@ const DEFAULT_COMMISSION_RATE = 0.15;
 export class WalksService {
   private readonly logger = new Logger(WalksService.name);
 
-  // Validada una sola vez al arrancar — ver validateCommissionRate()
+  // Validadas una sola vez al arrancar — ver validateCommissionRate() y
+  // validatePickupZoneSecret()
   private readonly commissionRate: number;
+  private readonly pickupZoneSecret: string;
 
   constructor(
     private prisma: PrismaService,
@@ -197,6 +205,7 @@ export class WalksService {
     @Optional() private mail?: MailService,
   ) {
     this.commissionRate = this.validateCommissionRate();
+    this.pickupZoneSecret = this.validatePickupZoneSecret();
   }
 
   // MP_MARKETPLACE_FEE es una FRACCIÓN (0.15 = 15%), no un porcentaje — si
@@ -217,6 +226,29 @@ export class WalksService {
       );
     }
     return fee;
+  }
+
+  // Sin este secreto, la ofuscación del punto de encuentro (ver
+  // toPublicWalk/approximatePickupPoint) se calcula solo a partir del
+  // walkId — un dato público (el propio paseador lo tiene, es su paseo) con
+  // un algoritmo público (este repo lo es). Cualquiera recalcula el mismo
+  // desplazamiento y lo revierte con una resta: la protección desaparece
+  // sin que se note nada distinto en pantalla. A diferencia de
+  // ADMIN_ALERT_EMAIL —que puede faltar y solo se pierde un aviso—, acá
+  // faltar significa "sin protección real", así que falla cerrado: mismo
+  // criterio que validateCommissionRate(), mejor que la API no arranque a
+  // que ande sirviendo una ofuscación decorativa.
+  private validatePickupZoneSecret(): string {
+    const MIN_LENGTH = 16;
+    const raw = this.config.get<string>("PICKUP_ZONE_SECRET");
+    if (!raw || raw.length < MIN_LENGTH) {
+      throw new Error(
+        `PICKUP_ZONE_SECRET ausente o demasiado corta (mínimo ${MIN_LENGTH} caracteres). ` +
+        `Sin este secreto, la ofuscación del punto de encuentro es reversible con el walkId ` +
+        `a la vista — la API no arranca en vez de servir una protección que no protege.`
+      );
+    }
+    return raw;
   }
 
   // ─── Crear reserva ───────────────────────────────────────
@@ -350,7 +382,7 @@ export class WalksService {
     });
     if (!created) throw new NotFoundException("Paseo no encontrado");
     // create() es solo para dueños (@Roles(OWNER) en el controller).
-    return toPublicWalk(created, /* isWalkerView */ false);
+    return toPublicWalk(created, /* isWalkerView */ false, this.pickupZoneSecret);
   }
 
   // ─── Mis paseos ──────────────────────────────────────────
@@ -385,7 +417,7 @@ export class WalksService {
         this.prisma.walk.count({ where }),
       ]);
       return {
-        data: walks.map((w) => toPublicWalk(w, /* isWalkerView */ true)),
+        data: walks.map((w) => toPublicWalk(w, /* isWalkerView */ true, this.pickupZoneSecret)),
         meta: { total, page, limit, totalPages: Math.ceil(total / limit), days },
       };
     }
@@ -412,7 +444,7 @@ export class WalksService {
       this.prisma.walk.count({ where }),
     ]);
     return {
-      data: walks.map((w) => toPublicWalk(w, /* isWalkerView */ false)),
+      data: walks.map((w) => toPublicWalk(w, /* isWalkerView */ false, this.pickupZoneSecret)),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit), days },
     };
   }
@@ -429,7 +461,7 @@ export class WalksService {
     await this.assertWalkAccess(userId, role, walk);
     // assertWalkAccess ya validó que, si el rol es WALKER, walk.walkerId es
     // el de quien pregunta — no hace falta una consulta aparte para saberlo.
-    return toPublicWalk(walk, /* isWalkerView */ role === UserRole.WALKER);
+    return toPublicWalk(walk, /* isWalkerView */ role === UserRole.WALKER, this.pickupZoneSecret);
   }
 
   // ─── Confirmar (paseador) ────────────────────────────────
@@ -916,11 +948,16 @@ export class WalksService {
     return endedAt.getTime() > expectedEnd + WALK_TIMING.END_LATE_THRESHOLD_MIN_AFTER * 60_000;
   }
 
+  // isWalkerView SIN default a propósito (regla de oro de CLAUDE.md: un
+  // olvido tiene que dejar la puerta cerrada, no abierta). Con un default
+  // en `false` o `true` fijo, una transición nueva que se olvide de pasarlo
+  // compilaría igual y revelaría (o escondería) la dirección exacta sin que
+  // nadie lo note — toPublicWalk ya lo exige obligatorio; esto empareja.
   private async updateStatus(
     walkId: string,
     status: WalkStatus,
     extra: Record<string, unknown> = {},
-    isWalkerView: boolean = false,
+    isWalkerView: boolean,
   ) {
     const updated = await this.prisma.walk.update({
       where: { id: walkId },
@@ -938,6 +975,6 @@ export class WalksService {
       ?.notifyWalkStatusChange(walkId, status)
       .catch((err) => this.logger.warn(`No se pudo notificar cambio de estado: ${err}`));
 
-    return toPublicWalk(updated, isWalkerView);
+    return toPublicWalk(updated, isWalkerView, this.pickupZoneSecret);
   }
 }

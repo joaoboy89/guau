@@ -50,7 +50,7 @@ const WALK_BASE = {
   mode: 'EXCLUSIVO',
   pickupAddress: 'Palermo',
   scheduledAt: FUTURE_SCHEDULED_AT,
-  walkType: { label: 'Paseo 30min' },
+  walkType: { label: 'Paseo 30min', durationMinutes: 30 },
   walker: { mpAccessToken: 'walker-token-123' },
 };
 const MP_PREFERENCE = {
@@ -304,6 +304,31 @@ describe('PaymentsService', () => {
 
       const callBody = mockPreferenceCreate.mock.calls[0][0].body;
       expect(callBody.marketplace_fee).toBe(100); // 1000 × 0.1 — NO 150 (walk.platformFee)
+    });
+
+    // El split manda esta preferencia al paseador (es quien cobra), y en
+    // CONFIRMED la dirección exacta todavía puede estar ofuscada del lado
+    // del paseador (anti-desintermediación). Si pickupAddress viajara acá,
+    // MercadoPago se la mostraría igual y esa protección sería decorativa.
+    it('la descripción del pago NO incluye pickupAddress', async () => {
+      setupHappyPath();
+      await service.createPreference('user-1', DTO);
+
+      const callBody = mockPreferenceCreate.mock.calls[0][0].body;
+      expect(callBody.items[0].description).not.toContain(WALK_BASE.pickupAddress);
+    });
+
+    // "Paseo de Mascota" fijo, no walk.mode: grupal/exclusivo es vocabulario
+    // interno del negocio, no le dice nada al dueño ni al paseador viendo
+    // su comprobante de MercadoPago.
+    it('la descripción del pago dice "Paseo de Mascota", no walk.mode (grupal/exclusivo)', async () => {
+      setupHappyPath(); // WALK_BASE.mode === 'EXCLUSIVO'
+      await service.createPreference('user-1', DTO);
+
+      const callBody = mockPreferenceCreate.mock.calls[0][0].body;
+      expect(callBody.items[0].description).toContain('Paseo de Mascota');
+      expect(callBody.items[0].description).not.toContain('exclusivo');
+      expect(callBody.items[0].description).not.toContain('grupal');
     });
 
     it('camino feliz: notification_url incluye walkId como query param', async () => {

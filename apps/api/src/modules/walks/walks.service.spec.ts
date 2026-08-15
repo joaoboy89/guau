@@ -156,10 +156,16 @@ function buildPrismaMock() {
   };
 }
 
+// Solo para tests — nunca en producción (la real sale de una variable de
+// entorno, ver .env.example). Necesita >=16 caracteres para pasar
+// validatePickupZoneSecret().
+const TEST_PICKUP_ZONE_SECRET = 'solo-para-tests-nunca-en-produccion';
+
 function buildConfigMock() {
   return {
     get: jest.fn((key: string) => {
       if (key === 'MP_MARKETPLACE_FEE') return '0.15';
+      if (key === 'PICKUP_ZONE_SECRET') return TEST_PICKUP_ZONE_SECRET;
       return null;
     }),
   };
@@ -241,7 +247,11 @@ describe('WalksService', () => {
   describe('constructor — validación de MP_MARKETPLACE_FEE', () => {
     function buildServiceWithFee(feeValue: string | null) {
       const cfg = {
-        get: jest.fn((key: string) => (key === 'MP_MARKETPLACE_FEE' ? feeValue : null)),
+        get: jest.fn((key: string) => {
+          if (key === 'MP_MARKETPLACE_FEE') return feeValue;
+          if (key === 'PICKUP_ZONE_SECRET') return TEST_PICKUP_ZONE_SECRET;
+          return null;
+        }),
       };
       return () => new WalksService(prisma as any, cfg as any);
     }
@@ -268,6 +278,43 @@ describe('WalksService', () => {
 
     it('"abc" (no numérico) revienta al arrancar', () => {
       expect(buildServiceWithFee('abc')).toThrow();
+    });
+  });
+
+  // Falla cerrado, mismo criterio que MP_MARKETPLACE_FEE arriba: sin este
+  // secreto, la ofuscación del punto de encuentro es reversible con el
+  // walkId a la vista (ver packages/shared/geo/pickup-zone.ts) — mejor que
+  // la API no arranque a que sirva una protección decorativa.
+  describe('constructor — validación de PICKUP_ZONE_SECRET', () => {
+    function buildServiceWithSecret(secretValue: string | null) {
+      const cfg = {
+        get: jest.fn((key: string) => {
+          if (key === 'MP_MARKETPLACE_FEE') return '0.15';
+          if (key === 'PICKUP_ZONE_SECRET') return secretValue;
+          return null;
+        }),
+      };
+      return () => new WalksService(prisma as any, cfg as any);
+    }
+
+    it('sin PICKUP_ZONE_SECRET seteada, revienta al arrancar', () => {
+      expect(buildServiceWithSecret(null)).toThrow();
+    });
+
+    it('vacía, revienta al arrancar', () => {
+      expect(buildServiceWithSecret('')).toThrow();
+    });
+
+    it('demasiado corta (menos de 16 caracteres), revienta al arrancar', () => {
+      expect(buildServiceWithSecret('corta')).toThrow();
+    });
+
+    it('con exactamente 16 caracteres, no revienta (límite inclusive)', () => {
+      expect(buildServiceWithSecret('a'.repeat(16))).not.toThrow();
+    });
+
+    it('con un secreto largo, no revienta', () => {
+      expect(buildServiceWithSecret(TEST_PICKUP_ZONE_SECRET)).not.toThrow();
     });
   });
 
