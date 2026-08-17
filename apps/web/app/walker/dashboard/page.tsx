@@ -12,7 +12,7 @@ import {
   walkActionAvailability,
   type WalkTransition,
 } from "@/lib/walk-status";
-import { formatDateTimeBA, formatTimeBA } from "@/lib/format-date";
+import { formatDateTimeBA, formatTimeBA, isTodayBA } from "@/lib/format-date";
 import { DAY_LABELS } from "@/lib/schedule";
 import { findNearestBarrio, type Barrio } from "@/lib/barrios";
 import BarrioSelect from "@/components/BarrioSelect";
@@ -910,7 +910,13 @@ export default function WalkerDashboardPage() {
                             tarjeta muda de la que brota un boton de golpe. */}
                         {availability && !availability.available && availability.availableAt && (
                           <span className="text-xs text-brand-text-muted text-center">
-                            Se habilita a las {formatTimeBA(availability.availableAt)}
+                            {/* Un paseo de hoy solo necesita la hora; uno de otro
+                                dia sin fecha se lee como si fuera hoy — asi fue
+                                el bug real en staging: "a las 8:15" para un
+                                paseo agendado nueve dias despues. */}
+                            {isTodayBA(availability.availableAt)
+                              ? `Se habilita a las ${formatTimeBA(availability.availableAt)}`
+                              : `Se habilita el ${formatDateTimeBA(availability.availableAt)}`}
                           </span>
                         )}
                       </div>

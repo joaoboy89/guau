@@ -21,3 +21,19 @@ export function formatTimeBA(date: Date): string {
     timeZone: BUENOS_AIRES_TIMEZONE,
   });
 }
+
+/** "YYYY-MM-DD" en hora de Buenos Aires — clave de dia, no para mostrar. */
+function dateKeyBA(date: Date): string {
+  return date.toLocaleDateString("en-CA", { timeZone: BUENOS_AIRES_TIMEZONE });
+}
+
+/**
+ * Si `date` cae en el mismo dia que "ahora", ambos en hora de Buenos Aires.
+ * Comparar `date.getDate()`/`new Date()` a secas usa el dia del DISPOSITIVO:
+ * mismo bug que formatDateTimeBA evita, pero para "hoy" en vez de la hora —
+ * alguien con el celular en otro huso veria "hoy" cuando en Buenos Aires ya
+ * es otro dia (o todavia no llego).
+ */
+export function isTodayBA(date: Date): boolean {
+  return dateKeyBA(date) === dateKeyBA(new Date());
+}
