@@ -58,6 +58,18 @@ export default function LoginPage() {
         setServerError("Email o contraseña incorrectos.");
       } else if (status === 403) {
         setServerError("Verificá tu email antes de ingresar. Revisá tu casilla de correo.");
+      } else if (status === 429) {
+        // El peor consejo posible acá sería "intentá de nuevo": un usuario
+        // bloqueado por el throttler que hace caso extiende su propio
+        // bloqueo. El mensaje tiene que decirle que espere, no que reintente.
+        setServerError("Demasiados intentos. Esperá un minuto y probá de nuevo.");
+      } else if (!status) {
+        // status undefined = la request no llegó a destino (sin respuesta
+        // que leer): caída de red, CORS, Cloudflare Access, lo que sea.
+        // Es un problema distinto de "el servidor dijo que no" y necesita
+        // su propio mensaje — decirle a alguien sin conexión "ocurrió un
+        // error" no le dice nada que pueda accionar.
+        setServerError("No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.");
       } else {
         setServerError("Ocurrió un error. Intentá de nuevo.");
       }
