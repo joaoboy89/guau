@@ -295,11 +295,17 @@ export default function WalkerDashboardPage() {
       await walkersAPI.updateAvailability({ isAvailable: next });
       setAvailable(next);
     } catch (err: unknown) {
-      const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 403) {
-        setAvailError("Tu cuenta está en revisión. Te avisamos cuando puedas activarte.");
+      // Mismo patron que zoneError/wallet: el servidor ya dice que paso (ej.
+      // "Solo paseadores verificados pueden activar su disponibilidad") mejor
+      // de lo que podriamos traducir a mano desde un status. La unica rama
+      // que hace falta agregar es la que ningun patron cubria: sin status no
+      // hay respuesta que leer, la request no llego a destino.
+      const axiosErr = err as AxiosError<{ message: string }>;
+      if (!axiosErr?.response?.status) {
+        setAvailError("No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.");
       } else {
-        setAvailError("No se pudo actualizar la disponibilidad. Intentá de nuevo.");
+        const msg = axiosErr.response?.data?.message;
+        setAvailError(msg ?? "No se pudo actualizar la disponibilidad. Intentá de nuevo.");
       }
     } finally {
       setToggling(false);
