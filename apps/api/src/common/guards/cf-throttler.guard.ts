@@ -54,8 +54,15 @@ export class CfThrottlerGuard extends ThrottlerGuard {
     throttlerLimitDetail: ThrottlerLimitDetail,
   ): Promise<void> {
     const req = context.switchToHttp().getRequest<{ method?: string; url?: string }>();
+    // Mismo criterio que con la IP: req.url puede traer query string (ej.
+    // /walkers?lat=...&lng=...) y una query es, en general, dato de quien la
+    // manda. Hoy son coordenadas de un desplegable de barrios — inofensivas
+    // — pero el log no sabe eso, y el dia que una ruta reciba algo sensible
+    // en la query, empieza a acumularse sin que nadie lo haya decidido. Se
+    // loguea solo el path.
+    const path = req.url?.split("?")[0] ?? "?";
     this.logger.warn(
-      `${req.method ?? "?"} ${req.url ?? "?"} bloqueado (429) — tracker=${throttlerLimitDetail.key}`,
+      `${req.method ?? "?"} ${path} bloqueado (429) — tracker=${throttlerLimitDetail.key}`,
     );
     return super.throwThrottlingException(context, throttlerLimitDetail);
   }

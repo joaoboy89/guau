@@ -75,4 +75,29 @@ describe('CfThrottlerGuard — throwThrottlingException', () => {
     expect(logged).toContain('abc123hash');
     expect(logged).not.toContain('203.0.113.7');
   });
+
+  it('no loguea la query string de la ruta (puede llevar datos de quien la manda)', async () => {
+    const guard = buildGuard();
+    const warnSpy = jest.spyOn((guard as any).logger, 'warn').mockImplementation(() => {});
+    const context = buildContext('GET', '/walkers?lat=-34.5547&lng=-58.4501');
+    const throttlerLimitDetail = {
+      ttl: 60000,
+      limit: 5,
+      key: 'abc123hash',
+      tracker: '203.0.113.7',
+      totalHits: 6,
+      timeToExpire: 30,
+      isBlocked: true,
+      timeToBlockExpire: 30,
+    };
+
+    await expect(
+      (guard as any).throwThrottlingException(context, throttlerLimitDetail),
+    ).rejects.toBeInstanceOf(ThrottlerException);
+
+    const logged = warnSpy.mock.calls[0][0] as string;
+    expect(logged).toContain('GET /walkers');
+    expect(logged).not.toContain('lat=');
+    expect(logged).not.toContain('-34.5547');
+  });
 });
