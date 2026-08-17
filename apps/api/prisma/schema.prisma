@@ -73,6 +73,17 @@ enum WalkMode {
   EXCLUSIVO
 }
 
+// Bloque D1 (docs/guau-politicas.md §3, "Verificacion de inicio"): con que
+// evidencia arranco el paseo. CODE es el camino normal (codigo del dueño);
+// NONE es el camino "evidencia, no candado" — el paseo arranca igual, pero
+// sin codigo, con el motivo en Walk.startVerifyReason. PHOTO llega en el
+// bloque D3, no antes: agregarlo ahora sin la logica de foto/R2 detras
+// dejaria un valor del enum que nada sabe producir.
+enum StartVerification {
+  CODE
+  NONE
+}
+
 enum PayoutStatus {
   PENDING
   PROCESSING
@@ -231,6 +242,28 @@ model Walk {
   closedBy           ClosedBy?
   notPerformedReason NotPerformedReason?
   notPerformedAt     DateTime?
+  // Bloque D1 — codigo de retiro (docs/guau-politicas.md §3). Se genera en
+  // confirm(), 4 digitos. Dato del grupo 1: NUNCA viaja al paseador (ver
+  // toPublicWalk en walks.service.ts) — si lo recibiera, la mecanica entera
+  // seria decorativa: lo leeria de la respuesta y lo ingresaria sin haber
+  // visto al dueño jamas.
+  pickupCode         String?
+  // Persistido en la base, no en memoria: un contenedor de Cloud Run puede
+  // reciclarse entre intentos y un contador en memoria se reiniciaria solo,
+  // dejando el limite de intentos sin efecto real. Se incrementa en cada
+  // intento incorrecto; al llegar a PICKUP_CODE.MAX_ATTEMPTS (@guau/shared),
+  // start() deja de aceptar el codigo, incluso si el sexto intento es
+  // correcto.
+  pickupCodeAttempts Int                  @default(0)
+  // NULL hasta que start() resuelve como fue: CODE (camino normal) o NONE
+  // (el paseador eligio "iniciar sin codigo"). No hay branch para "todavia
+  // no se resolvio" mas alla de null — start() siempre lo setea, es la unica
+  // escritura de este campo.
+  startVerification  StartVerification?
+  // Solo tiene valor cuando startVerification = NONE: el motivo elegido (o
+  // el texto libre de "otro"), guardado en start(). Es el dato del que
+  // cuelga la resolucion de disputas para ese camino — ver politicas.md.
+  startVerifyReason  String?
   pickupLat          Float
   pickupLng          Float
   pickupAddress      String

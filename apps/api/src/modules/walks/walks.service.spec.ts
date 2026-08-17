@@ -6,14 +6,18 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { WalkStatus, WalkMode, VerificationStatus, UserRole, NotPerformedReason, ClosedBy } from '@prisma/client';
+import {
+  WalkStatus, WalkMode, VerificationStatus, UserRole, NotPerformedReason, ClosedBy, StartVerification,
+} from '@prisma/client';
 import { WalksService } from './walks.service';
 import { PrismaService } from '../../database/prisma.service';
 import { TrackingGateway } from '../tracking/tracking.gateway';
 import { ChatService } from '../chat/chat.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../../common/services/mail.service';
-import { NOTIFICATION_TYPES } from '@guau/shared';
+import {
+  NOTIFICATION_TYPES, START_WITHOUT_CODE_REASON, START_WITHOUT_CODE_REASON_LABEL, PICKUP_CODE,
+} from '@guau/shared';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -24,6 +28,10 @@ const WALKER_USER_ID    = 'walker-user-1';
 const OWNER_USER_ID     = 'owner-user-1';
 const DOG_ID            = 'dog-1';
 const WALK_TYPE_ID      = 'wt-1';
+// Para los tests de start() que necesitan pasar el codigo correcto — no
+// forma parte de BASE_WALK/WALK_FULL (que no lo tienen) para no alterar
+// ningun test que compara contra expectedPublicWalk().
+const TEST_PICKUP_CODE  = '4821';
 
 const BASE_WALKER = {
   id:                 WALKER_PROFILE_ID,
@@ -1201,10 +1209,11 @@ describe('WalksService', () => {
       // scheduledAt = ahora — bien adentro de la ventana, mucho antes de T+10m
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt: new Date(),
+        pickupCode: TEST_PICKUP_CODE, pickupCodeAttempts: 0,
       });
       prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
 
-      await service.start(WALKER_USER_ID, WALK_ID);
+      await service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE });
 
       expect(prisma.walk.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1239,10 +1248,13 @@ describe('WalksService', () => {
       const scheduledAt = new Date(Date.now() - 60 * 60 * 1000); // 1h en el pasado — muy despues de T+10m
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt,
+        pickupCode: TEST_PICKUP_CODE, pickupCodeAttempts: 0,
       });
       prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
 
-      await expect(service.start(WALKER_USER_ID, WALK_ID)).resolves.toBeDefined();
+      await expect(
+        service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE }),
+      ).resolves.toBeDefined();
 
       expect(prisma.walk.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1258,8 +1270,9 @@ describe('WalksService', () => {
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY,
         scheduledAt: new Date(Date.now() - 11 * 60 * 1000),
+        pickupCode: TEST_PICKUP_CODE, pickupCodeAttempts: 0,
       });
-      await service.start(WALKER_USER_ID, WALK_ID);
+      await service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE });
       expect(prisma.walk.update).toHaveBeenLastCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ startedLate: true }) }),
       );
@@ -1267,11 +1280,226 @@ describe('WalksService', () => {
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY,
         scheduledAt: new Date(Date.now() - 9 * 60 * 1000),
+        pickupCode: TEST_PICKUP_CODE, pickupCodeAttempts: 0,
       });
-      await service.start(WALKER_USER_ID, WALK_ID);
+      await service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE });
       expect(prisma.walk.update).toHaveBeenLastCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ startedLate: false }) }),
       );
+    });
+  });
+
+  // ─── Bloque D1 — código de retiro (docs/guau-politicas.md §3) ─────────────
+
+  describe('bloque D1 — código de retiro', () => {
+    // ─── El código NUNCA sale en el payload del paseador ─────────────────
+    // El test que más importa del bloque: si un refactor futuro rompe esto,
+    // toda la mecánica del código se vuelve decorativa (el paseador lo lee
+    // de la respuesta y lo ingresa sin haber visto al dueño).
+
+    it.each([
+      WalkStatus.PENDING,
+      WalkStatus.CONFIRMED,
+      WalkStatus.WALKER_ON_WAY,
+      WalkStatus.IN_PROGRESS,
+      WalkStatus.COMPLETED,
+    ])('el paseador NUNCA ve pickupCode en el payload — estado %s', async (status) => {
+      prisma.walk.findUnique.mockResolvedValue({ ...WALK_FULL, status, pickupCode: TEST_PICKUP_CODE });
+      prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+
+      const result = await service.findById(WALKER_USER_ID, UserRole.WALKER, WALK_ID);
+
+      // No alcanza con pickupCode === undefined: eso también lo cumple un
+      // objeto que SÍ tiene la clave con valor null. Lo que la política
+      // exige es que la clave no exista.
+      expect('pickupCode' in result).toBe(false);
+    });
+
+    it('el dueño SÍ ve pickupCode desde CONFIRMED', async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        ...WALK_FULL, status: WalkStatus.CONFIRMED, pickupCode: TEST_PICKUP_CODE,
+      });
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walkParticipant.findFirst.mockResolvedValue({
+        id: 'p-1', walkId: WALK_ID, ownerId: OWNER_PROFILE_ID,
+      });
+
+      const result = await service.findById(OWNER_USER_ID, UserRole.OWNER, WALK_ID);
+
+      expect((result as { pickupCode?: string }).pickupCode).toBe(TEST_PICKUP_CODE);
+    });
+
+    // ─── Generación en confirm() ───────────────────────────────────────────
+
+    it('confirm() genera un pickupCode de 4 dígitos numéricos, en un update separado del de status', async () => {
+      setupWalkerWalk(WalkStatus.PENDING);
+      prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.CONFIRMED });
+
+      await service.confirm(WALKER_USER_ID, WALK_ID);
+
+      expect(prisma.walk.update).toHaveBeenNthCalledWith(1,
+        expect.objectContaining({ data: { pickupCode: expect.stringMatching(/^\d{4}$/) } }),
+      );
+      expect(prisma.walk.update).toHaveBeenNthCalledWith(2,
+        expect.objectContaining({ data: { status: WalkStatus.CONFIRMED } }),
+      );
+    });
+
+    // ─── start() — validación del código ───────────────────────────────────
+
+    describe('start() con código', () => {
+      function setupWalkOnWay(pickupCodeAttempts: number) {
+        prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+        prisma.walk.findUnique.mockResolvedValue({
+          ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt: new Date(),
+          pickupCode: TEST_PICKUP_CODE, pickupCodeAttempts,
+        });
+      }
+
+      it('código correcto: arranca con startVerification CODE y startVerifyReason null', async () => {
+        setupWalkOnWay(0);
+        prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
+
+        await service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE });
+
+        expect(prisma.walk.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              startVerification: StartVerification.CODE,
+              startVerifyReason: null,
+            }),
+          }),
+        );
+      });
+
+      it('código incorrecto: BadRequestException, incrementa pickupCodeAttempts en la base y NO inicia el paseo', async () => {
+        setupWalkOnWay(0);
+        prisma.walk.update.mockResolvedValue({ pickupCodeAttempts: 1 });
+
+        await expect(service.start(WALKER_USER_ID, WALK_ID, { pickupCode: '0000' }))
+          .rejects.toThrow(BadRequestException);
+
+        expect(prisma.walk.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: WALK_ID },
+            data: { pickupCodeAttempts: { increment: 1 } },
+          }),
+        );
+        expect(prisma.walk.update).not.toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ status: WalkStatus.IN_PROGRESS }) }),
+        );
+      });
+
+      it('el mensaje de código incorrecto es idéntico sin importar el código (ninguna pista de "casi")', async () => {
+        setupWalkOnWay(0);
+        prisma.walk.update.mockResolvedValue({ pickupCodeAttempts: 1 });
+        let farMessage: string | undefined;
+        try {
+          await service.start(WALKER_USER_ID, WALK_ID, { pickupCode: '0000' });
+        } catch (e) {
+          farMessage = (e as BadRequestException).message;
+        }
+
+        setupWalkOnWay(0);
+        prisma.walk.update.mockResolvedValue({ pickupCodeAttempts: 1 });
+        let closeMessage: string | undefined;
+        try {
+          // 3 de 4 dígitos coinciden con TEST_PICKUP_CODE ('4821') — tiene
+          // que dar EXACTAMENTE el mismo mensaje que uno que no coincide en
+          // ninguno.
+          await service.start(WALKER_USER_ID, WALK_ID, { pickupCode: '4820' });
+        } catch (e) {
+          closeMessage = (e as BadRequestException).message;
+        }
+
+        expect(farMessage).toBeDefined();
+        expect(farMessage).toEqual(closeMessage);
+      });
+
+      it('el contador de intentos persiste entre llamadas — no vive en memoria del proceso', async () => {
+        // Simula que esta request es un contenedor nuevo (Cloud Run reciclado):
+        // el service no tiene ningún estado propio, así que el único lugar de
+        // donde puede salir "ya fallaste 3 veces" es lo que devuelve la base.
+        // Con MAX_ATTEMPTS=5, este es el 4to intento: todavía queda 1.
+        setupWalkOnWay(3);
+        prisma.walk.update.mockResolvedValue({ pickupCodeAttempts: 4 });
+
+        await expect(service.start(WALKER_USER_ID, WALK_ID, { pickupCode: '0000' }))
+          .rejects.toThrow(/Te quedan 1 intento/);
+      });
+
+      it('límite de 5 intentos: el sexto rebota aunque el código sea correcto', async () => {
+        setupWalkOnWay(PICKUP_CODE.MAX_ATTEMPTS); // ya agotó los 5, persistido en la "base"
+
+        await expect(service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE }))
+          .rejects.toThrow(BadRequestException);
+        await expect(service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE }))
+          .rejects.toThrow(/límite de intentos/);
+        // Ni siquiera llega a comparar el código — el límite corta antes,
+        // así que tampoco escribe pickupCodeAttempts de nuevo.
+        expect(prisma.walk.update).not.toHaveBeenCalled();
+      });
+    });
+
+    // ─── start() sin código — evidencia, no candado ────────────────────────
+
+    describe('start() sin código', () => {
+      function setupWalkOnWay() {
+        prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+        prisma.walk.findUnique.mockResolvedValue({
+          ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt: new Date(),
+          pickupCode: TEST_PICKUP_CODE, pickupCodeAttempts: 0,
+        });
+        prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
+      }
+
+      it('motivo predefinido: arranca igual, startVerification NONE, guarda la etiqueta legible', async () => {
+        setupWalkOnWay();
+
+        await service.start(
+          WALKER_USER_ID, WALK_ID, { reason: START_WITHOUT_CODE_REASON.BUILDING_STAFF },
+        );
+
+        expect(prisma.walk.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: WalkStatus.IN_PROGRESS,
+              startVerification: StartVerification.NONE,
+              startVerifyReason: START_WITHOUT_CODE_REASON_LABEL.BUILDING_STAFF,
+            }),
+          }),
+        );
+      });
+
+      it('motivo "otro": guarda el texto libre tal cual', async () => {
+        setupWalkOnWay();
+
+        await service.start(WALKER_USER_ID, WALK_ID, {
+          reason: START_WITHOUT_CODE_REASON.OTHER,
+          otherReason: 'Me lo dejó el kiosquero de la esquina',
+        });
+
+        expect(prisma.walk.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: WalkStatus.IN_PROGRESS,
+              startVerification: StartVerification.NONE,
+              startVerifyReason: 'Me lo dejó el kiosquero de la esquina',
+            }),
+          }),
+        );
+      });
+
+      it('sin código NI motivo: BadRequestException, no inicia el paseo (el paseo nunca queda sin poder arrancar, pero tampoco arranca sin que alguien elija un camino)', async () => {
+        prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
+        prisma.walk.findUnique.mockResolvedValue({
+          ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt: new Date(),
+          pickupCode: TEST_PICKUP_CODE, pickupCodeAttempts: 0,
+        });
+
+        await expect(service.start(WALKER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+        expect(prisma.walk.update).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -1801,10 +2029,11 @@ describe('WalksService', () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER);
       prisma.walk.findUnique.mockResolvedValue({
         ...BASE_WALK, status: WalkStatus.WALKER_ON_WAY, scheduledAt: new Date(),
+        pickupCode: TEST_PICKUP_CODE, pickupCodeAttempts: 0,
       });
       prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
 
-      await service.start(WALKER_USER_ID, WALK_ID);
+      await service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE });
 
       expect(prisma.walk.findMany).not.toHaveBeenCalled();
     });

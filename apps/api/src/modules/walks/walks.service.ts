@@ -8,6 +8,7 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import * as crypto from "crypto";
 import { PrismaService } from "../../database/prisma.service";
 import {
   Prisma,
@@ -17,10 +18,12 @@ import {
   UserRole,
   NotPerformedReason,
   ClosedBy,
+  StartVerification,
 } from "@prisma/client";
 import { CreateWalkDto } from "./dto/create-walk.dto";
 import { CancelWalkDto } from "./dto/cancel-walk.dto";
 import { QueryWalksDto } from "./dto/query-walks.dto";
+import { StartWalkDto } from "./dto/start-walk.dto";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { ChatService } from "../chat/chat.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -30,6 +33,9 @@ import { isWalkPaid } from "./walk-payment.util";
 import {
   WALK_TIMING,
   NOTIFICATION_TYPES,
+  PICKUP_CODE,
+  START_WITHOUT_CODE_REASON,
+  START_WITHOUT_CODE_REASON_LABEL,
   canMarkOnWay,
   canStart,
   canFinish,
@@ -166,7 +172,7 @@ function toPublicWalk(walk: WalkWithInclude, isWalkerView: boolean, pickupZoneSe
     ? null
     : approximatePickupPoint(walk.id, walk.pickupLat, walk.pickupLng, pickupZoneSecret);
 
-  return {
+  const base = {
     id: walk.id,
     status: walk.status,
     scheduledAt: walk.scheduledAt,
@@ -183,6 +189,17 @@ function toPublicWalk(walk: WalkWithInclude, isWalkerView: boolean, pickupZoneSe
     isPaid: isWalkPaid(walk.mpPaymentId),
     isExpired: walk.scheduledAt.getTime() <= Date.now(),
   };
+
+  // pickupCode: dato del grupo 1 (docs/guau-politicas.md §3) — nunca viaja
+  // al paseador. La clave se OMITE del todo del lado del paseador, no se
+  // manda en null: un objeto sin la clave es lo único que un test puede
+  // verificar sin ambigüedad (`'pickupCode' in result`), y lo único que
+  // sobrevive intacto si un día alguien cambia el default de la columna. Si
+  // viajara aunque sea en null, el día que ese default cambie a "" la fuga
+  // pasaría desapercibida hasta que alguien mirara la respuesta cruda. El
+  // dueño lo ve siempre que exista (desde confirm(), que es quien lo genera)
+  // — no solo en el momento del retiro, porque muy seguido no va a estar.
+  return isWalkerView ? base : { ...base, pickupCode: walk.pickupCode };
 }
 
 const DEFAULT_COMMISSION_RATE = 0.15;
@@ -475,6 +492,15 @@ export class WalksService {
     // camino y cerrar NUNCA se bloquean (ver el comentario del método).
     await this.assertNoOverdueInProgress(walk.walkerId);
 
+    // Update separado del de updateStatus (que hace `data: { status }` a
+    // secas) a propósito: generar el código es una escritura que solo pasa
+    // acá, en confirm(). Mezclarla en el `extra` de updateStatus arrastraría
+    // un campo que los otros seis callers de ese método no usan.
+    await this.prisma.walk.update({
+      where: { id: walkId },
+      data: { pickupCode: this.generatePickupCode() },
+    });
+
     const updated = await this.updateStatus(walkId, WalkStatus.CONFIRMED, {}, /* isWalkerView */ true);
 
     // Crear conversación entre paseador y dueño al confirmar
@@ -506,7 +532,11 @@ export class WalksService {
 
   // ─── Iniciar paseo (paseador) ────────────────────────────
 
-  async start(userId: string, walkId: string) {
+  // dto con default {} (no undefined a secas): así, si algo llama a start()
+  // sin body, cae en la misma rama de "falta código o motivo" en vez de
+  // reventar con un TypeError al leer dto.pickupCode de undefined — la
+  // ausencia de dato tiene que dar el mismo 400 informativo, no un 500.
+  async start(userId: string, walkId: string, dto: StartWalkDto = {}) {
     const walk = await this.getWalkerWalkOrThrow(userId, walkId);
     this.assertStatus(walk.status, WalkStatus.WALKER_ON_WAY, "iniciar");
     this.assertCanStart(walk.scheduledAt);
@@ -514,6 +544,13 @@ export class WalksService {
     // negocio multi-perro, un paseador con tres perros en la mano tiene que
     // poder retirar el cuarto — eso es el producto, no una anomalía. Lo
     // único que gobierna start() es su propia ventana de tiempo.
+
+    // Evidencia, no candado (docs/guau-politicas.md §3): esto NUNCA bloquea
+    // el paseo — si no hay código, resuelve con el motivo y sigue. Lo único
+    // que puede frenar acá es un código mal tipeado (ver verifyPickupCode),
+    // y ni siquiera eso cierra la puerta: el paseador puede cambiar de
+    // camino y arrancar igual con "iniciar sin código".
+    const verification = await this.resolveStartVerification(walk, dto);
 
     const startedAt = new Date();
     // Se calcula una sola vez, acá, y se persiste — no se deriva en lectura
@@ -524,7 +561,7 @@ export class WalksService {
     const startedLate = startedAt.getTime() > lateThreshold;
 
     return this.updateStatus(
-      walkId, WalkStatus.IN_PROGRESS, { startedAt, startedLate }, /* isWalkerView */ true,
+      walkId, WalkStatus.IN_PROGRESS, { startedAt, startedLate, ...verification }, /* isWalkerView */ true,
     );
   }
 
@@ -798,6 +835,101 @@ export class WalksService {
     const opensAt = new Date(scheduledAt.getTime() - WALK_TIMING.START_OPENS_MIN_BEFORE * 60_000);
     throw new BadRequestException(
       `Todavía no podés iniciar el paseo. Vas a poder a partir de las ${toBusinessDayAndTime(opensAt).timeStr}.`,
+    );
+  }
+
+  // ─── Código de retiro (bloque D1) ───────────────────────────────────────
+
+  // crypto.randomInt (no Math.random): no hace falta que sea criptográfico
+  // —la defensa real es el límite de intentos, no la imposibilidad de
+  // adivinar un número de 4 dígitos— pero randomInt está en la stdlib, no
+  // suma dependencias, y saca cualquier duda sobre sesgo de distribución.
+  // padStart cubre los códigos que arrancan en 0 (ej. 47 → "0047"): sin
+  // esto, un código con menos de 4 dígitos rompería la longitud exacta que
+  // exige StartWalkDto.pickupCode.
+  private generatePickupCode(): string {
+    return String(crypto.randomInt(0, 10 ** PICKUP_CODE.LENGTH)).padStart(PICKUP_CODE.LENGTH, "0");
+  }
+
+  // Resuelve CÓMO arrancó el paseo — nunca SI puede arrancar (evidencia, no
+  // candado: eso lo decide únicamente assertCanStart). Dos caminos
+  // excluyentes: código (lo valida contra el guardado en confirm()) o motivo
+  // (el paseador declaró que no lo tiene). Ninguno de los dos existe →
+  // rechaza acá, antes de escribir nada, con un mensaje que dice las dos
+  // salidas disponibles.
+  private async resolveStartVerification(
+    walk: { id: string; pickupCode: string | null; pickupCodeAttempts: number },
+    dto: StartWalkDto,
+  ): Promise<{ startVerification: StartVerification; startVerifyReason: string | null }> {
+    if (dto.pickupCode) {
+      await this.verifyPickupCode(walk, dto.pickupCode);
+      return { startVerification: StartVerification.CODE, startVerifyReason: null };
+    }
+
+    if (dto.reason) {
+      // OTHER guarda el texto libre tal cual (ya validado y recortado por
+      // StartWalkDto); el resto de los motivos guarda su etiqueta legible —
+      // el motivo es el dato del que cuelga una disputa futura, tiene que
+      // poder leerse solo, sin ir a buscar qué significaba cada clave.
+      const startVerifyReason = dto.reason === START_WITHOUT_CODE_REASON.OTHER
+        ? dto.otherReason!
+        : START_WITHOUT_CODE_REASON_LABEL[dto.reason];
+      return { startVerification: StartVerification.NONE, startVerifyReason };
+    }
+
+    throw new BadRequestException(
+      "Para iniciar el paseo hace falta el código de 4 dígitos que te pasó el dueño, o el motivo por el que no lo tenés.",
+    );
+  }
+
+  // El mensaje NUNCA insinúa si el código estaba cerca —ni "casi", ni
+  // cuántos dígitos coinciden— porque cualquier pista reduce el espacio de
+  // búsqueda de un atacante con intentos ilimitados de tiempo (no de
+  // cantidad: el límite ya se los tapa, pero el mensaje es una segunda
+  // capa). SÍ dice cuántos intentos quedan: eso no filtra nada del código
+  // en sí y es información que el paseador necesita para decidir si sigue
+  // probando o cambia a "iniciar sin código" (CLAUDE.md: qué pasó y qué
+  // hacer).
+  private async verifyPickupCode(
+    walk: { id: string; pickupCode: string | null; pickupCodeAttempts: number },
+    candidate: string,
+  ): Promise<void> {
+    // No debería pasar nunca por la app (confirm() siempre lo genera), pero
+    // el backlog registra intervenciones manuales por SQL — fallar cerrado
+    // en vez de aceptar cualquier código contra un walk sin código real.
+    if (!walk.pickupCode) {
+      throw new UnprocessableEntityException(
+        "Este paseo no tiene un código de retiro generado. No es un problema tuyo — contactanos para resolverlo.",
+      );
+    }
+
+    if (walk.pickupCodeAttempts >= PICKUP_CODE.MAX_ATTEMPTS) {
+      throw new BadRequestException(
+        "Superaste el límite de intentos para este código. Iniciá el paseo sin código e indicá el motivo.",
+      );
+    }
+
+    if (candidate === walk.pickupCode) return;
+
+    // Persistido en la base, no en memoria (ver el comentario del campo en
+    // schema.prisma): un contenedor de Cloud Run puede reciclarse entre
+    // intentos y un contador en memoria se reiniciaría solo, dejando el
+    // límite sin efecto real.
+    const updated = await this.prisma.walk.update({
+      where: { id: walk.id },
+      data: { pickupCodeAttempts: { increment: 1 } },
+      select: { pickupCodeAttempts: true },
+    });
+
+    const remaining = PICKUP_CODE.MAX_ATTEMPTS - updated.pickupCodeAttempts;
+    if (remaining <= 0) {
+      throw new BadRequestException(
+        "Código incorrecto. Superaste el límite de intentos — iniciá el paseo sin código e indicá el motivo.",
+      );
+    }
+
+    throw new BadRequestException(
+      `Código incorrecto. Te quedan ${remaining} intento${remaining === 1 ? "" : "s"}.`,
     );
   }
 

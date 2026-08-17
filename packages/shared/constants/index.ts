@@ -82,6 +82,41 @@ export const PICKUP_ZONE_MAX_OFFSET_METERS = 200;
 
 export const WALKER_RESPONSE_TIMEOUT_MINUTES = 15;
 
+// Bloque D1 — código de retiro (docs/guau-politicas.md §3, "Verificación de
+// inicio"). 4 dígitos, 10.000 combinaciones: sin techo de intentos, un
+// paseador podría probar hasta acertar y "demostrar" que fue a un paseo al
+// que nunca fue. El límite es la defensa real, no la longitud del código.
+export const PICKUP_CODE = {
+  LENGTH: 4,
+  MAX_ATTEMPTS: 5,
+} as const;
+
+// Motivos predefinidos para "iniciar sin código" — evidencia, no candado
+// (el paseo SIEMPRE puede arrancar). OTHER habilita el texto libre, que es
+// una ventana nueva (ver StartWalkDto: @MaxLength, sanitizado). Vive en
+// shared porque el front arma el selector con las mismas claves que el
+// backend valida — un motivo que el dropdown no ofrece no puede llegar
+// nunca al backend por otro camino que no sea OTHER.
+export const START_WITHOUT_CODE_REASON = {
+  BUILDING_STAFF:     "BUILDING_STAFF",
+  NEIGHBOR_OR_FAMILY: "NEIGHBOR_OR_FAMILY",
+  OWNER_HAS_NO_CODE:  "OWNER_HAS_NO_CODE",
+  OTHER:              "OTHER",
+} as const;
+
+export type StartWithoutCodeReason =
+  typeof START_WITHOUT_CODE_REASON[keyof typeof START_WITHOUT_CODE_REASON];
+
+export const START_WITHOUT_CODE_REASON_LABEL: Record<StartWithoutCodeReason, string> = {
+  BUILDING_STAFF:     "Me lo entregó el encargado o portero",
+  NEIGHBOR_OR_FAMILY: "Me lo entregó un vecino o familiar del dueño",
+  OWNER_HAS_NO_CODE:  "El dueño no tenía el código a mano",
+  OTHER:              "Otro motivo",
+};
+
+// Tope del texto libre de OTHER — la ventana nueva que abre este campo.
+export const START_WITHOUT_CODE_OTHER_MAX_LENGTH = 200;
+
 export const MAX_DOGS_PER_GROUP_WALK = 6;
 
 export const SOCKET_EVENTS = {

@@ -19,7 +19,9 @@ import BarrioSelect from "@/components/BarrioSelect";
 import { Badge, Button } from "@/components/ui";
 import CancelWalkDialog from "@/components/CancelWalkDialog";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import StartWalkDialog from "@/components/StartWalkDialog";
 import { AxiosError } from "axios";
+import { START_WITHOUT_CODE_REASON, type StartWithoutCodeReason } from "@guau/shared";
 
 interface WalkerSchedule {
   id:        string;
@@ -134,9 +136,12 @@ function splitActive(items: WalkItem[]): { active: WalkItem[]; past: WalkItem[] 
   return { active, past };
 }
 
-const TRANSITION_CALL: Record<WalkTransition, (id: string) => Promise<unknown>> = {
+// "start" no vive acá: desde el bloque D1 siempre necesita un body (código o
+// motivo), así que handleWalkAction lo intercepta antes de llegar a este
+// mapa — dejarlo con la firma vieja (solo id) rompería la llamada real a
+// walksAPI.start, que ahora exige el segundo parámetro.
+const TRANSITION_CALL: Record<Exclude<WalkTransition, "start">, (id: string) => Promise<unknown>> = {
   onWay:  walksAPI.onWay,
-  start:  walksAPI.start,
   finish: walksAPI.finish,
 };
 
@@ -189,6 +194,16 @@ export default function WalkerDashboardPage() {
 
   const [finishDialogWalkId, setFinishDialogWalkId] = useState<string | null>(null);
   const [finishError, setFinishError] = useState<string | null>(null);
+
+  // Código de retiro (bloque D1) — "Iniciar paseo" ya no dispara directo,
+  // abre este diálogo. mode arranca siempre en "code": el camino sin código
+  // es una salida DESDE ahí, no una elección previa.
+  const [startDialogWalkId, setStartDialogWalkId] = useState<string | null>(null);
+  const [startMode, setStartMode]                 = useState<"code" | "reason">("code");
+  const [startCode, setStartCode]                 = useState("");
+  const [startReason, setStartReason]              = useState<StartWithoutCodeReason | "">("");
+  const [startOtherReason, setStartOtherReason]    = useState("");
+  const [startError, setStartError]                = useState<string | null>(null);
 
   const [cancelDialogWalkId, setCancelDialogWalkId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
@@ -472,20 +487,35 @@ export default function WalkerDashboardPage() {
 
   // Un solo boton por tarjeta y el estado decide cual: nextWalkAction devuelve
   // la unica transicion disponible. "Finalizar" abre dialogo porque COMPLETED
-  // es terminal; los otros dos salen directo.
+  // es terminal; "Iniciar" abre el diálogo del código (bloque D1) — nunca
+  // dispara directo, a diferencia de onWay.
   const handleWalkAction = (walk: WalkItem) => {
     const next = nextWalkAction(walk.status);
     if (!next) return;
+    if (next.action === "start") {
+      setStartError(null);
+      setStartMode("code");
+      setStartCode("");
+      setStartReason("");
+      setStartOtherReason("");
+      setStartDialogWalkId(walk.id);
+      return;
+    }
     if (next.needsConfirm) {
       setFinishError(null);
       setFinishDialogWalkId(walk.id);
       return;
     }
+    // Copiado a una const: la estrechez de tipo de `next.action !== "start"`
+    // no sobrevive dentro de la closure de abajo si se sigue leyendo como
+    // propiedad de `next` (TS no puede garantizar que no cambie antes de que
+    // la closure corra). Una const sí la conserva.
+    const action = next.action;
     setActionError(null);
     void runWalkAction(
       walk.id,
-      () => TRANSITION_CALL[next.action](walk.id),
-      TRANSITION_ERROR[next.action],
+      () => TRANSITION_CALL[action](walk.id),
+      TRANSITION_ERROR[action],
       setActionError,
     );
   };
@@ -506,6 +536,35 @@ export default function WalkerDashboardPage() {
       setFinishError,
     );
     if (ok) setFinishDialogWalkId(null);
+  };
+
+  const dismissStartDialog = () => {
+    if (actioning) return;
+    setStartDialogWalkId(null);
+    setStartMode("code");
+    setStartCode("");
+    setStartReason("");
+    setStartOtherReason("");
+    setStartError(null);
+  };
+
+  const handleStartSubmit = async () => {
+    if (!startDialogWalkId) return;
+    setStartError(null);
+    const payload =
+      startMode === "code"
+        ? { pickupCode: startCode }
+        : startReason === START_WITHOUT_CODE_REASON.OTHER
+        ? { reason: startReason, otherReason: startOtherReason.trim() }
+        : { reason: startReason };
+
+    const ok = await runWalkAction(
+      startDialogWalkId,
+      () => walksAPI.start(startDialogWalkId, payload),
+      TRANSITION_ERROR.start,
+      setStartError,
+    );
+    if (ok) dismissStartDialog();
   };
 
   const dismissCancelDialog = () => {
@@ -1038,6 +1097,22 @@ export default function WalkerDashboardPage() {
         confirming={actioning === finishDialogWalkId}
         error={finishError}
         fallbackFocusId="mis-paseos"
+      />
+
+      <StartWalkDialog
+        open={startDialogWalkId !== null}
+        mode={startMode}
+        onModeChange={setStartMode}
+        code={startCode}
+        onCodeChange={setStartCode}
+        reason={startReason}
+        onReasonChange={setStartReason}
+        otherReason={startOtherReason}
+        onOtherReasonChange={setStartOtherReason}
+        onDismiss={dismissStartDialog}
+        onSubmit={handleStartSubmit}
+        submitting={actioning === startDialogWalkId}
+        error={startError}
       />
 
       <CancelWalkDialog
