@@ -6,9 +6,7 @@ English | [Español](./README.es.md)
 
 Dog-walking marketplace for Buenos Aires (Capital Federal + Greater Buenos Aires), Argentina. Connects dog owners with verified walkers — booking, payments, and (in progress) live GPS tracking.
 
-**Project status:** MVP live in production, closed beta — first real transaction processed and validated (real money, MercadoPago split verified). `master` is production — there is no staging environment.
-
-<!-- SCREENSHOTS: pending — se agregan mañana -->
+**Project status:** MVP live in production, closed beta — first real transaction processed and validated (real money, MercadoPago split verified). `master` is production and deploys live on every push; every change lands first on a `staging` branch with its own GCP pipeline, tested against a real environment, before it's considered for `master`.
 
 ---
 
@@ -58,13 +56,15 @@ Session tokens live in `httpOnly` cookies (secure, sameSite lax), not in `localS
 
 ---
 
-**5. `master` is production, no staging — but with a test gate in CI**
+**5. Staging joined after production did — same decision, revisited when the stakes changed**
 
-Every push to `master` deploys to production via GitHub Actions. There's no staging environment.
+At first, every push to `master` deployed straight to production, with no staging environment in between. I was a single developer validating a business with no live users yet: a staging environment duplicates infrastructure, secrets, and maintenance to protect against a risk that, at that point, didn't really exist. The real risk at that stage was not iterating fast enough — so I put the protection where it actually paid off: the full test suite (407 backend tests + 49 frontend tests) running as a gate in CI, blocking any push with failing tests before it could reach production.
 
-*Why:* I'm a single developer validating a business. A staging environment duplicates infrastructure, secrets, and maintenance to protect against... whom? The real risk at this stage is not iterating fast enough. I put the protection where it actually pays off: the full test suite (~210 backend and frontend tests) runs as a gate in CI before building and deploying — a push with failing tests never reaches production.
+*What changed:* real money started moving through the platform, and a real walker went through onboarding. The cost I'd accepted on purpose back then — "a bug the tests don't catch reaches real users" — stopped being theoretical the moment there was an actual person and actual money on the other end of that bug.
 
-*The cost:* a bug the tests don't catch reaches real users. I accept that consciously while the user base is still counted in single digits; staging joins the roadmap once there's real traffic to protect.
+*What's there today:* a `staging` branch with its own pipeline to Google Cloud Platform (Cloud Run + Cloud SQL), locked down behind Cloudflare Access and a Worker using Workload Identity Federation — no downloadable service-account key anywhere in that chain (more detail in the *Staging environment* section below). Every change goes to `staging` first, gets exercised against a real environment, and only then gets considered for `master`. `master` is still production and still deploys live on every push — that half of the original decision never changed.
+
+*The cost, measured against the real GCP bill, not guessed:* Cloud SQL plus Cloud Run for an environment with zero real traffic run around **$60 USD/month** — Cloud SQL alone, the one piece that never scales to zero, is 77% of that. For comparison, the VPS that runs the *entire* production stack costs **$7-10 USD/month**. Two pipelines to maintain, every secret duplicated across two places, and roughly six to eight times the infrastructure cost of production itself, to protect an environment that today has zero users of its own. Worth it now that there's a real transaction and a real person on the other side of a mistake; it wouldn't have been worth it on day one.
 
 ---
 
@@ -89,18 +89,18 @@ The marketplace commission (`MP_MARKETPLACE_FEE`) is validated inside `WalksServ
 | Payments | MercadoPago Checkout Pro — marketplace split (`marketplace_fee`), seller OAuth Connect, signed webhook, reconciliation job, seller access token encrypted at rest (AES-256-GCM) |
 | Email | Resend |
 | Auth | JWT + refresh tokens in `httpOnly` cookies (not accessible from JS) |
-| Testing | Jest — backend: 200+ automated tests across the highest-risk modules (payments, auth, walker search, bookings, admin, encryption, access control); frontend: Jest suites over the API client (auth-refresh-loop regression), the notifications store, and date utilities |
+| Testing | Jest — backend: 407 automated tests across the highest-risk modules (payments, auth, walker search, bookings, admin, encryption, access control); frontend: 49 tests over the API client (auth-refresh-loop regression), the notifications store, and date utilities |
 | Deploy | Self-managed VPS + Docker Compose + Cloudflare Tunnel |
 | CI/CD | GitHub Actions (push to `master` → test → build → automatic deploy) |
 | Monorepo | npm workspaces + Turborepo |
 
 ## Current status
 
-Implemented and working: full registration/auth (httpOnly cookies, no tokens accessible from JavaScript), owner and walker profiles (including work-zone setup via geolocation), proximity-based walker search, a complete booking flow (create → confirm/reject → in progress → completed), real-time in-app notifications (bell icon with unread badge, powered by Socket.io over the Cloudflare Tunnel, verified in production), and 200+ automated backend tests covering the highest-risk modules (payments, auth, search, bookings, admin, encryption, access control).
+Implemented and working: full registration/auth (httpOnly cookies, no tokens accessible from JavaScript), owner and walker profiles (including work-zone setup via geolocation), proximity-based walker search, and a booking lifecycle across its real eight states (`PENDING → CONFIRMED → WALKER_ON_WAY → IN_PROGRESS → COMPLETED`, plus `CANCELLED_OWNER`, `CANCELLED_WALKER`, and `NOT_PERFORMED` for bookings that never happened) — backed by a job that runs every 5 minutes to catch bookings stuck in a dead end (never confirmed, walker never showed up, nobody acted) and resolve them automatically. Two anti-fraud mechanisms guard the handoff itself: the exact pickup address stays obfuscated to the walker (a randomized point within ~200m, deterministic per booking) until they tap "on my way", and starting a walk now requires a 4-digit pickup code the owner hands over in person — a code that never reaches the walker's own device — so "the walk started" stops being one person's word against the other's. Real-time in-app notifications (bell icon with unread badge, powered by Socket.io over the Cloudflare Tunnel, verified in production), and 407 automated backend tests plus 49 frontend tests covering the highest-risk modules (payments, auth, search, bookings, admin, encryption, access control).
 
 Payments via MercadoPago: **marketplace split validated end-to-end in production, with real money**. The owner pays, and the amount is automatically split between the walker (via their own MercadoPago OAuth Connect) and Güau (`marketplace_fee`). The first real transaction: a $3000 (ARS) walk split into Güau's commission ($450, exactly 15%), MercadoPago's own fee ($129.09, ~4.3% with VAT), and the walker's net payout ($2,420.91) — verified against production logs and the real database numbers. Includes a webhook that queries the payment using the seller's own credentials (delivered in 3.7 seconds on that first real payment), a periodic reconciliation job as a backstop (no serious payments system should depend on a single notification channel), idempotent processing (a duplicate webhook resend from MercadoPago was correctly ignored), and the walker's `mpAccessToken` **encrypted at rest (AES-256-GCM)** and never exposed in HTTP responses.
 
-Pending: map integration (Mapbox is installed, not yet wired up), photo uploads (Cloudflare R2), live GPS tracking on the owner's side, browser push notifications, and broader frontend test coverage.
+Pending: map integration (Mapbox is installed, not yet wired up), photo uploads (Cloudflare R2), live GPS tracking on the owner's side, in-app chat between owner and walker (the conversation is already created server-side on booking confirmation, but there's no chat UI yet), browser push notifications, and broader frontend test coverage.
 
 ## Monorepo structure
 
@@ -150,10 +150,10 @@ Backend available at `http://localhost:3001`, with Swagger at `http://localhost:
 ## Tests
 
 ```bash
-# Backend — 200+ tests (Jest)
+# Backend — 407 tests (Jest)
 cd apps/api && npm test
 
-# Frontend — Jest via next/jest
+# Frontend — 49 tests (Jest via next/jest)
 cd apps/web && npm test
 ```
 
@@ -182,13 +182,19 @@ flowchart TD
     G & H --> I[cloudflared → public domains]
 ```
 
-Every `push` to `master` triggers `.github/workflows/docker.yml`: it builds the `api` and `web` images, publishes them to the GitHub Container Registry, then connects over SSH to the production VPS to pull them and bring up the containers with Docker Compose. There's no staging environment — whatever gets pushed to `master` is live in production within 2-3 minutes.
+Every `push` to `master` triggers `.github/workflows/docker.yml`: it builds the `api` and `web` images, publishes them to the GitHub Container Registry, then connects over SSH to the production VPS to pull them and bring up the containers with Docker Compose. Production deploys are direct — whatever gets pushed to `master` is live within 2-3 minutes. There's no staging gate in this pipeline; the separate staging environment described below runs on its own path and branch.
 
 The pipeline runs the tests (backend + frontend) before building — if anything fails, the deploy never runs. Migrations are self-applying: the API container's entrypoint runs `prisma migrate deploy` on every boot, before starting the app — a new migration ships inside the image and gets applied automatically on deploy, with no manual step.
 
 Daily Postgres backups to Cloudflare R2 with 30-day retention, via `infra/vps/backup-db.sh` (cron at 4:00 AM on the VPS). Restore documented in `infra/vps/restore-db.sh`.
 
 The VPS is only reachable through a Cloudflare Tunnel. Container ports are bound to `127.0.0.1` (not reachable from the public IP), and the provider's firewall only allows inbound SSH — verified with real external connection tests, not assumed. SSH access is key-only (password auth disabled), with `fail2ban` active.
+
+### Staging environment
+
+A second environment on Google Cloud Platform (Cloud Run + Cloud SQL) mirrors production for validating changes before they go live — deployed from its own branch and pipeline, fully decoupled from the VPS.
+
+Cloud Run services there are IAM-only: they don't accept public traffic directly. A Cloudflare Access layer in front handles human login (SSO via one-time email codes), and a purpose-built Cloudflare Worker bridges authenticated requests into GCP using **Workload Identity Federation** — the Worker signs its own short-lived JWT and exchanges it for a Google-issued token scoped to a single audience, on every request. No downloadable service-account key exists anywhere in that chain, which removes a long-lived credential that would otherwise need storage and rotation.
 
 ## Additional documentation
 

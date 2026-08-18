@@ -30,11 +30,58 @@ enum WalkStatus {
   COMPLETED
   CANCELLED_OWNER
   CANCELLED_WALKER
+  NOT_PERFORMED
+}
+
+// La caja (WalkStatus.NOT_PERFORMED) dice QUE paso; el motivo dice QUIEN
+// fallo. Se llama asi y no EXPIRED (como estaba disenado originalmente)
+// porque EXPIRED describe bien "se pudrio solo" y describe mal el caso donde
+// el paseador fue, espero y declaro que el dueño no aparecio — ahi no expiro
+// nada, alguien actuo. El motivo es el que decide la plata (bloque E).
+enum NotPerformedReason {
+  // Nunca marco "en camino" y paso T + duracion del WalkType. Dos caminos
+  // distintos llegan a este mismo motivo: el job (WalkExpirationService,
+  // automatico) y el boton del dueño "el paseador no se presento"
+  // (bloque B, manual, desde T+10m) — el motivo es el mismo, cambia solo
+  // quien lo detecto.
+  WALKER_NO_SHOW
+  ON_WAY_NEVER_STARTED  // marco "en camino" y despues silencio: nunca inicio ni reclamo nada
+  OWNER_NO_SHOW         // el paseador lo declara con GPS (boton, bloque D)
+  // Canario, no una regla real: si un paseo termina acá es que apareció un
+  // estado que el resto del job no supo nombrar (ej. CONFIRMED con onWayAt
+  // seteado — no debería poder pasar por la app, pero una intervención
+  // manual por SQL sí puede dejarlo así). Si esto empieza a aparecer en los
+  // logs, hay un caso sin mapear y hay que investigarlo, no ignorarlo.
+  NOBODY_ACTED
+  NEVER_CONFIRMED       // job: quedo PENDING y paso la hora pactada
+}
+
+// Quien cerro el paseo (COMPLETED). Dato de prolijidad para el historial del
+// paseador, no de puntualidad: un WALKER que nunca cierra sus propios
+// paseos y depende de que el dueño confirme la recepcion es una señal
+// distinta (y de la misma familia) que llegar tarde. ADMIN queda definido
+// para cuando exista el cierre manual desde el panel (politicas.md lo
+// menciona como "segunda llave") — todavia no hay endpoint que lo setee.
+enum ClosedBy {
+  WALKER
+  OWNER
+  ADMIN
 }
 
 enum WalkMode {
   GRUPAL
   EXCLUSIVO
+}
+
+// Bloque D1 (docs/guau-politicas.md §3, "Verificacion de inicio"): con que
+// evidencia arranco el paseo. CODE es el camino normal (codigo del dueño);
+// NONE es el camino "evidencia, no candado" — el paseo arranca igual, pero
+// sin codigo, con el motivo en Walk.startVerifyReason. PHOTO llega en el
+// bloque D3, no antes: agregarlo ahora sin la logica de foto/R2 detras
+// dejaria un valor del enum que nada sabe producir.
+enum StartVerification {
+  CODE
+  NONE
 }
 
 enum PayoutStatus {
@@ -169,8 +216,54 @@ model Walk {
   mode               WalkMode      @default(GRUPAL)
   status             WalkStatus    @default(PENDING)
   scheduledAt        DateTime
+  onWayAt            DateTime?
   startedAt          DateTime?
+  // true si startedAt quedo mas de WALK_TIMING.START_LATE_THRESHOLD_MIN_AFTER
+  // despues de scheduledAt. Se calcula UNA vez en start() y se persiste — no
+  // se deriva en lectura como isExpired — porque alimenta la tasa de
+  // puntualidad del paseador: necesita agregarse por SQL sobre muchos paseos
+  // (WHERE startedLate) sin traer cada fila a memoria, y tiene que quedar
+  // fijo aunque el umbral cambie mas adelante (una decision "fue tardio"
+  // tomada con la regla vigente en ese momento no se reescribe sola).
+  startedLate        Boolean              @default(false)
   endedAt            DateTime?
+  // true si endedAt quedo mas de WALK_TIMING.END_LATE_THRESHOLD_MIN_AFTER
+  // despues del fin esperado (startedAt + duracion del WalkType). Mismo
+  // criterio que startedLate y las mismas dos razones: se persiste (no se
+  // deriva) porque alimenta metricas que se agregan por SQL sobre muchos
+  // paseos sin traer cada fila a memoria, y porque envenena cualquier
+  // promedio de duracion si no se puede excluir (un paseo de 2h cerrado 20h
+  // despues da endedAt-startedAt = 20h, un numero que no describe nada real).
+  endedLate          Boolean              @default(false)
+  // Quien confirmo que el paseo termino. WALKER cuando lo cierra el propio
+  // paseador (finish()); OWNER cuando el dueño confirma la recepcion porque
+  // el paseador no lo hizo (confirmReceipt()) — la llave de escape del
+  // bloqueo del bloque B. Null mientras el paseo no llego a COMPLETED.
+  closedBy           ClosedBy?
+  notPerformedReason NotPerformedReason?
+  notPerformedAt     DateTime?
+  // Bloque D1 — codigo de retiro (docs/guau-politicas.md §3). Se genera en
+  // confirm(), 4 digitos. Dato del grupo 1: NUNCA viaja al paseador (ver
+  // toPublicWalk en walks.service.ts) — si lo recibiera, la mecanica entera
+  // seria decorativa: lo leeria de la respuesta y lo ingresaria sin haber
+  // visto al dueño jamas.
+  pickupCode         String?
+  // Persistido en la base, no en memoria: un contenedor de Cloud Run puede
+  // reciclarse entre intentos y un contador en memoria se reiniciaria solo,
+  // dejando el limite de intentos sin efecto real. Se incrementa en cada
+  // intento incorrecto; al llegar a PICKUP_CODE.MAX_ATTEMPTS (@guau/shared),
+  // start() deja de aceptar el codigo, incluso si el sexto intento es
+  // correcto.
+  pickupCodeAttempts Int                  @default(0)
+  // NULL hasta que start() resuelve como fue: CODE (camino normal) o NONE
+  // (el paseador eligio "iniciar sin codigo"). No hay branch para "todavia
+  // no se resolvio" mas alla de null — start() siempre lo setea, es la unica
+  // escritura de este campo.
+  startVerification  StartVerification?
+  // Solo tiene valor cuando startVerification = NONE: el motivo elegido (o
+  // el texto libre de "otro"), guardado en start(). Es el dato del que
+  // cuelga la resolucion de disputas para ese camino — ver politicas.md.
+  startVerifyReason  String?
   pickupLat          Float
   pickupLng          Float
   pickupAddress      String
@@ -189,6 +282,15 @@ model Walk {
   locations    WalkLocation[]
   reviews      Review[]
   conversation Conversation?
+
+  // Los cuatro pases de WalkExpirationService (cada 5 min, 288 corridas por
+  // dia) filtran siempre por estos dos campos juntos. Sin este indice,
+  // Postgres escanea la tabla entera en cada pase — y todos ademas hacen
+  // orderBy + take (para agarrar los 50 mas vencidos), el peor caso: tienen
+  // que leer y ordenar todo para saber cuales son esos 50. Se agrega ahora,
+  // con la tabla en decenas de filas: sobre una tabla grande, CREATE INDEX
+  // es una operacion que hay que planificar, no algo para hacer despues.
+  @@index([status, scheduledAt])
 }
 
 // ─── PARTICIPANTES DEL PASEO ─────────────────────────────

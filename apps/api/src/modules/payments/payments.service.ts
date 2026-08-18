@@ -107,7 +107,18 @@ export class PaymentsService {
           {
             id: walk.walkTypeId,
             title: `Güau — Paseo ${walk.walkType.label}`,
-            description: `Paseo ${walk.mode === "EXCLUSIVO" ? "exclusivo" : "grupal"} — ${walk.pickupAddress}`,
+            // SIN pickupAddress a propósito: el split manda esta preferencia
+            // al paseador (es quien cobra), y en CONFIRMED —que puede ser
+            // días antes de "voy en camino"— la dirección exacta todavía
+            // está ofuscada (ver toPublicWalk, anti-desintermediación). Si
+            // fuera acá, MercadoPago se la mostraría igual y toda esa
+            // protección sería decorativa. Con tipo, duración y fecha
+            // alcanza para que el dueño reconozca el cobro en su comprobante
+            // — ya sabe dónde vive.
+            // "Paseo de Mascota" fijo, no walk.mode: grupal/exclusivo es
+            // vocabulario interno del negocio — no le dice nada al dueño en
+            // su comprobante ni al paseador en su cuenta de MercadoPago.
+            description: `Paseo de Mascota — ${walk.walkType.durationMinutes} min — ${walk.scheduledAt.toLocaleString("es-AR", { dateStyle: "long", timeStyle: "short", timeZone: "America/Argentina/Buenos_Aires" })}`,
             quantity: 1,
             unit_price: ownerTotal,
             currency_id: "ARS",

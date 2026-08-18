@@ -15,6 +15,7 @@ import { WalksService } from "./walks.service";
 import { CreateWalkDto } from "./dto/create-walk.dto";
 import { CancelWalkDto } from "./dto/cancel-walk.dto";
 import { QueryWalksDto } from "./dto/query-walks.dto";
+import { StartWalkDto } from "./dto/start-walk.dto";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -100,9 +101,12 @@ export class WalksController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.WALKER)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Iniciar el paseo (WALKER_ON_WAY → IN_PROGRESS)" })
-  start(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.walks.start(user.id, id);
+  @ApiOperation({
+    summary:
+      "Iniciar el paseo (WALKER_ON_WAY → IN_PROGRESS). Requiere el código del dueño o un motivo si no lo tiene.",
+  })
+  start(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() dto: StartWalkDto) {
+    return this.walks.start(user.id, id, dto);
   }
 
   @Put(":id/finish")
@@ -125,5 +129,30 @@ export class WalksController {
     @Body() dto: CancelWalkDto,
   ) {
     return this.walks.cancel(user.id, user.role, id, dto);
+  }
+
+  // ─── Reclamos y cierre (solo dueño) ──────────────────────
+
+  @Put(":id/report-walker-no-show")
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Dueño reporta que el paseador no se presentó (CONFIRMED/WALKER_ON_WAY → NOT_PERFORMED). Desde T+10m, no vence.",
+  })
+  reportWalkerNoShow(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.walks.reportWalkerNoShow(user.id, id);
+  }
+
+  @Put(":id/confirm-receipt")
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Dueño confirma que recibió a su perro (IN_PROGRESS → COMPLETED). Llave de escape del bloqueo.",
+  })
+  confirmReceipt(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.walks.confirmReceipt(user.id, id);
   }
 }

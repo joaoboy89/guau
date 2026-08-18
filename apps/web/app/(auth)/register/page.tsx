@@ -111,6 +111,16 @@ function RegisterForm() {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 409) {
         setServerError("Ese email ya está registrado. ¿Querés ingresar?");
+      } else if (status === 429) {
+        // Mismo criterio que login: "intentá de nuevo" es el peor consejo
+        // para alguien bloqueado por el throttler — extiende su propio
+        // bloqueo en vez de esperarlo.
+        setServerError("Demasiados intentos. Esperá un minuto y probá de nuevo.");
+      } else if (!status) {
+        // status undefined = la request no llegó a destino, sin respuesta
+        // que leer — problema distinto de "el servidor dijo que no" (ver
+        // login/page.tsx, mismo patrón).
+        setServerError("No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.");
       } else {
         setServerError("Ocurrió un error. Intentá de nuevo.");
       }

@@ -18,6 +18,10 @@ interface WalkDetail {
   totalAmount: number;
   isPaid: boolean;
   isExpired: boolean;
+  // Ausente del todo (no null) hasta CONFIRMED, y siempre ausente para el
+  // paseador — ver toPublicWalk() en walks.service.ts. Opcional acá porque
+  // la API puede no mandar la clave.
+  pickupCode?: string;
   walkType: { label: string; durationMinutes: number };
   walker: {
     user: { firstName: string; lastName: string };
@@ -38,6 +42,8 @@ export default function WalkDetailPage() {
   const [payError, setPayError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [paymentResult, setPaymentResult] = useState<string | null>(null);
+
+  const [codeCopied, setCodeCopied] = useState(false);
 
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -76,6 +82,18 @@ export default function WalkDetailPage() {
       const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
       setPayError(msg ?? "No se pudo iniciar el pago");
       setPaying(false);
+    }
+  };
+
+  const handleCopyCode = async () => {
+    if (!walk?.pickupCode) return;
+    try {
+      await navigator.clipboard.writeText(walk.pickupCode);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    } catch {
+      // Sin permiso de portapapeles o navegador viejo: el código ya está
+      // seleccionable a simple vista, no hace falta un mensaje de error acá.
     }
   };
 
@@ -225,6 +243,31 @@ export default function WalkDetailPage() {
           </div>
         </section>
 
+        {/* Código de retiro (bloque D1) — visible desde CONFIRMED y no solo
+            en el momento de la entrega: muy seguido el dueño no va a estar
+            ahí en persona (portero, vecino, familiar), así que necesita
+            poder mandarlo por mensaje con anticipación. */}
+        {walk.pickupCode && (walk.status === "CONFIRMED" || walk.status === "WALKER_ON_WAY") && (
+          <section className="bg-brand-surface rounded-2xl p-5 shadow-card border border-brand-border flex flex-col gap-2">
+            <span className="text-xs text-brand-text-muted">Código de retiro</span>
+            <p className="text-xs text-brand-text-muted">
+              Pasáselo al paseador cuando te retire a tu perro. Si no vas a estar,
+              podés mandárselo por mensaje a quien se lo entregue.
+            </p>
+            <div className="flex items-center gap-3">
+              <span className="text-3xl font-bold tracking-[0.3em] text-brand-text font-mono select-all">
+                {walk.pickupCode}
+              </span>
+              <button
+                onClick={handleCopyCode}
+                className="text-xs font-semibold text-brand-primary underline"
+              >
+                {codeCopied ? "Copiado" : "Copiar"}
+              </button>
+            </div>
+          </section>
+        )}
+
         {/* Acción según estado */}
         {walk.status === "PENDING" && (
           <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-700">
@@ -257,6 +300,28 @@ export default function WalkDetailPage() {
                 </Button>
               </>
             )}
+          </div>
+        )}
+
+        {/* Paseo en curso — el dueño no tiene nada que hacer, pero tampoco
+            puede quedarse sin ver nada. Hasta hoy estos tres estados eran
+            inalcanzables, asi que el bloque de acciones solo contemplaba
+            PENDING y CONFIRMED: un paseo que arranca dejaba la pantalla sin
+            una sola linea debajo de los datos, incluido el "Pago completado"
+            que se veia un segundo antes. Es un mensaje neutro, no
+            funcionalidad nueva del lado del dueño. */}
+        {(walk.status === "WALKER_ON_WAY" || walk.status === "IN_PROGRESS") && (
+          <div className="px-4 py-3 rounded-xl bg-brand-primary-soft border border-brand-primary/20 text-sm text-brand-primary">
+            {walk.status === "WALKER_ON_WAY"
+              ? "El paseador está yendo a buscar a tu perro."
+              : "El paseo está en curso."}
+            {walk.isPaid && " Ya está pagado."}
+          </div>
+        )}
+
+        {walk.status === "COMPLETED" && (
+          <div className="px-4 py-3 rounded-xl bg-brand-green-soft border border-brand-green/30 text-sm font-semibold text-brand-green">
+            Paseo completado.
           </div>
         )}
 

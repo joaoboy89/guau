@@ -6,6 +6,7 @@ import { Resend } from "resend";
 export class MailService {
   private readonly resend: Resend | null = null;
   private readonly from: string;
+  private readonly adminAlertEmail: string;
   private readonly logger = new Logger(MailService.name);
 
   constructor(private config: ConfigService) {
@@ -17,6 +18,10 @@ export class MailService {
       this.resend = new Resend(apiKey);
     }
     this.from = config.get<string>("EMAIL_FROM") ?? "Güau <noreply@resend.jbsaasapp.com>";
+    // Sin default hardcodeado a proposito: si falta, sendNotPerformedAlert
+    // avisa por warning y no manda nada — que falte una alerta no puede
+    // romper el job que limpia paseos colgados.
+    this.adminAlertEmail = config.get<string>("ADMIN_ALERT_EMAIL") ?? "";
   }
 
   sendVerificationEmail(to: string, firstName: string, token: string): void {
@@ -159,6 +164,80 @@ Si no te registraste en Güau, ignorá este mensaje.
       .send({ from: this.from, to, subject: `Bienvenido a Güau, ${firstName}`, html, text })
       .catch((err) => {
         this.logger.warn(`No se pudo enviar email de bienvenida a ${to}: ${err}`);
+      });
+  }
+
+  /**
+   * La primera alerta que tiene el sistema. Solo se llama para paseos
+   * NOT_PERFORMED con plata adentro — un NOT_PERFORMED sin pagar no necesita
+   * que nadie intervenga. El mail avisa, nada mas: ningun refund se dispara
+   * desde acá, la plata la mueve Joa a mano desde el panel de admin.
+   */
+  sendNotPerformedAlert(details: {
+    walkId: string;
+    reason: string;
+    scheduledAt: Date;
+    totalAmount: number;
+    ownerName: string;
+    ownerEmail: string;
+    walkerName: string;
+  }): void {
+    // Chequeo primero, aunque el mail esté deshabilitado por completo: es la
+    // condición que este job necesita que quede visible en el log, no la
+    // configuración general de Resend (esa ya avisó una vez al arrancar).
+    if (!this.adminAlertEmail) {
+      this.logger.warn(
+        `ADMIN_ALERT_EMAIL no configurada — no se pudo avisar del paseo no realizado ${details.walkId} (tiene plata adentro)`,
+      );
+      return;
+    }
+    if (!this.resend) return;
+
+    const dateStr = details.scheduledAt.toLocaleString("es-AR", {
+      dateStyle: "long",
+      timeStyle: "short",
+      timeZone: "America/Argentina/Buenos_Aires",
+    });
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:24px;background-color:#f0f0f4;font-family:Arial,Helvetica,sans-serif;color:#333333">
+  <table width="560" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border-radius:8px;padding:24px 32px;max-width:560px">
+    <tr><td>
+      <p style="margin:0 0 16px 0;font-size:16px;font-weight:700;color:#b91c1c">⚠️ Paseo no realizado — tiene plata adentro</p>
+      <p style="margin:0 0 4px 0;font-size:14px"><strong>Motivo:</strong> ${details.reason}</p>
+      <p style="margin:0 0 4px 0;font-size:14px"><strong>Agendado para:</strong> ${dateStr}</p>
+      <p style="margin:0 0 4px 0;font-size:14px"><strong>Monto:</strong> $${details.totalAmount.toLocaleString("es-AR")}</p>
+      <p style="margin:0 0 4px 0;font-size:14px"><strong>Dueño:</strong> ${details.ownerName} (${details.ownerEmail})</p>
+      <p style="margin:0 0 16px 0;font-size:14px"><strong>Paseador:</strong> ${details.walkerName}</p>
+      <p style="margin:0;font-size:12px;color:#888888">walkId: ${details.walkId} — ningún reembolso se disparó automáticamente.</p>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const text = `Paseo no realizado — tiene plata adentro
+
+Motivo: ${details.reason}
+Agendado para: ${dateStr}
+Monto: $${details.totalAmount.toLocaleString("es-AR")}
+Dueño: ${details.ownerName} (${details.ownerEmail})
+Paseador: ${details.walkerName}
+walkId: ${details.walkId}
+
+Ningún reembolso se disparó automáticamente.`;
+
+    this.resend.emails
+      .send({
+        from: this.from,
+        to: this.adminAlertEmail,
+        subject: `Paseo no realizado con plata adentro — ${details.reason}`,
+        html,
+        text,
+      })
+      .catch((err) => {
+        this.logger.error(`No se pudo mandar la alerta de walk ${details.walkId}: ${err}`);
       });
   }
 }
