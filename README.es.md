@@ -6,9 +6,7 @@
 
 Marketplace de paseo de perros para Capital Federal y Gran Buenos Aires, Argentina. Conecta dueños de mascotas con paseadores verificados — reserva, pago y (en construcción) seguimiento GPS en tiempo real.
 
-**Estado del proyecto:** MVP en producción, beta cerrada — primera transacción real procesada y validada (dinero real, split de MercadoPago verificado). `master` es producción — no hay ambiente de staging.
-
-<!-- SCREENSHOTS: pending — se agregan mañana -->
+**Estado del proyecto:** MVP en producción, beta cerrada — primera transacción real procesada y validada (dinero real, split de MercadoPago verificado). `master` es producción y deploya en vivo en cada push; todo cambio llega primero a una rama `staging` con su propio pipeline en GCP, se prueba contra un ambiente real, y recién después se considera para `master`.
 
 ---
 
@@ -58,13 +56,15 @@ Los tokens de sesión viven en cookies `httpOnly` (secure, sameSite lax), no en 
 
 ---
 
-**5. `master` = producción, sin staging — pero con gate de tests en CI**
+**5. El staging llegó después que producción — misma decisión, revisada cuando cambió lo que había en juego**
 
-Cada push a `master` deploya a producción vía GitHub Actions. No hay entorno de staging.
+Al principio, cada push a `master` deployaba directo a producción, sin ningún ambiente intermedio. Era un solo desarrollador validando un negocio sin usuarios reales todavía: un staging duplica infraestructura, secretos y mantenimiento para proteger contra un riesgo que, en ese momento, no existía de verdad. El riesgo real en esa etapa era no iterar rápido — así que puse la protección donde rendía: la suite completa (407 tests de backend + 49 de frontend) corriendo como gate en CI, bloqueando cualquier push con tests rotos antes de que llegara a producción.
 
-*Por qué:* soy un solo desarrollador validando un negocio. Un staging duplica infra, secretos y mantenimiento para proteger... ¿de quién? El riesgo real en esta etapa es no iterar rápido. La protección la puse donde rinde: la suite completa (~210 tests de backend + frontend) corre como gate en CI antes de buildear y deployar — un push con tests rotos no llega a producción.
+*Qué cambió:* empezó a circular dinero real por la plataforma, y una paseadora real pasó por el onboarding. El costo que había aceptado a propósito en ese momento —"un bug que los tests no atrapen llega a usuarios reales"— dejó de ser teórico en el momento en que hubo una persona real y plata real del otro lado de ese bug.
 
-*El costo:* un bug que los tests no atrapen llega a usuarios reales. Lo acepto conscientemente mientras los usuarios se cuentan de a unos; staging entra al roadmap cuando haya tráfico que proteger.
+*Qué hay hoy:* una rama `staging` con su propio pipeline hacia Google Cloud Platform (Cloud Run + Cloud SQL), cerrada detrás de Cloudflare Access y un Worker que usa Workload Identity Federation — sin ninguna key de service account descargable en toda esa cadena (más detalle en la sección *Ambiente de staging* más abajo). Todo cambio va primero a `staging`, se prueba contra un ambiente real, y recién después se considera para `master`. `master` sigue siendo producción y sigue deployando en vivo en cada push — esa mitad de la decisión original no cambió.
+
+*El costo, medido contra la factura real de GCP, no supuesto:* Cloud SQL más Cloud Run para un ambiente sin tráfico real rondan los **$60 USD/mes** — Cloud SQL solo, la única pieza que nunca escala a cero, es el 77% de eso. Para comparar, el VPS que corre *toda* la producción cuesta **$7-10 USD/mes**. Dos pipelines para mantener, cada secreto duplicado en dos lugares, y entre seis y ocho veces el costo de infraestructura de la propia producción, para proteger un ambiente que hoy no tiene un solo usuario propio. Vale la pena ahora que hay una transacción real y una persona real del otro lado de un error; no hubiera valido la pena el primer día.
 
 ---
 
@@ -89,14 +89,14 @@ La comisión del marketplace (`MP_MARKETPLACE_FEE`) se valida en el constructor 
 | Pagos | MercadoPago Checkout Pro — split de marketplace (`marketplace_fee`), OAuth Connect del vendedor, webhook firmado, job de reconciliación, token del vendedor cifrado en reposo (AES-256-GCM) |
 | Email | Resend |
 | Auth | JWT + Refresh Tokens, en cookies `httpOnly` (no accesibles desde JS) |
-| Testing | Jest (backend: 200+ tests automatizados en los módulos de mayor riesgo — pagos, auth, búsqueda, reservas, admin, cifrado, control de acceso; frontend: suites de Jest sobre el cliente API (regresión del loop de auth), el store de notificaciones y utilidades de fechas) |
+| Testing | Jest (backend: 407 tests automatizados en los módulos de mayor riesgo — pagos, auth, búsqueda, reservas, admin, cifrado, control de acceso; frontend: 49 tests sobre el cliente API (regresión del loop de auth), el store de notificaciones y utilidades de fechas) |
 | Deploy | VPS propio + Docker Compose + Cloudflare Tunnel |
 | CI/CD | GitHub Actions (push a `master` → tests → build → deploy automático) |
 | Monorepo | npm workspaces + Turborepo |
 
 ## Estado actual
 
-Implementado y funcionando: registro y auth completos (cookies httpOnly, sin tokens accesibles desde JavaScript), perfil de dueño y paseador (incluida carga de zona de trabajo por geolocalización), búsqueda de paseadores por cercanía, flujo completo de reserva (crear → confirmar/rechazar → en curso → completado), notificaciones in-app en tiempo real (campana con badge de no leídas, vía Socket.io sobre el Cloudflare Tunnel, verificado en producción), y 200+ tests automatizados de backend cubriendo los módulos de mayor riesgo (pagos, auth, búsqueda, reservas, administración, cifrado, control de acceso).
+Implementado y funcionando: registro y auth completos (cookies httpOnly, sin tokens accesibles desde JavaScript), perfil de dueño y paseador (incluida carga de zona de trabajo por geolocalización), búsqueda de paseadores por cercanía, y un ciclo de vida de reserva completo a través de sus ocho estados reales (`PENDING → CONFIRMED → WALKER_ON_WAY → IN_PROGRESS → COMPLETED`, más `CANCELLED_OWNER`, `CANCELLED_WALKER` y `NOT_PERFORMED` para las reservas que no llegaron a hacerse) — sostenido por un job que corre cada 5 minutos para detectar reservas que quedaron trabadas en un callejón sin salida (nunca confirmadas, paseador que nunca apareció, nadie actuó) y resolverlas solo. Dos mecanismos anti-fraude protegen la entrega misma: la dirección exacta del punto de encuentro queda ofuscada para el paseador (un punto aleatorio dentro de ~200m, determinístico por reserva) hasta que aprieta "voy en camino", y arrancar un paseo hoy exige un código de 4 dígitos que el dueño entrega en persona — un código que nunca llega al dispositivo del paseador — así que "el paseo arrancó" deja de ser la palabra de una sola parte contra la otra. Notificaciones in-app en tiempo real (campana con badge de no leídas, vía Socket.io sobre el Cloudflare Tunnel, verificado en producción), y 407 tests automatizados de backend más 49 de frontend cubriendo los módulos de mayor riesgo (pagos, auth, búsqueda, reservas, administración, cifrado, control de acceso).
 
 Pago vía MercadoPago: **split de marketplace validado end-to-end en producción, con dinero real**. El dueño paga y el monto se reparte automáticamente entre el paseador (vía OAuth Connect de su propia cuenta de MercadoPago) y Güau (`marketplace_fee`). Primera transacción real: un paseo de $3000 dividido en comisión de Güau ($450, 15% exacto), comisión de MercadoPago ($129,09, ~4,3% con IVA) y neto acreditado al paseador ($2.420,91) — verificado contra logs de producción y los números reales de la base de datos. Incluye webhook que consulta el pago con las credenciales del vendedor (entregado en 3,7 segundos en ese primer pago real), job de reconciliación periódico como respaldo (ningún sistema de pagos serio depende de un solo canal de notificación), procesamiento idempotente (un reenvío duplicado de MercadoPago fue correctamente ignorado), y el `mpAccessToken` del paseador **cifrado en reposo (AES-256-GCM)** y nunca expuesto en respuestas HTTP.
 
@@ -150,10 +150,10 @@ Backend disponible en `http://localhost:3001`, con Swagger en `http://localhost:
 ## Tests
 
 ```bash
-# Backend — 200+ tests (Jest)
+# Backend — 407 tests (Jest)
 cd apps/api && npm test
 
-# Frontend — Jest vía next/jest
+# Frontend — 49 tests (Jest vía next/jest)
 cd apps/web && npm test
 ```
 
