@@ -8,7 +8,6 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import * as crypto from "crypto";
 import { PrismaService } from "../../database/prisma.service";
 import {
   Prisma,
@@ -24,6 +23,7 @@ import { CreateWalkDto } from "./dto/create-walk.dto";
 import { CancelWalkDto } from "./dto/cancel-walk.dto";
 import { QueryWalksDto } from "./dto/query-walks.dto";
 import { StartWalkDto } from "./dto/start-walk.dto";
+import { generatePickupCode } from "./pickup-code.util";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { ChatService } from "../chat/chat.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -498,7 +498,7 @@ export class WalksService {
     // un campo que los otros seis callers de ese método no usan.
     await this.prisma.walk.update({
       where: { id: walkId },
-      data: { pickupCode: this.generatePickupCode() },
+      data: { pickupCode: generatePickupCode() },
     });
 
     const updated = await this.updateStatus(walkId, WalkStatus.CONFIRMED, {}, /* isWalkerView */ true);
@@ -839,17 +839,10 @@ export class WalksService {
   }
 
   // ─── Código de retiro (bloque D1) ───────────────────────────────────────
-
-  // crypto.randomInt (no Math.random): no hace falta que sea criptográfico
-  // —la defensa real es el límite de intentos, no la imposibilidad de
-  // adivinar un número de 4 dígitos— pero randomInt está en la stdlib, no
-  // suma dependencias, y saca cualquier duda sobre sesgo de distribución.
-  // padStart cubre los códigos que arrancan en 0 (ej. 47 → "0047"): sin
-  // esto, un código con menos de 4 dígitos rompería la longitud exacta que
-  // exige StartWalkDto.pickupCode.
-  private generatePickupCode(): string {
-    return String(crypto.randomInt(0, 10 ** PICKUP_CODE.LENGTH)).padStart(PICKUP_CODE.LENGTH, "0");
-  }
+  // generatePickupCode vive en pickup-code.util.ts, no acá — la usa también
+  // el script de backfill de producción (apps/api/scripts/), y esa
+  // reutilización es el punto: una sola definición, no dos que puedan
+  // desincronizarse (una en la app, otra reimplementada a mano en el script).
 
   // Resuelve CÓMO arrancó el paseo — nunca SI puede arrancar (evidencia, no
   // candado: eso lo decide únicamente assertCanStart). Dos caminos
