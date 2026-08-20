@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WalkRemindersService } from './walk-reminders.service';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { NOTIFICATION_TYPES } from '@guau/shared';
+import { NOTIFICATION_TYPES, WALK_TIMING } from '@guau/shared';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -15,11 +15,6 @@ const WALKER_CANDIDATE = {
 
 const OWNER_CANDIDATE = {
   id: 'walk-2',
-  // "Debería haber arrancado hace 10 minutos" — el escenario real de este
-  // aviso (T+5m / T+10m). Con 30 min de duración, el fin esperado todavía
-  // está 20 minutos en el futuro: no expiró, sigue siendo candidato.
-  scheduledAt: new Date(Date.now() - 10 * 60 * 1000),
-  walkType: { durationMinutes: 30 },
   participants: [{ owner: { user: { id: 'owner-user-1' } } }],
 };
 
@@ -202,54 +197,77 @@ describe('WalkRemindersService', () => {
       expect(notifications.create).not.toHaveBeenCalled();
     });
 
-    // El bug real (producción, 2026-08): remindOwner tampoco tenía cota
-    // inferior — `threshold = now - minutesAfter` con `scheduledAt: { lte:
-    // threshold }` "decía" todo paseo anterior a esa fecha, sin importar
-    // cuánto. Los tests viejos no lo cazaron por el mismo motivo que
-    // remindWalker: OWNER_CANDIDATE no tenía ni scheduledAt ni duración, así
-    // que nada podía calificar como "afuera de la ventana". A diferencia de
-    // remindWalker, acá la cota SÍ vive en memoria (no en el WHERE): Prisma
-    // no puede comparar `scheduledAt + walkType.durationMinutes` contra
-    // `now`, así que el candidato inyectado en el mock atraviesa el WHERE
-    // (que en el mock no filtra nada) y es la propia función la que tiene
-    // que rechazarlo — acá sí es un test de comportamiento genuino, no una
-    // simulación del WHERE como en remindWalker.
-    it('un paseo muy viejo (mucho más allá de su propio fin esperado) NO genera recordatorio de dueño', async () => {
-      const staleOwner = {
-        ...OWNER_CANDIDATE,
-        id: 'walk-old-owner',
-        scheduledAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000), // hace dos meses
-        // misma duración de 30 min que OWNER_CANDIDATE — el fin esperado
-        // quedó hace casi dos meses, muy pasado.
-      };
-      mockSixPasses({ notStarted1: [staleOwner] });
+    // Bug real (producción, sesión 15): remindOwner primero no tenía NINGUNA
+    // cota inferior, y el arreglo siguiente le puso una atada a la duración
+    // del WalkType — copiando el reloj de WalkExpirationService, que
+    // contesta una pregunta distinta ("¿este paseo ya se puede dar por
+    // muerto?", no "¿el encuentro no pasó a horario?"). El fix real: la
+    // cota inferior va entera en el WHERE (gte), sin depender de la
+    // duración de nada. Por eso el test que importa acá no es "no se manda
+    // el aviso" (eso ya pasaba, incluso con el criterio equivocado) sino
+    // que LA CONSULTA se achicó — es lo que Joa pidió explícitamente
+    // verificar, y es la única forma de probar que el WHERE realmente
+    // cambió, no que un filtro en memoria lo sigue tapando.
+    it('la consulta al dueño pide scheduledAt >= piso (gte), no solo un techo — antes no existía ningún gte', async () => {
+      mockSixPasses({});
+
+      await service.sendReminders();
+
+      // Tercera llamada = notStarted1 (T+5m), cuarta = notStarted2 (T+10m).
+      const whereN1 = prisma.walk.findMany.mock.calls[2][0].where;
+      const whereN2 = prisma.walk.findMany.mock.calls[3][0].where;
+
+      // gte tiene que EXISTIR (antes de este fix, era undefined — este
+      // assert por sí solo ya falla contra el código viejo) y tiene que
+      // reflejar el piso: now - (minutesAfter + tolerancia).
+      const expectedGte1 = Date.now() - (WALK_TIMING.NOT_STARTED_ALERT_1_MIN_AFTER
+        + WALK_TIMING.NOT_STARTED_ALERT_STALE_TOLERANCE_MIN) * 60_000;
+      const expectedGte2 = Date.now() - (WALK_TIMING.NOT_STARTED_ALERT_2_MIN_AFTER
+        + WALK_TIMING.NOT_STARTED_ALERT_STALE_TOLERANCE_MIN) * 60_000;
+
+      expect((whereN1.scheduledAt.gte as Date).getTime()).toBeGreaterThan(expectedGte1 - 5_000);
+      expect((whereN1.scheduledAt.gte as Date).getTime()).toBeLessThanOrEqual(expectedGte1 + 1_000);
+      expect((whereN2.scheduledAt.gte as Date).getTime()).toBeGreaterThan(expectedGte2 - 5_000);
+      expect((whereN2.scheduledAt.gte as Date).getTime()).toBeLessThanOrEqual(expectedGte2 + 1_000);
+
+      // El techo (lte) sigue siendo el que ya existía: now - minutesAfter.
+      expect((whereN1.scheduledAt.lte as Date).getTime()).toBeLessThan(Date.now());
+    });
+
+    // Escenario del prompt: el job estuvo caído y vuelve tarde. Se simula
+    // el filtro real de Prisma (igual que el test de remindWalker de más
+    // arriba) porque acá SÍ importa que sea la query la que excluye al
+    // candidato, no un filtro después.
+    function mockRealWhereFilter(candidate: { id: string; scheduledAt: Date }) {
+      prisma.walk.findMany.mockImplementation((args: any) => {
+        const bounds = args?.where?.scheduledAt as { gte?: Date; lte?: Date } | undefined;
+        const t = candidate.scheduledAt.getTime();
+        const passesGte = !bounds?.gte || t >= bounds.gte.getTime();
+        const passesLte = !bounds?.lte || t <= bounds.lte.getTime();
+        return Promise.resolve(passesGte && passesLte ? [{ ...OWNER_CANDIDATE, id: candidate.id }] : []);
+      });
+    }
+
+    it('si el job vuelve 3 horas tarde, el aviso de T+5m NO se manda — el momento ya pasó', async () => {
+      // Debería haber arrancado hace 3h: muy afuera de la tolerancia
+      // (minutesAfter + 10min ≈ 15min de margen total) — la única cota
+      // inferior que existe, y alcanza sola para rechazarlo.
+      mockRealWhereFilter({ id: 'walk-stale', scheduledAt: new Date(Date.now() - 3 * 60 * 60 * 1000) });
 
       await service.sendReminders();
 
       expect(notifications.create).not.toHaveBeenCalled();
     });
 
-    it('justo en su propio fin esperado ya NO genera recordatorio; un minuto antes, sí', async () => {
-      const durationMinutes = 30;
-      const scheduledAt = new Date(Date.now() - (durationMinutes + 1) * 60_000); // fin esperado hace 1 min
-      const justExpired = { ...OWNER_CANDIDATE, id: 'walk-just-expired', scheduledAt, walkType: { durationMinutes } };
-      mockSixPasses({ notStarted1: [justExpired] });
+    it('dentro de la tolerancia (una corrida de cron perdida) el aviso SÍ se manda', async () => {
+      // minutesAfter=5 + tolerancia=10 = 15 min de margen total. A los 12
+      // min todavía entra.
+      mockRealWhereFilter({ id: 'walk-fresh', scheduledAt: new Date(Date.now() - 12 * 60 * 1000) });
 
       await service.sendReminders();
-      expect(notifications.create).not.toHaveBeenCalled();
 
-      jest.clearAllMocks();
-      prisma.notification.findMany.mockResolvedValue([]);
-      const aboutToExpire = {
-        ...justExpired,
-        id: 'walk-about-to-expire',
-        scheduledAt: new Date(Date.now() - (durationMinutes - 1) * 60_000), // fin esperado en 1 min
-      };
-      mockSixPasses({ notStarted1: [aboutToExpire] });
-
-      await service.sendReminders();
       expect(notifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { walkId: 'walk-about-to-expire' } }),
+        expect.objectContaining({ data: { walkId: 'walk-fresh' } }),
       );
     });
   });
@@ -338,14 +356,14 @@ describe('WalkRemindersService', () => {
   // ─── Ventana 4: techo explícito ──────────────────────────────────────────
 
   describe('take', () => {
-    it('las seis consultas piden take: 50', async () => {
+    it('las seis consultas piden take: 100', async () => {
       mockSixPasses({});
 
       await service.sendReminders();
 
       expect(prisma.walk.findMany).toHaveBeenCalledTimes(6);
       for (const call of prisma.walk.findMany.mock.calls) {
-        expect(call[0]).toEqual(expect.objectContaining({ take: 50 }));
+        expect(call[0]).toEqual(expect.objectContaining({ take: 100 }));
       }
     });
   });

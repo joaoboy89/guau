@@ -48,6 +48,38 @@ export const WALK_TIMING = {
   // exactamente las mismas dos chances de demorarse (5 y 10 min) que tiene
   // el paseador para marcar "en camino".
   NOT_STARTED_ALERT_2_MIN_AFTER: 10,
+  // Cota inferior (la UNICA) de WalkRemindersService.remindOwner — sesion
+  // 15: el aviso "¿todo bien?" habia quedado atado primero a la duracion
+  // del WalkType, el mismo reloj que usa WalkExpirationService para decidir
+  // si un paseo "ya se puede dar por muerto" — una pregunta distinta a la
+  // de este aviso, que es sobre el ENCUENTRO que no paso a horario, no
+  // sobre el paseo en si.
+  //
+  // No manda el aviso si el momento (scheduledAt + minutesAfter) ya paso
+  // hace mas de esto:
+  //  - Decision de producto (docs/guau-politicas.md §5): la pregunta
+  //    "¿todo bien?" tambien va a vivir en la pantalla del dueño, asi que
+  //    un ping tardio (el job estuvo caido y vuelve horas despues) no
+  //    suma, solo confunde — el momento ya paso.
+  //  - El valor cubre exactamente UNA corrida perdida del cron de 5
+  //    minutos (2 x 5min): mas que eso empieza a tolerar un job realmente
+  //    roto como si fuera normal, que no es la intencion.
+  //
+  // Por que alcanza con esta sola cota, sin un piso generico aparte: al
+  // vivir en minutos (no en horas), la ventana de la consulta ya queda
+  // acotada a minutos por diseño — nunca escanea historia vieja de la
+  // base. Sin NINGUNA cota inferior (el bug original), con backlog mayor a
+  // BATCH_SIZE y orden ascendente por scheduledAt, el lote se llena de
+  // paseos viejos y un candidato reciente legitimo se queda sin cupo — en
+  // silencio, sin error, sin log: el job informa "0 recordatorios" y nadie
+  // se entera. Hubo un piso generico de 13h agregado ademas de este, y se
+  // saco: 13h siempre es mas laxo que minutesAfter + esta tolerancia (a lo
+  // sumo ~25 minutos), asi que esa rama nunca podia ganar — y un limite
+  // que nunca se ejecuta pero sigue ahi es peor que no tenerlo, es una
+  // trampa: el dia que alguien suba este numero pensando que existe ese
+  // backstop de 13h, se encuentra con que lo recorta en silencio, sin
+  // ningun error que avise por que.
+  NOT_STARTED_ALERT_STALE_TOLERANCE_MIN: 10,
   // Bloque B — el boton del dueño "el paseador no se presento" se habilita
   // desde T+10m y NO vence (dura hasta que el paseo llegue a un estado
   // final): un boton para reportar un problema no necesita vencimiento, si

@@ -7,7 +7,12 @@ import { NOTIFICATION_TYPES, NotificationType, WALK_TIMING } from "@guau/shared"
 
 // Ventana 4: techo explicito por pase. Con la cadencia de 5 min, un
 // acumulado viejo se drena solo en vez de explotar en una sola corrida.
-const BATCH_SIZE = 50;
+// 100, no un numero mas grande "por las dudas": con las ventanas de tiempo
+// bien acotadas (ver el WHERE de remindOwner mas abajo) la cantidad real de
+// candidatos por pase es chica, y 100 es margen tranquilo para eso. Si
+// algun dia no alcanzan, la respuesta es paginar, no subir el numero de
+// vuelta — un techo mas alto corre el problema para adelante, no lo cierra.
+const BATCH_SIZE = 100;
 
 /**
  * Dos avisos por destinatario, cada uno UNA vez: al paseador antes de que
@@ -108,54 +113,49 @@ export class WalkRemindersService {
   }
 
   // ─── Al dueño: el paseo no llegó a IN_PROGRESS ──────────────────────────
-  // Ventana: paseos CONFIRMED/WALKER_ON_WAY que deberían haber arrancado
-  // hace `minutesAfter` minutos y siguen sin hacerlo — PERO solo mientras
-  // sigan dentro de su propia duración esperada (scheduledAt + duración del
-  // WalkType, todavía no pasada). Esa cota de arriba es la MISMA que usa
-  // WalkExpirationService.isPastExpectedEnd para decidir cuándo un
-  // CONFIRMED/WALKER_ON_WAY pasa a NOT_PERFORMED: un paseo deja de ser
-  // candidato de este aviso en el mismo instante en que ese servicio lo
-  // marcaría vencido. Más allá de ese punto "¿todo bien?" ya no es la
-  // pregunta correcta — si el paseo sigue en este estado pasado su propio
-  // fin esperado, es porque el job de vencimiento está atrasado o caído,
-  // no porque siga "por arrancar" con normalidad. No es un número
-  // inventado: es la duración real de CADA paseo, la misma que ya usa el
-  // job de vencimiento — no un techo genérico que sirva mal a un paseo de
-  // 30 minutos y mal al revés a uno de varias horas.
+  // Ventana: paseos CONFIRMED/WALKER_ON_WAY cuyo horario de encuentro
+  // (scheduledAt) ya pasó hace entre `minutesAfter` minutos y el piso de
+  // abajo. La pregunta de este aviso ("¿todo bien?") es sobre el ENCUENTRO
+  // que no pasó a horario — no sobre el paseo que no se hizo — así que el
+  // reloj que le corresponde es la hora pactada, nunca la duración del
+  // WalkType. Una versión anterior de este método ataba la cota a
+  // `scheduledAt + walkType.durationMinutes`, copiando el criterio de
+  // WalkExpirationService.isPastExpectedEnd — el reloj equivocado: ese
+  // cálculo contesta "¿este paseo ya se puede dar por muerto?", una
+  // pregunta distinta con un reloj distinto. Que el paseo dure 30 minutos o
+  // 4 horas no cambia en nada cuándo corresponde preguntar si el dueño
+  // sigue esperando en la puerta.
   //
-  // El WHERE de abajo (`lte: threshold`) es apenas el filtro barato del
-  // índice — sin la duración del WalkType ahí (Prisma no puede comparar
-  // `scheduledAt + walkType.durationMinutes` contra `now` sin SQL crudo),
-  // no alcanza para expresar la cota real. La cota real se aplica en
-  // memoria, mismo criterio que remindClose: la ventana de tiempo exacta no
-  // se le confía solo al WHERE. Sin esta cota, un paseo de hace dos meses
-  // (backlog viejo por un job caído, o un dump de producción cargado en
-  // otro ambiente) calificaba igual que uno de hace seis minutos — el bug
-  // real que este fix cierra.
+  // Cota inferior — la única (ver el comentario de la constante en
+  // @guau/shared para el porqué no hace falta un piso genérico aparte):
+  // NOT_STARTED_ALERT_STALE_TOLERANCE_MIN, decisión de producto
+  // (politicas.md §5) — no manda el aviso si el momento ya pasó hace más de
+  // lo que una corrida perdida del cron puede explicar. La pregunta "¿todo
+  // bien?" también va a vivir en la pantalla del dueño, así que un ping
+  // tardío (job caído que vuelve horas después) no suma, confunde. Al vivir
+  // en minutos, esta cota ya deja la ventana de la consulta acotada a
+  // minutos — nunca escanea historia vieja de la base.
 
   private async remindOwner(now: Date, minutesAfter: number, type: NotificationType): Promise<number> {
     const threshold = new Date(now.getTime() - minutesAfter * 60_000);
+    const gte = new Date(
+      now.getTime() - (minutesAfter + WALK_TIMING.NOT_STARTED_ALERT_STALE_TOLERANCE_MIN) * 60_000,
+    );
+
     const candidates = await this.prisma.walk.findMany({
       where: {
         status: { in: [WalkStatus.CONFIRMED, WalkStatus.WALKER_ON_WAY] },
-        scheduledAt: { lte: threshold },
+        scheduledAt: { gte, lte: threshold },
       },
       select: {
         id: true,
-        scheduledAt: true,
-        walkType: { select: { durationMinutes: true } },
         participants: { select: { owner: { select: { user: { select: { id: true } } } } }, take: 1 },
       },
       orderBy: { scheduledAt: "asc" },
       take: BATCH_SIZE,
     });
 
-    const notYetExpired = candidates.filter((walk) => {
-      const expectedEnd = walk.scheduledAt.getTime() + walk.walkType.durationMinutes * 60_000;
-      return now.getTime() < expectedEnd;
-    });
-
-    const pending = await this.filterAlreadyNotified(type, notYetExpired);
+    const pending = await this.filterAlreadyNotified(type, candidates);
 
     let sent = 0;
     for (const walk of pending) {
