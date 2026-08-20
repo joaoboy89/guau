@@ -63,11 +63,25 @@ export class WalkRemindersService {
   }
 
   // ─── Al paseador: "voy en camino" nunca apretado ────────────────────────
+  // Ventana: paseos que arrancan entre AHORA y los próximos `minutesBefore`
+  // minutos — scheduledAt en [now, threshold]. La cota inferior (`gte:
+  // now`) es la que faltaba hasta esta versión: el WHERE solo tenía
+  // `lte: threshold`, que en los hechos decía "todo paseo anterior a
+  // dentro de X minutos" — TODO el pasado incluido, no solo lo que falta
+  // por arrancar. Es el bug real que este fix cierra: la primera corrida en
+  // producción mandó 9 recordatorios con un solo paseo futuro en la base,
+  // todos por paseos CONFIRMED viejos que este `gte` ahora excluye. Un
+  // paseo cuyo horario ya pasó no es candidato de este aviso — ese caso lo
+  // cubre remindOwner, más abajo. La cota vive entera en el WHERE (no hace
+  // falta un filtro en memoria como en remindOwner): no necesita ningún
+  // dato extra —a diferencia de la ventana de remindOwner, que depende de
+  // la duración del WalkType— así que Prisma la resuelve sola, sin
+  // fetchear de más.
 
   private async remindWalker(now: Date, minutesBefore: number, type: NotificationType): Promise<number> {
     const threshold = new Date(now.getTime() + minutesBefore * 60_000);
     const candidates = await this.prisma.walk.findMany({
-      where: { status: WalkStatus.CONFIRMED, onWayAt: null, scheduledAt: { lte: threshold } },
+      where: { status: WalkStatus.CONFIRMED, onWayAt: null, scheduledAt: { gte: now, lte: threshold } },
       select: {
         id: true,
         scheduledAt: true,
@@ -94,6 +108,30 @@ export class WalkRemindersService {
   }
 
   // ─── Al dueño: el paseo no llegó a IN_PROGRESS ──────────────────────────
+  // Ventana: paseos CONFIRMED/WALKER_ON_WAY que deberían haber arrancado
+  // hace `minutesAfter` minutos y siguen sin hacerlo — PERO solo mientras
+  // sigan dentro de su propia duración esperada (scheduledAt + duración del
+  // WalkType, todavía no pasada). Esa cota de arriba es la MISMA que usa
+  // WalkExpirationService.isPastExpectedEnd para decidir cuándo un
+  // CONFIRMED/WALKER_ON_WAY pasa a NOT_PERFORMED: un paseo deja de ser
+  // candidato de este aviso en el mismo instante en que ese servicio lo
+  // marcaría vencido. Más allá de ese punto "¿todo bien?" ya no es la
+  // pregunta correcta — si el paseo sigue en este estado pasado su propio
+  // fin esperado, es porque el job de vencimiento está atrasado o caído,
+  // no porque siga "por arrancar" con normalidad. No es un número
+  // inventado: es la duración real de CADA paseo, la misma que ya usa el
+  // job de vencimiento — no un techo genérico que sirva mal a un paseo de
+  // 30 minutos y mal al revés a uno de varias horas.
+  //
+  // El WHERE de abajo (`lte: threshold`) es apenas el filtro barato del
+  // índice — sin la duración del WalkType ahí (Prisma no puede comparar
+  // `scheduledAt + walkType.durationMinutes` contra `now` sin SQL crudo),
+  // no alcanza para expresar la cota real. La cota real se aplica en
+  // memoria, mismo criterio que remindClose: la ventana de tiempo exacta no
+  // se le confía solo al WHERE. Sin esta cota, un paseo de hace dos meses
+  // (backlog viejo por un job caído, o un dump de producción cargado en
+  // otro ambiente) calificaba igual que uno de hace seis minutos — el bug
+  // real que este fix cierra.
 
   private async remindOwner(now: Date, minutesAfter: number, type: NotificationType): Promise<number> {
     const threshold = new Date(now.getTime() - minutesAfter * 60_000);
@@ -104,13 +142,20 @@ export class WalkRemindersService {
       },
       select: {
         id: true,
+        scheduledAt: true,
+        walkType: { select: { durationMinutes: true } },
         participants: { select: { owner: { select: { user: { select: { id: true } } } } }, take: 1 },
       },
       orderBy: { scheduledAt: "asc" },
       take: BATCH_SIZE,
     });
 
-    const pending = await this.filterAlreadyNotified(type, candidates);
+    const notYetExpired = candidates.filter((walk) => {
+      const expectedEnd = walk.scheduledAt.getTime() + walk.walkType.durationMinutes * 60_000;
+      return now.getTime() < expectedEnd;
+    });
+
+    const pending = await this.filterAlreadyNotified(type, notYetExpired);
 
     let sent = 0;
     for (const walk of pending) {
