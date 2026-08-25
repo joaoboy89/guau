@@ -151,6 +151,13 @@ export const START_WITHOUT_CODE_OTHER_MAX_LENGTH = 200;
 
 export const MAX_DOGS_PER_GROUP_WALK = 6;
 
+// Salida de soporte provisoria. Se reemplaza por el chat interno cuando
+// exista el front del modulo `chat` (backend completo, front en cero). No es
+// variable de entorno: no cambia entre ambientes, no es secreto, y como
+// NEXT_PUBLIC_* quedaria horneada en el bundle igual — una constante
+// compartida hace lo mismo con menos piezas.
+export const SUPPORT_EMAIL = "soporte@jbsaasapp.com";
+
 export const SOCKET_EVENTS = {
   WALK_JOIN: "walk:join",
   WALK_LEAVE: "walk:leave",
@@ -195,9 +202,35 @@ export const NOTIFICATION_TYPES = {
   WALK_CLOSE_REMINDER_1_OWNER:  "walk_close_reminder_1_owner",
   WALK_CLOSE_REMINDER_2_WALKER: "walk_close_reminder_2_walker",
   WALK_CLOSE_REMINDER_2_OWNER:  "walk_close_reminder_2_owner",
+  // Cierre del bloque D1 (docs/guau-politicas.md §3/§5) — las dos van al
+  // dueño, una por paseo, nunca una por perro (un paseo tiene un solo
+  // dueño; ver el comentario del punto 0 en walks.service.ts).
+  WALK_PICKUP_CODE_EXHAUSTED: "walk_pickup_code_exhausted",
+  WALK_STARTED_NO_CODE:       "walk_started_no_code",
 } as const;
 
 export type NotificationType = typeof NOTIFICATION_TYPES[keyof typeof NOTIFICATION_TYPES];
+
+// GET /walks/pending-questions (cierre del bloque D1, guau-politicas.md §5)
+// — cosas que el dueño tiene pendiente de responder, no un historial. Un
+// solo tipo hoy; el campo `type` existe para que un segundo tipo entre sin
+// romper el contrato, no para abstraer por adelantado un motor genérico.
+export const PENDING_QUESTION_TYPES = {
+  NO_CODE_START: "NO_CODE_START",
+} as const;
+
+export type PendingQuestionType = typeof PENDING_QUESTION_TYPES[keyof typeof PENDING_QUESTION_TYPES];
+
+export interface PendingQuestion {
+  walkId: string;
+  type: PendingQuestionType;
+  // Decide el estado A/B del cartel: IN_PROGRESS (paseo en curso) o
+  // COMPLETED (ya cerrado, la pregunta sigue viva igual).
+  status: "IN_PROGRESS" | "COMPLETED";
+  dogsLabel: string;
+  startVerifyReason: string;
+  endedAt: string | null;
+}
 
 export const CONTACT_PATTERNS = [
   /\b\d{10,11}\b/,
