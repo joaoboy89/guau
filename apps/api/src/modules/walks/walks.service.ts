@@ -587,8 +587,11 @@ export class WalksService {
     // dueño CÓMO arrancó y lleva la acción de conformidad del cartel del
     // dashboard.
     if (verification.startVerification === StartVerification.NONE) {
+      // No debería ser null nunca acá (resolveStartVerification siempre lo
+      // setea junto con NONE) — mismo criterio que pendingQuestions(): un
+      // fallback en vez de `!`, para no comerse el caso si alguna vez lo es.
       void this.notificationsService
-        ?.notifyStartedWithoutCode(walkId, verification.startVerifyReason!)
+        ?.notifyStartedWithoutCode(walkId, verification.startVerifyReason ?? "motivo no registrado")
         .catch((err) => this.logger.warn(`No se pudo notificar el inicio sin codigo: ${err}`));
     }
 
