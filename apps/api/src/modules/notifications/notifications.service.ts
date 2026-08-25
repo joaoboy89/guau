@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from "@nestjs/commo
 import { PrismaService } from "../../database/prisma.service";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { WalkStatus, Prisma } from "@prisma/client";
-import { NOTIFICATION_TYPES, NotificationType } from "@guau/shared";
+import { NOTIFICATION_TYPES, NotificationType, formatDogsLabel } from "@guau/shared";
 
 interface CreateNotificationData {
   userId: string;
@@ -210,5 +210,75 @@ export class NotificationsService {
     }
 
     await Promise.all(promises);
+  }
+
+  // ─── Cierre del bloque D1 — avisos al dueño ─────────────
+  // Un paseo tiene UN solo dueño (el "grupal" del Mode es que el paseador
+  // lleva varios paseos a la vez, no que un paseo tenga varios dueños — ver
+  // el comentario del punto 0 en walks.service.ts). Las dos notificaciones
+  // de acá son UNA por paseo, nunca una por perro: se lee el owner de
+  // cualquiera de los participantes (todos comparten el mismo) y se junta
+  // el nombre de los perros para el texto.
+
+  private async loadOwnerAndDogs(walkId: string) {
+    const walk = await this.prisma.walk.findUnique({
+      where: { id: walkId },
+      select: {
+        participants: {
+          select: {
+            owner: { select: { user: { select: { id: true } } } },
+            dog: { select: { name: true } },
+          },
+        },
+      },
+    });
+    if (!walk || walk.participants.length === 0) return null;
+
+    return {
+      ownerUserId: walk.participants[0].owner.user.id,
+      dogsLabel: formatDogsLabel(walk.participants.map((p) => p.dog.name)),
+    };
+  }
+
+  // Dispara UNA sola vez por paseo: el llamador (verifyPickupCode, en
+  // walks.service.ts) solo la invoca en el momento exacto en que el
+  // contador de intentos cruza el tope, no en cada intento posterior ya
+  // bloqueado — así que no hace falta un guard de idempotencia acá.
+  //
+  // El mensaje no acusa a nadie ni menciona un número de intentos (CLAUDE.md
+  // + decisión de Joa): la causa más común es que el dueño pasó mal el
+  // código, y un número escrito a mano miente el día que PICKUP_CODE.
+  // MAX_ATTEMPTS cambie.
+  async notifyPickupCodeExhausted(walkId: string) {
+    const info = await this.loadOwnerAndDogs(walkId);
+    if (!info) return;
+
+    await this.create({
+      userId: info.ownerUserId,
+      title:  "No se pudo validar el código",
+      body:   "El paseador probó demasiadas veces el código sin acertar. Lo más común es que se " +
+              "haya pasado mal — confirmáselo por otro medio, o dejalo iniciar el paseo sin código.",
+      type:   NOTIFICATION_TYPES.WALK_PICKUP_CODE_EXHAUSTED,
+      data:   { walkId },
+    });
+  }
+
+  // Dispara desde start(), solo cuando startVerification resuelve NONE. Esta
+  // es la notificación que el cartel del dashboard (dueño) usa como fuente
+  // de "hay algo pendiente de responder" — igual el cartel no lee esta
+  // notificación en sí, lee GET /walks/pending-questions (whitelist propia)
+  // para no depender del historial de notificaciones ya leídas/borradas.
+  async notifyStartedWithoutCode(walkId: string, startVerifyReason: string) {
+    const info = await this.loadOwnerAndDogs(walkId);
+    if (!info) return;
+
+    await this.create({
+      userId: info.ownerUserId,
+      title:  "El paseo empezó sin código",
+      body:   `El paseador inició el paseo de ${info.dogsLabel} sin validar el código. Declaró: ` +
+              `"${startVerifyReason}". Entrá para confirmar que está todo bien.`,
+      type:   NOTIFICATION_TYPES.WALK_STARTED_NO_CODE,
+      data:   { walkId },
+    });
   }
 }

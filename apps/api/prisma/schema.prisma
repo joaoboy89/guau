@@ -264,6 +264,17 @@ model Walk {
   // el texto libre de "otro"), guardado en start(). Es el dato del que
   // cuelga la resolucion de disputas para ese camino — ver politicas.md.
   startVerifyReason  String?
+  // Cierre del bloque D1 (guau-politicas.md §5): el dueño confirma que un
+  // arranque sin codigo esta bien. Va en Walk, no en WalkParticipant — un
+  // paseo tiene UN solo dueño (el "grupal" es que el paseador lleva varios
+  // paseos a la vez, no que un paseo tenga varios dueños; ver el comentario
+  // en walks.service.ts sobre este invariante). Nullable, sin default:
+  // null significa "no se expreso todavia", nunca "esta en desacuerdo" — si
+  // el dia de mañana hace falta registrar un desacuerdo explicito, es otro
+  // campo, no este puesto en false. Idempotente en la escritura (primera
+  // gana, ver acknowledgeNoCode en walks.service.ts): pisar la marca en un
+  // reintento le haria perder valor de evidencia al timestamp.
+  ownerAcknowledgedNoCodeAt DateTime?
   pickupLat          Float
   pickupLng          Float
   pickupAddress      String

@@ -52,6 +52,18 @@ export class WalksController {
     return this.walks.findMyWalks(user.id, user.role, query);
   }
 
+  // ─── Preguntas pendientes del dueño (cartel del dashboard) ─
+  // ANTES de ":id" — Nest matchea rutas en orden y "pending-questions"
+  // calzaría como :id si esta ruta fuera declarada después.
+
+  @Get("pending-questions")
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER)
+  @ApiOperation({ summary: "Paseos con algo pendiente de responder (cartel del dashboard)" })
+  pendingQuestions(@CurrentUser() user: AuthUser) {
+    return this.walks.pendingQuestions(user.id);
+  }
+
   // ─── Detalle ─────────────────────────────────────────────
 
   @Get(":id")
@@ -154,5 +166,17 @@ export class WalksController {
   })
   confirmReceipt(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.walks.confirmReceipt(user.id, id);
+  }
+
+  @Put(":id/acknowledge-no-code")
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Dueño confirma que un paseo que arrancó sin código está todo bien. Idempotente, primera gana.",
+  })
+  acknowledgeNoCode(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.walks.acknowledgeNoCode(user.id, id);
   }
 }

@@ -176,4 +176,87 @@ describe('NotificationsService', () => {
       expect(prisma.notification.create).toHaveBeenCalledTimes(2);
     });
   });
+
+  // ─── Cierre del bloque D1 — UNA notificación por paseo, no por perro ──────
+  // Un paseo tiene un solo dueño (varios perros suyos, nunca perros de
+  // dueños distintos) — ver el comentario del punto 0 en walks.service.ts.
+  // Estos tests son la prueba de esa regla: un dueño con 3 perros en el
+  // mismo paseo tiene que recibir UNA sola notificación, no tres.
+
+  const OWNER_MULTI_DOG_ROW = {
+    participants: [
+      { owner: { user: { id: 'owner-user-1' } }, dog: { name: 'Lolo' } },
+      { owner: { user: { id: 'owner-user-1' } }, dog: { name: 'Mota' } },
+      { owner: { user: { id: 'owner-user-1' } }, dog: { name: 'Rocky' } },
+    ],
+  };
+
+  describe('notifyPickupCodeExhausted()', () => {
+    it('si el walk no existe (o no tiene participantes), no crea notificación', async () => {
+      prisma.walk.findUnique.mockResolvedValue(null);
+      await service.notifyPickupCodeExhausted('walk-1');
+      expect(prisma.notification.create).not.toHaveBeenCalled();
+    });
+
+    it('crea UNA sola notificación al dueño, aunque el paseo tenga varios perros suyos', async () => {
+      prisma.walk.findUnique.mockResolvedValue(OWNER_MULTI_DOG_ROW);
+      prisma.notification.create.mockResolvedValue({ id: 'n' });
+
+      await service.notifyPickupCodeExhausted('walk-1');
+
+      expect(prisma.notification.create).toHaveBeenCalledTimes(1);
+      expect(prisma.notification.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'owner-user-1',
+            type:   NOTIFICATION_TYPES.WALK_PICKUP_CODE_EXHAUSTED,
+            data:   { walkId: 'walk-1' },
+          }),
+        }),
+      );
+    });
+
+    it('el texto no menciona un número de intentos ni acusa a nadie', async () => {
+      prisma.walk.findUnique.mockResolvedValue(OWNER_MULTI_DOG_ROW);
+      prisma.notification.create.mockResolvedValue({ id: 'n' });
+
+      await service.notifyPickupCodeExhausted('walk-1');
+
+      const callData = prisma.notification.create.mock.calls[0][0].data;
+      expect(callData.body).not.toMatch(/\d+\s*(veces|intentos)/i);
+      expect(callData.body).not.toMatch(/sospech|fraude/i);
+    });
+  });
+
+  describe('notifyStartedWithoutCode()', () => {
+    it('si el walk no existe (o no tiene participantes), no crea notificación', async () => {
+      prisma.walk.findUnique.mockResolvedValue(null);
+      await service.notifyStartedWithoutCode('walk-1', 'El dueño no tenía el código a mano');
+      expect(prisma.notification.create).not.toHaveBeenCalled();
+    });
+
+    it('crea UNA sola notificación al dueño con el motivo declarado', async () => {
+      prisma.walk.findUnique.mockResolvedValue(OWNER_MULTI_DOG_ROW);
+      prisma.notification.create.mockResolvedValue({ id: 'n' });
+
+      await service.notifyStartedWithoutCode('walk-1', 'El dueño no tenía el código a mano');
+
+      expect(prisma.notification.create).toHaveBeenCalledTimes(1);
+      const callData = prisma.notification.create.mock.calls[0][0].data;
+      expect(callData.userId).toBe('owner-user-1');
+      expect(callData.type).toBe(NOTIFICATION_TYPES.WALK_STARTED_NO_CODE);
+      expect(callData.data).toEqual({ walkId: 'walk-1' });
+      expect(callData.body).toContain('El dueño no tenía el código a mano');
+    });
+
+    it('junta el nombre de los perros del paseo en el cuerpo (Lolo y 2 más)', async () => {
+      prisma.walk.findUnique.mockResolvedValue(OWNER_MULTI_DOG_ROW);
+      prisma.notification.create.mockResolvedValue({ id: 'n' });
+
+      await service.notifyStartedWithoutCode('walk-1', 'motivo');
+
+      const callData = prisma.notification.create.mock.calls[0][0].data;
+      expect(callData.body).toContain('Lolo y 2 más');
+    });
+  });
 });

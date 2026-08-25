@@ -36,12 +36,15 @@ import {
   PICKUP_CODE,
   START_WITHOUT_CODE_REASON,
   START_WITHOUT_CODE_REASON_LABEL,
+  PENDING_QUESTION_TYPES,
+  formatDogsLabel,
   canMarkOnWay,
   canStart,
   canFinish,
   canReportWalkerNoShow,
   expectedEndAt,
   approximatePickupPoint,
+  type PendingQuestion,
 } from "@guau/shared";
 
 // Incluye las relaciones que siempre se devuelven con un Walk
@@ -560,9 +563,21 @@ export class WalksService {
     const lateThreshold = walk.scheduledAt.getTime() + WALK_TIMING.START_LATE_THRESHOLD_MIN_AFTER * 60_000;
     const startedLate = startedAt.getTime() > lateThreshold;
 
-    return this.updateStatus(
+    const updated = await this.updateStatus(
       walkId, WalkStatus.IN_PROGRESS, { startedAt, startedLate, ...verification }, /* isWalkerView */ true,
     );
+
+    // Aparte del aviso genérico de "el paseo comenzó" (notifyWalkStatusChange
+    // más arriba, disparado por updateStatus): este es el que le dice al
+    // dueño CÓMO arrancó y lleva la acción de conformidad del cartel del
+    // dashboard.
+    if (verification.startVerification === StartVerification.NONE) {
+      void this.notificationsService
+        ?.notifyStartedWithoutCode(walkId, verification.startVerifyReason!)
+        .catch((err) => this.logger.warn(`No se pudo notificar el inicio sin codigo: ${err}`));
+    }
+
+    return updated;
   }
 
   // ─── Finalizar paseo (paseador) ──────────────────────────
@@ -765,6 +780,90 @@ export class WalksService {
     return updated;
   }
 
+  // ─── Conformidad sobre un inicio sin código (dueño) ──────
+  // Cierre del bloque D1 (guau-politicas.md §5): convierte "arrancó sin
+  // código" de la palabra de una sola parte (el paseador) en un hecho que el
+  // dueño vio y aceptó. Alimenta el cartel de GET /walks/pending-questions.
+
+  async acknowledgeNoCode(userId: string, walkId: string) {
+    const walk = await this.prisma.walk.findUnique({
+      where: { id: walkId },
+      select: {
+        id: true,
+        startVerification: true,
+        ownerAcknowledgedNoCodeAt: true,
+        // Comparar owner.userId directo contra el userId del token evita
+        // una consulta aparte a OwnerProfile — con esto alcanza para saber
+        // si quien pregunta es el dueño de ESTE paseo. Como efecto: un
+        // paseador nunca puede darse conformidad a sí mismo, porque su
+        // userId nunca va a aparecer acá (el rol ya lo bloquea antes en el
+        // controller — esto es la segunda capa, a nivel de datos).
+        participants: { select: { owner: { select: { userId: true } } } },
+      },
+    });
+    if (!walk) throw new NotFoundException("Paseo no encontrado");
+
+    const isOwner = walk.participants.some((p) => p.owner.userId === userId);
+    if (!isOwner) throw new ForbiddenException("No tenés acceso a este paseo");
+
+    // No hay nada que aceptar si arrancó con código, o si todavía no
+    // arrancó (startVerification sigue null) — falla cerrado en vez de
+    // dejar confirmar algo que no ocurrió.
+    if (walk.startVerification !== StartVerification.NONE) {
+      throw new BadRequestException(
+        "Este paseo no tiene nada pendiente de confirmar sobre el código de retiro.",
+      );
+    }
+
+    // Idempotente, primera gana: es un timestamp de valor evidencial ("el
+    // dueño lo dio por bueno a las 14:07") — un reintento (doble tap, retry
+    // de red) que lo pisara con una hora distinta le arruinaría ese valor.
+    if (walk.ownerAcknowledgedNoCodeAt) {
+      return { id: walk.id, ownerAcknowledgedNoCodeAt: walk.ownerAcknowledgedNoCodeAt };
+    }
+
+    return this.prisma.walk.update({
+      where: { id: walkId },
+      data: { ownerAcknowledgedNoCodeAt: new Date() },
+      select: { id: true, ownerAcknowledgedNoCodeAt: true },
+    });
+  }
+
+  // ─── Preguntas pendientes del dueño (cartel del dashboard) ─
+  // Una sola query: el filtro por dueño va DENTRO del where (participants.
+  // some.owner.userId), nunca después en memoria — así "solo ve lo suyo" lo
+  // garantiza la base, no el código de arriba. take fijo: es una lista como
+  // cualquier otra, sin excepción por ser corta en la práctica.
+
+  async pendingQuestions(userId: string): Promise<PendingQuestion[]> {
+    const walks = await this.prisma.walk.findMany({
+      where: {
+        participants: { some: { owner: { userId } } },
+        status: { in: [WalkStatus.IN_PROGRESS, WalkStatus.COMPLETED] },
+        startVerification: StartVerification.NONE,
+        ownerAcknowledgedNoCodeAt: null,
+      },
+      select: {
+        id: true,
+        status: true,
+        startVerifyReason: true,
+        endedAt: true,
+        participants: { select: { dog: { select: { name: true } } } },
+      },
+      orderBy: { scheduledAt: "desc" },
+      take: 50,
+    });
+
+    return walks.map((w) => ({
+      walkId: w.id,
+      type: PENDING_QUESTION_TYPES.NO_CODE_START,
+      status: w.status as "IN_PROGRESS" | "COMPLETED",
+      dogsLabel: formatDogsLabel(w.participants.map((p) => p.dog.name)),
+      startVerifyReason: w.startVerifyReason!,
+      endedAt: w.endedAt ? w.endedAt.toISOString() : null,
+    }));
+  }
+
   // ─── Ruta GPS ────────────────────────────────────────────
 
   async getLocations(userId: string, role: string, walkId: string) {
@@ -916,6 +1015,13 @@ export class WalksService {
 
     const remaining = PICKUP_CODE.MAX_ATTEMPTS - updated.pickupCodeAttempts;
     if (remaining <= 0) {
+      // Único punto donde el contador CRUZA el tope — no se repite en
+      // intentos posteriores (esos entran por el guard de arriba, antes de
+      // incrementar), así que el dueño recibe este aviso una sola vez.
+      void this.notificationsService
+        ?.notifyPickupCodeExhausted(walk.id)
+        .catch((err) => this.logger.warn(`No se pudo notificar el agotamiento de intentos: ${err}`));
+
       throw new BadRequestException(
         "Código incorrecto. Superaste el límite de intentos — iniciá el paseo sin código e indicá el motivo.",
       );

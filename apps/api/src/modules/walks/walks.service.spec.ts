@@ -186,7 +186,10 @@ describe('WalksService', () => {
   let prisma:                ReturnType<typeof buildPrismaMock>;
   let trackingGateway:       { emitStatusChanged: jest.Mock };
   let chatService:           { ensureConversationForWalk: jest.Mock };
-  let notificationsService:  { notifyWalkStatusChange: jest.Mock; notifyNewWalkRequest: jest.Mock; create: jest.Mock };
+  let notificationsService:  {
+    notifyWalkStatusChange: jest.Mock; notifyNewWalkRequest: jest.Mock; create: jest.Mock;
+    notifyPickupCodeExhausted: jest.Mock; notifyStartedWithoutCode: jest.Mock;
+  };
   let mail:                  { sendNotPerformedAlert: jest.Mock };
 
   beforeEach(async () => {
@@ -199,9 +202,11 @@ describe('WalksService', () => {
     trackingGateway      = { emitStatusChanged: jest.fn() };
     chatService          = { ensureConversationForWalk: jest.fn().mockResolvedValue({}) };
     notificationsService = {
-      notifyWalkStatusChange: jest.fn().mockResolvedValue({}),
-      notifyNewWalkRequest:   jest.fn().mockResolvedValue({}),
-      create:                 jest.fn().mockResolvedValue({}),
+      notifyWalkStatusChange:    jest.fn().mockResolvedValue({}),
+      notifyNewWalkRequest:      jest.fn().mockResolvedValue({}),
+      create:                    jest.fn().mockResolvedValue({}),
+      notifyPickupCodeExhausted: jest.fn().mockResolvedValue({}),
+      notifyStartedWithoutCode:  jest.fn().mockResolvedValue({}),
     };
     mail = { sendNotPerformedAlert: jest.fn() };
 
@@ -351,6 +356,23 @@ describe('WalksService', () => {
       // dto.dogIds.length = 1 pero findMany devuelve 0 perros → mismatch
       prisma.dog.findMany.mockResolvedValue([]);
       await expect(service.create(OWNER_USER_ID, CREATE_DTO)).rejects.toThrow(BadRequestException);
+    });
+
+    // Control de acceso sin cobertura hasta ahora: los tests de arriba y de
+    // abajo mockean dog.findMany con el array que quieren y nunca miran CON
+    // QUÉ where se lo llamó — así que un refactor que se olvide de
+    // `ownerId: owner.id` en la query (dejando reservar con el perro de
+    // OTRO dueño) seguiría pasando todos esos tests igual. Este es el que
+    // lo hubiera cazado: verifica el contrato de la consulta, no solo la
+    // rama de respuesta.
+    it('la query de perros se acota al dueño que pide la reserva (ownerId en el where) — nunca trae perros de otro', async () => {
+      setupCreateMocks();
+
+      await service.create(OWNER_USER_ID, CREATE_DTO);
+
+      expect(prisma.dog.findMany).toHaveBeenCalledWith({
+        where: { id: { in: CREATE_DTO.dogIds }, ownerId: OWNER_PROFILE_ID, isActive: true },
+      });
     });
 
     it('lanza NotFoundException si el walkType no existe', async () => {
@@ -1438,6 +1460,39 @@ describe('WalksService', () => {
         // Ni siquiera llega a comparar el código — el límite corta antes,
         // así que tampoco escribe pickupCodeAttempts de nuevo.
         expect(prisma.walk.update).not.toHaveBeenCalled();
+        // Ni notifica de nuevo: el aviso es de cuando el contador CRUZA el
+        // tope, no de cada intento posterior ya bloqueado.
+        expect(notificationsService.notifyPickupCodeExhausted).not.toHaveBeenCalled();
+      });
+
+      it('el 5to intento fallido (el que agota el límite) notifica al dueño una sola vez', async () => {
+        setupWalkOnWay(PICKUP_CODE.MAX_ATTEMPTS - 1); // a un intento fallido del tope
+        prisma.walk.update.mockResolvedValue({ pickupCodeAttempts: PICKUP_CODE.MAX_ATTEMPTS });
+
+        await expect(service.start(WALKER_USER_ID, WALK_ID, { pickupCode: '0000' }))
+          .rejects.toThrow(BadRequestException);
+
+        expect(notificationsService.notifyPickupCodeExhausted).toHaveBeenCalledTimes(1);
+        expect(notificationsService.notifyPickupCodeExhausted).toHaveBeenCalledWith(WALK_ID);
+      });
+
+      it('un intento fallido que todavía deja intentos disponibles NO notifica', async () => {
+        setupWalkOnWay(0);
+        prisma.walk.update.mockResolvedValue({ pickupCodeAttempts: 1 });
+
+        await expect(service.start(WALKER_USER_ID, WALK_ID, { pickupCode: '0000' }))
+          .rejects.toThrow(BadRequestException);
+
+        expect(notificationsService.notifyPickupCodeExhausted).not.toHaveBeenCalled();
+      });
+
+      it('código correcto: NO dispara la notificación de "arrancó sin código" (ese es otro camino)', async () => {
+        setupWalkOnWay(0);
+        prisma.walk.update.mockResolvedValue({ ...WALK_FULL, status: WalkStatus.IN_PROGRESS });
+
+        await service.start(WALKER_USER_ID, WALK_ID, { pickupCode: TEST_PICKUP_CODE });
+
+        expect(notificationsService.notifyStartedWithoutCode).not.toHaveBeenCalled();
       });
     });
 
@@ -1471,6 +1526,19 @@ describe('WalksService', () => {
         );
       });
 
+      it('motivo predefinido: notifica al dueño que arrancó sin código, con la etiqueta legible', async () => {
+        setupWalkOnWay();
+
+        await service.start(
+          WALKER_USER_ID, WALK_ID, { reason: START_WITHOUT_CODE_REASON.BUILDING_STAFF },
+        );
+
+        expect(notificationsService.notifyStartedWithoutCode).toHaveBeenCalledTimes(1);
+        expect(notificationsService.notifyStartedWithoutCode).toHaveBeenCalledWith(
+          WALK_ID, START_WITHOUT_CODE_REASON_LABEL.BUILDING_STAFF,
+        );
+      });
+
       it('motivo "otro": guarda el texto libre tal cual', async () => {
         setupWalkOnWay();
 
@@ -1487,6 +1555,10 @@ describe('WalksService', () => {
               startVerifyReason: 'Me lo dejó el kiosquero de la esquina',
             }),
           }),
+        );
+        // La notificación lleva el mismo texto libre, no la re-mapea.
+        expect(notificationsService.notifyStartedWithoutCode).toHaveBeenCalledWith(
+          WALK_ID, 'Me lo dejó el kiosquero de la esquina',
         );
       });
 
@@ -1932,6 +2004,130 @@ describe('WalksService', () => {
       expect(prisma.walk.update).toHaveBeenLastCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ endedLate: true }) }),
       );
+    });
+  });
+
+  // ─── Conformidad sobre un inicio sin código (cierre del bloque D1) ──────
+
+  describe('acknowledgeNoCode()', () => {
+    const ACK_WALK = {
+      id: WALK_ID,
+      startVerification: StartVerification.NONE as StartVerification | null,
+      ownerAcknowledgedNoCodeAt: null as Date | null,
+      participants: [{ owner: { userId: OWNER_USER_ID } }],
+    };
+
+    it('NotFoundException si el walk no existe', async () => {
+      prisma.walk.findUnique.mockResolvedValue(null);
+      await expect(service.acknowledgeNoCode(OWNER_USER_ID, WALK_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('ForbiddenException si quien pregunta no es el dueño de este paseo', async () => {
+      prisma.walk.findUnique.mockResolvedValue(ACK_WALK);
+      await expect(service.acknowledgeNoCode('otro-owner-user', WALK_ID)).rejects.toThrow(ForbiddenException);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('un paseador no puede darse conformidad a sí mismo — su userId nunca es owner.userId de este paseo', async () => {
+      prisma.walk.findUnique.mockResolvedValue(ACK_WALK);
+      await expect(service.acknowledgeNoCode(WALKER_USER_ID, WALK_ID)).rejects.toThrow(ForbiddenException);
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+    });
+
+    it('BadRequestException si el paseo arrancó CON código — no hay nada que confirmar', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...ACK_WALK, startVerification: StartVerification.CODE });
+      await expect(service.acknowledgeNoCode(OWNER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+    });
+
+    it('BadRequestException si el paseo todavía no arrancó (startVerification null)', async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...ACK_WALK, startVerification: null });
+      await expect(service.acknowledgeNoCode(OWNER_USER_ID, WALK_ID)).rejects.toThrow(BadRequestException);
+    });
+
+    it('camino feliz: escribe ownerAcknowledgedNoCodeAt y devuelve la whitelist mínima', async () => {
+      prisma.walk.findUnique.mockResolvedValue(ACK_WALK);
+      const now = new Date();
+      prisma.walk.update.mockResolvedValue({ id: WALK_ID, ownerAcknowledgedNoCodeAt: now });
+
+      const result = await service.acknowledgeNoCode(OWNER_USER_ID, WALK_ID);
+
+      expect(prisma.walk.update).toHaveBeenCalledWith({
+        where: { id: WALK_ID },
+        data: { ownerAcknowledgedNoCodeAt: expect.any(Date) },
+        select: { id: true, ownerAcknowledgedNoCodeAt: true },
+      });
+      expect(result).toEqual({ id: WALK_ID, ownerAcknowledgedNoCodeAt: now });
+    });
+
+    it('idempotente: si ya estaba confirmado, devuelve el valor existente SIN pisarlo (no escribe)', async () => {
+      const alreadyAt = new Date('2026-08-20T14:07:00.000Z');
+      prisma.walk.findUnique.mockResolvedValue({ ...ACK_WALK, ownerAcknowledgedNoCodeAt: alreadyAt });
+
+      const result = await service.acknowledgeNoCode(OWNER_USER_ID, WALK_ID);
+
+      expect(prisma.walk.update).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: WALK_ID, ownerAcknowledgedNoCodeAt: alreadyAt });
+    });
+  });
+
+  // ─── Cartel del dashboard: preguntas pendientes del dueño ───────────────
+
+  describe('pendingQuestions()', () => {
+    it('una sola query: dueño, estado y "sin confirmar" van todos en el where, no filtrados después', async () => {
+      prisma.walk.findMany.mockResolvedValue([]);
+
+      await service.pendingQuestions(OWNER_USER_ID);
+
+      expect(prisma.walk.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.walk.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            participants: { some: { owner: { userId: OWNER_USER_ID } } },
+            status: { in: [WalkStatus.IN_PROGRESS, WalkStatus.COMPLETED] },
+            startVerification: StartVerification.NONE,
+            ownerAcknowledgedNoCodeAt: null,
+          },
+          take: 50,
+        }),
+      );
+    });
+
+    it('mapea cada fila al contrato esperado, con el nombre de los perros ya formateado', async () => {
+      prisma.walk.findMany.mockResolvedValue([
+        {
+          id: 'walk-9',
+          status: WalkStatus.IN_PROGRESS,
+          startVerifyReason: 'El dueño no tenía el código a mano',
+          endedAt: null,
+          participants: [{ dog: { name: 'Lolo' } }, { dog: { name: 'Mota' } }],
+        },
+      ]);
+
+      const result = await service.pendingQuestions(OWNER_USER_ID);
+
+      expect(result).toEqual([{
+        walkId: 'walk-9',
+        type: 'NO_CODE_START',
+        status: 'IN_PROGRESS',
+        dogsLabel: 'Lolo y Mota',
+        startVerifyReason: 'El dueño no tenía el código a mano',
+        endedAt: null,
+      }]);
+    });
+
+    it('paseo COMPLETED: endedAt viaja como ISO string, no como Date', async () => {
+      const endedAt = new Date('2026-08-24T17:03:00.000Z');
+      prisma.walk.findMany.mockResolvedValue([
+        {
+          id: 'walk-9', status: WalkStatus.COMPLETED, startVerifyReason: 'motivo', endedAt,
+          participants: [{ dog: { name: 'Lolo' } }],
+        },
+      ]);
+
+      const [result] = await service.pendingQuestions(OWNER_USER_ID);
+
+      expect(result.endedAt).toBe(endedAt.toISOString());
+      expect(result.status).toBe('COMPLETED');
     });
   });
 
