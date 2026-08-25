@@ -112,7 +112,6 @@ guau/
 ├── packages/
 │   └── shared/    # Tipos TypeScript compartidos entre web y api
 ├── infra/vps/     # docker-compose.yml de producción + script de deploy manual
-├── docs/          # Blueprint técnico + pendientes + brand guide
 └── .github/workflows/  # CI/CD
 ```
 
@@ -172,14 +171,18 @@ Los valores reales (tokens de MercadoPago, claves JWT, API keys de Resend, etc.)
 
 ```mermaid
 flowchart TD
-    A[git push a master] --> B["Run tests (API + web)"]
-    B -->|falla| C[Pipeline se corta acá]
-    B -->|pasa| D[Build API image]
-    B -->|pasa| E[Build Web image]
-    D & E --> F["Deploy to VPS vía SSH\ndocker compose up -d"]
-    F --> G[api — 127.0.0.1:3001]
-    F --> H[web — 127.0.0.1:3000]
-    G & H --> I[cloudflared → dominios públicos]
+    A[Trabajo en una feature] --> B[push a staging]
+    B --> C{Gate de CI<br/>412 + 49 tests}
+    C -->|falla| X[Pipeline se corta acá]
+    C -->|pasa| D[Build + deploy]
+    D --> E[GCP · Cloud Run + Cloud SQL<br/>detrás de Cloudflare Access]
+    E --> F[Se prueba contra el ambiente real]
+    F --> G[merge a master]
+    G --> H{Gate de CI<br/>los mismos tests}
+    H -->|falla| X
+    H -->|pasa| I[Build + deploy por SSH]
+    I --> J[VPS · Docker Compose]
+    J --> K[cloudflared → dominios públicos]
 ```
 
 Cada `push` a `master` dispara `.github/workflows/docker.yml`: construye las imágenes de `api` y `web`, las publica en GitHub Container Registry, y se conecta por SSH al VPS de producción para bajarlas y levantar los contenedores con Docker Compose. El deploy de producción es directo — lo que se pushea a `master` queda en producción en 2-3 minutos. Este pipeline no tiene gate de staging; el ambiente de staging separado que se describe abajo corre en su propia rama y su propio camino.
@@ -195,10 +198,6 @@ La conexión al VPS público es únicamente a través de un túnel de Cloudflare
 Un segundo ambiente en Google Cloud Platform (Cloud Run + Cloud SQL) espeja producción para validar cambios antes de que lleguen a usuarios reales — se deploya desde su propia rama y su propio pipeline, totalmente desacoplado del VPS.
 
 Los servicios de Cloud Run ahí son IAM-only: no aceptan tráfico público directo. Una capa de Cloudflare Access por delante maneja el login humano (SSO por código de un solo uso vía email), y un Cloudflare Worker a medida hace de puente de identidad hacia GCP usando **Workload Identity Federation** — el Worker firma su propio JWT de corta duración y lo canjea por un token de Google con audiencia específica, en cada request. No existe ninguna key de service account descargable en ningún punto de esa cadena, lo que elimina una credencial de larga vida que de otro modo habría que guardar y rotar.
-
-## Documentación adicional
-
-Existe una carpeta `docs/` con notas de arquitectura, modelo de datos y decisiones de producto — **es local, privada, y no forma parte de este repositorio** (`docs/` está en `.gitignore` a propósito). Si estás leyendo esto desde un clon del repo, esa carpeta no va a estar presente; este README es la referencia autosuficiente para levantar y entender el proyecto.
 
 ---
 
