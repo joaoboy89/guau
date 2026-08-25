@@ -198,6 +198,13 @@ describe('WalksService', () => {
     prisma.$transaction.mockImplementation(
       (cb: (tx: typeof prisma) => Promise<unknown>) => cb(prisma),
     );
+    // Default sin pendientes: create() ahora llama a pendingQuestions() antes
+    // de validar los perros, y confirm() ya usaba walk.findMany para
+    // assertNoOverdueInProgress — sin este default, cualquier test de
+    // create()/confirm() que no le interese ninguno de los dos rompe con
+    // "undefined no tiene .map()/.find()". Los tests que SÍ les interesa lo
+    // pisan explícitamente.
+    prisma.walk.findMany.mockResolvedValue([]);
 
     trackingGateway      = { emitStatusChanged: jest.fn() };
     chatService          = { ensureConversationForWalk: jest.fn().mockResolvedValue({}) };
@@ -349,6 +356,31 @@ describe('WalksService', () => {
     it('lanza NotFoundException si no existe el ownerProfile', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(null);
       await expect(service.create(OWNER_USER_ID, CREATE_DTO)).rejects.toThrow(NotFoundException);
+    });
+
+    // Cierre del bloque D1 (guau-politicas.md §5): el cartel del dashboard es
+    // comodidad, esta es la defensa real (regla 7 de CLAUDE.md — el front se
+    // adapta, nunca es el único guardián). Cubre las tres puertas a
+    // /walks/new que el cartel no puede tapar (header de /walks, CTA del
+    // estado vacío, perfil del paseador) porque todas terminan acá.
+    it('lanza BadRequestException si el dueño tiene una pregunta pendiente que bloquea (bloque D1) — ni llega a validar los perros', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.walk.findMany.mockResolvedValue([
+        {
+          id: 'walk-pendiente', status: WalkStatus.IN_PROGRESS, startVerifyReason: 'motivo',
+          endedAt: null, participants: [{ dog: { name: 'Lolo' } }],
+        },
+      ]);
+
+      await expect(service.create(OWNER_USER_ID, CREATE_DTO)).rejects.toThrow(BadRequestException);
+      await expect(service.create(OWNER_USER_ID, CREATE_DTO))
+        .rejects.toThrow(/confirmalo desde el inicio/i);
+      expect(prisma.dog.findMany).not.toHaveBeenCalled();
+    });
+
+    it('sin nada pendiente, no bloquea — el camino feliz sigue de largo', async () => {
+      setupCreateMocks(); // walk.findMany ya default a [] (beforeEach)
+      await expect(service.create(OWNER_USER_ID, CREATE_DTO)).resolves.toBeDefined();
     });
 
     it('lanza BadRequestException si algún perro no existe o no pertenece al dueño', async () => {

@@ -232,6 +232,15 @@ export interface PendingQuestion {
   endedAt: string | null;
 }
 
+// Cuáles PendingQuestion IMPIDEN reservar un paseo nuevo (create(), en
+// walks.service.ts) — lista con nombre, no un motor genérico ni un flag
+// calculado. Hoy un solo miembro; el segundo (paseo sin pagar,
+// guau-politicas.md §7 ter, bloqueado hasta el test de MercadoPago) entra
+// agregando una línea acá, sin tocar create().
+export const BLOCKING_PENDING_QUESTION_TYPES: readonly PendingQuestionType[] = [
+  PENDING_QUESTION_TYPES.NO_CODE_START,
+];
+
 export const CONTACT_PATTERNS = [
   /\b\d{10,11}\b/,
   /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,

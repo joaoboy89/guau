@@ -37,6 +37,7 @@ import {
   START_WITHOUT_CODE_REASON,
   START_WITHOUT_CODE_REASON_LABEL,
   PENDING_QUESTION_TYPES,
+  BLOCKING_PENDING_QUESTION_TYPES,
   formatDogsLabel,
   canMarkOnWay,
   canStart,
@@ -285,7 +286,21 @@ export class WalksService {
     const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
     if (!owner) throw new NotFoundException("Perfil de dueño no encontrado");
 
-    // 2. Validar perros — pertenecen al dueño, están activos
+    // 2. Bloqueo por conformidad pendiente (cierre del bloque D1, guau-
+    // politicas.md §5). Esta es la defensa real — el cartel del dashboard es
+    // solo la comodidad de no tener que intentar para enterarse (regla 7 de
+    // CLAUDE.md: manda la API). Reusa pendingQuestions() en vez de repetir su
+    // condición acá: el día que un segundo tipo bloqueante exista, alcanza
+    // con sumarlo a BLOCKING_PENDING_QUESTION_TYPES — este chequeo no
+    // necesita tocarse.
+    const pending = await this.pendingQuestions(userId);
+    if (pending.some((q) => BLOCKING_PENDING_QUESTION_TYPES.includes(q.type))) {
+      throw new BadRequestException(
+        "Tenés un paseo esperando tu confirmación. Confirmalo desde el inicio para poder reservar otro.",
+      );
+    }
+
+    // 3. Validar perros — pertenecen al dueño, están activos
     const dogs = await this.prisma.dog.findMany({
       where: { id: { in: dto.dogIds }, ownerId: owner.id, isActive: true },
     });
@@ -293,7 +308,7 @@ export class WalksService {
       throw new BadRequestException("Uno o más perros no existen o no te pertenecen");
     }
 
-    // 3. Validar tipo de paseo
+    // 4. Validar tipo de paseo
     const walkType = await this.prisma.walkType.findUnique({
       where: { id: dto.walkTypeId },
     });
@@ -301,7 +316,7 @@ export class WalksService {
       throw new NotFoundException("Tipo de paseo no válido");
     }
 
-    // 4. Validar paseador
+    // 5. Validar paseador
     const walker = await this.prisma.walkerProfile.findUnique({
       where: { id: dto.walkerId },
     });
@@ -313,7 +328,7 @@ export class WalksService {
       throw new UnprocessableEntityException("El paseador no está disponible");
     }
 
-    // 5. Validar horario del paseador
+    // 6. Validar horario del paseador
     // Las franjas de WalkerSchedule se interpretan en hora argentina — ver
     // toBusinessDayAndTime para el porqué (no usar getDay()/toTimeString() acá).
     const { dayOfWeek, timeStr } = toBusinessDayAndTime(scheduledAt);
@@ -333,7 +348,7 @@ export class WalksService {
       );
     }
 
-    // 6. Validar capacidad del paseador en ese horario (paseos PENDING/CONFIRMED)
+    // 7. Validar capacidad del paseador en ese horario (paseos PENDING/CONFIRMED)
     const dogsAlreadyBooked = await this.prisma.walkParticipant.count({
       where: {
         walk: {
@@ -349,7 +364,7 @@ export class WalksService {
       );
     }
 
-    // 7. Calcular montos
+    // 8. Calcular montos
     const commissionRate = this.commissionRate;
     const amountPaid =
       mode === WalkMode.EXCLUSIVO
@@ -358,7 +373,7 @@ export class WalksService {
     const platformFee = amountPaid * commissionRate;
     const walkerAmount = amountPaid - platformFee;
 
-    // 8. Crear Walk + WalkParticipants en una transacción
+    // 9. Crear Walk + WalkParticipants en una transacción
     const walk = await this.prisma.$transaction(async (tx) => {
       const newWalk = await tx.walk.create({
         data: {
@@ -859,7 +874,11 @@ export class WalksService {
       type: PENDING_QUESTION_TYPES.NO_CODE_START,
       status: w.status as "IN_PROGRESS" | "COMPLETED",
       dogsLabel: formatDogsLabel(w.participants.map((p) => p.dog.name)),
-      startVerifyReason: w.startVerifyReason!,
+      // No debería ser null nunca acá (el where ya exige startVerification
+      // NONE, y start() siempre setea el motivo junto con eso) — pero un `!`
+      // solo calla al compilador; el fallback es lo que evita que el dueño
+      // lea "Declaró: undefined" si alguna vez lo es.
+      startVerifyReason: w.startVerifyReason ?? "motivo no registrado",
       endedAt: w.endedAt ? w.endedAt.toISOString() : null,
     }));
   }
