@@ -58,7 +58,7 @@ Session tokens live in `httpOnly` cookies (secure, sameSite lax), not in `localS
 
 **5. Staging joined after production did — same decision, revisited when the stakes changed**
 
-At first, every push to `master` deployed straight to production, with no staging environment in between. I was a single developer validating a business with no live users yet: a staging environment duplicates infrastructure, secrets, and maintenance to protect against a risk that, at that point, didn't really exist. The real risk at that stage was not iterating fast enough — so I put the protection where it actually paid off: the full test suite (407 backend tests + 49 frontend tests) running as a gate in CI, blocking any push with failing tests before it could reach production.
+At first, every push to `master` deployed straight to production, with no staging environment in between. I was a single developer validating a business with no live users yet: a staging environment duplicates infrastructure, secrets, and maintenance to protect against a risk that, at that point, didn't really exist. The real risk at that stage was not iterating fast enough — so I put the protection where it actually paid off: the full test suite (412 backend tests + 49 frontend tests) running as a gate in CI, blocking any push with failing tests before it could reach production.
 
 *What changed:* real money started moving through the platform, and a real walker went through onboarding. The cost I'd accepted on purpose back then — "a bug the tests don't catch reaches real users" — stopped being theoretical the moment there was an actual person and actual money on the other end of that bug.
 
@@ -89,14 +89,14 @@ The marketplace commission (`MP_MARKETPLACE_FEE`) is validated inside `WalksServ
 | Payments | MercadoPago Checkout Pro — marketplace split (`marketplace_fee`), seller OAuth Connect, signed webhook, reconciliation job, seller access token encrypted at rest (AES-256-GCM) |
 | Email | Resend |
 | Auth | JWT + refresh tokens in `httpOnly` cookies (not accessible from JS) |
-| Testing | Jest — backend: 407 automated tests across the highest-risk modules (payments, auth, walker search, bookings, admin, encryption, access control); frontend: 49 tests over the API client (auth-refresh-loop regression), the notifications store, and date utilities |
+| Testing | Jest — backend: 412 automated tests across the highest-risk modules (payments, auth, walker search, bookings, admin, encryption, access control); frontend: 49 tests over the API client (auth-refresh-loop regression), the notifications store, and date utilities |
 | Deploy | Self-managed VPS + Docker Compose + Cloudflare Tunnel |
 | CI/CD | GitHub Actions (push to `master` → test → build → automatic deploy) |
 | Monorepo | npm workspaces + Turborepo |
 
 ## Current status
 
-Implemented and working: full registration/auth (httpOnly cookies, no tokens accessible from JavaScript), owner and walker profiles (including work-zone setup via geolocation), proximity-based walker search, and a booking lifecycle across its real eight states (`PENDING → CONFIRMED → WALKER_ON_WAY → IN_PROGRESS → COMPLETED`, plus `CANCELLED_OWNER`, `CANCELLED_WALKER`, and `NOT_PERFORMED` for bookings that never happened) — backed by a job that runs every 5 minutes to catch bookings stuck in a dead end (never confirmed, walker never showed up, nobody acted) and resolve them automatically. Two anti-fraud mechanisms guard the handoff itself: the exact pickup address stays obfuscated to the walker (a randomized point within ~200m, deterministic per booking) until they tap "on my way", and starting a walk now requires a 4-digit pickup code the owner hands over in person — a code that never reaches the walker's own device — so "the walk started" stops being one person's word against the other's. Real-time in-app notifications (bell icon with unread badge, powered by Socket.io over the Cloudflare Tunnel, verified in production), and 407 automated backend tests plus 49 frontend tests covering the highest-risk modules (payments, auth, search, bookings, admin, encryption, access control).
+Implemented and working: full registration/auth (httpOnly cookies, no tokens accessible from JavaScript), owner and walker profiles (including work-zone setup via geolocation), proximity-based walker search, and a booking lifecycle across its real eight states (`PENDING → CONFIRMED → WALKER_ON_WAY → IN_PROGRESS → COMPLETED`, plus `CANCELLED_OWNER`, `CANCELLED_WALKER`, and `NOT_PERFORMED` for bookings that never happened) — backed by a job that runs every 5 minutes to catch bookings stuck in a dead end (never confirmed, walker never showed up, nobody acted) and resolve them automatically. Two anti-fraud mechanisms guard the handoff itself: the exact pickup address stays obfuscated to the walker (a randomized point within ~200m, deterministic per booking) until they tap "on my way", and starting a walk now requires a 4-digit pickup code the owner hands over in person — a code that never reaches the walker's own device — so "the walk started" stops being one person's word against the other's. Real-time in-app notifications (bell icon with unread badge, powered by Socket.io over the Cloudflare Tunnel, verified in production), and 412 automated backend tests plus 49 frontend tests covering the highest-risk modules (payments, auth, search, bookings, admin, encryption, access control).
 
 Payments via MercadoPago: **marketplace split validated end-to-end in production, with real money**. The owner pays, and the amount is automatically split between the walker (via their own MercadoPago OAuth Connect) and Güau (`marketplace_fee`). The first real transaction: a $3000 (ARS) walk split into Güau's commission ($450, exactly 15%), MercadoPago's own fee ($129.09, ~4.3% with VAT), and the walker's net payout ($2,420.91) — verified against production logs and the real database numbers. Includes a webhook that queries the payment using the seller's own credentials (delivered in 3.7 seconds on that first real payment), a periodic reconciliation job as a backstop (no serious payments system should depend on a single notification channel), idempotent processing (a duplicate webhook resend from MercadoPago was correctly ignored), and the walker's `mpAccessToken` **encrypted at rest (AES-256-GCM)** and never exposed in HTTP responses.
 
@@ -149,7 +149,7 @@ Backend available at `http://localhost:3001`, with Swagger at `http://localhost:
 ## Tests
 
 ```bash
-# Backend — 407 tests (Jest)
+# Backend — 412 tests (Jest)
 cd apps/api && npm test
 
 # Frontend — 49 tests (Jest via next/jest)
@@ -185,7 +185,7 @@ flowchart TD
     J --> K[cloudflared → public domains]
 ```
 
-Every `push` to `master` triggers `.github/workflows/docker.yml`: it builds the `api` and `web` images, publishes them to the GitHub Container Registry, then connects over SSH to the production VPS to pull them and bring up the containers with Docker Compose. Production deploys are direct — whatever gets pushed to `master` is live within 2-3 minutes. There's no staging gate in this pipeline; the separate staging environment described below runs on its own path and branch.
+Every `push` to `master` triggers `.github/workflows/docker.yml`: it builds the `api` and `web` images, publishes them to the GitHub Container Registry, then connects over SSH to the production VPS to pull them and bring up the containers with Docker Compose. Production deploys are direct — whatever gets pushed to `master` is live within 2-3 minutes. Worth being precise about one thing the diagram above doesn't show: passing through staging first is a rule I follow, not a mechanism this workflow enforces. `docker.yml` has no way to check where a commit has been; staging runs on its own branch, with its own pipeline, described below.
 
 The pipeline runs the tests (backend + frontend) before building — if anything fails, the deploy never runs. Migrations are self-applying: the API container's entrypoint runs `prisma migrate deploy` on every boot, before starting the app — a new migration ships inside the image and gets applied automatically on deploy, with no manual step.
 
