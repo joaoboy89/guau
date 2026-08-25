@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosError } from "axios";
 import { navigateTo } from "./navigate";
 import type { Notification } from "./store";
+import type { PendingQuestion } from "@guau/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -119,6 +120,11 @@ export const walksAPI = {
   finish:    (id: string)    => api.put(`/walks/${id}/finish`),
   cancel:    (id: string, data?: { cancellationReason?: string }) =>
                           api.put(`/walks/${id}/cancel`, data ?? {}),
+  acknowledgeNoCode:  (id: string) =>
+                          api.put<{ id: string; ownerAcknowledgedNoCodeAt: string }>(
+                            `/walks/${id}/acknowledge-no-code`
+                          ),
+  pendingQuestions:   ()           => api.get<PendingQuestion[]>("/walks/pending-questions"),
 };
 
 export const reviewsAPI = {
