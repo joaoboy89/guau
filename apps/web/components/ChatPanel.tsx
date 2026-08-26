@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AxiosError } from "axios";
-import { SOCKET_EVENTS } from "@guau/shared";
+import { SOCKET_EVENTS, hasBlockingContactInfo } from "@guau/shared";
 import { chatAPI, type ChatMessage } from "@/lib/api";
 import { useAuth } from "@/lib/store";
 import { connectSocket, getSocket, joinUser } from "@/lib/socket";
@@ -116,6 +116,20 @@ export default function ChatPanel({ walkId }: ChatPanelProps) {
   const handleSend = async () => {
     const trimmed = content.trim();
     if (!trimmed || !conversationId || sending) return;
+
+    // Mismo chequeo que la API, misma función de @guau/shared que usa
+    // sendMessage() del lado del servidor — una sola fuente de verdad, sin
+    // duplicar regex. Acá es comodidad (avisar antes de mandar); la defensa
+    // real sigue siendo el 400 del servidor, que corre igual aunque este
+    // chequeo tuviera un bug o alguien lo saltee llamando a la API directo.
+    // Sin "mandar igual": Joa decidió que este nivel bloquea.
+    if (hasBlockingContactInfo(trimmed)) {
+      setSendError(
+        "Este mensaje parece tener un dato de contacto (teléfono, mail, usuario o link). " +
+        "Sacalo y reescribilo — el chat es para coordinar el paseo."
+      );
+      return;
+    }
 
     setSending(true);
     setSendError(null);
