@@ -100,6 +100,39 @@ describe('ChatService', () => {
     });
   });
 
+  // ─── El apellido es un dato de Güau, no de las partes ────────────────────
+  // Un dueño y un paseador no se ven el apellido en ninguna pantalla —
+  // regla de Joa. La cabecera de la conversación ya lo cumplía (1.1); acá
+  // el sender de cada mensaje individual también tenía lastName.
+
+  describe('el sender de un mensaje nunca lleva apellido', () => {
+    it('getMessages() no pide lastName en el select de sender', async () => {
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(WalkStatus.CONFIRMED));
+      prisma.message.findMany.mockResolvedValue([]);
+
+      await service.getMessages(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID);
+
+      const select = prisma.message.findMany.mock.calls[0][0].include.sender.select;
+      expect(select).toEqual({ id: true, firstName: true, avatarUrl: true });
+      expect(select.lastName).toBeUndefined();
+    });
+
+    it('sendMessage() no pide lastName en el select de sender del mensaje creado', async () => {
+      prisma.conversation.findUnique.mockResolvedValue({
+        ...conversationRow(WalkStatus.CONFIRMED),
+        owner:  { user: { id: OWNER_USER_ID } },
+        walker: { user: { id: WALKER_USER_ID } },
+      });
+      prisma.message.create.mockResolvedValue({ id: 'msg-1' });
+
+      await service.sendMessage(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID, { content: 'hola' });
+
+      const select = prisma.message.create.mock.calls[0][0].include.sender.select;
+      expect(select).toEqual({ id: true, firstName: true, avatarUrl: true });
+      expect(select.lastName).toBeUndefined();
+    });
+  });
+
   // ─── Las dos listas sin techo (1.2) ──────────────────────────────────────
 
   describe('getMyConversations() — take: 50 (backstop)', () => {

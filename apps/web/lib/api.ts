@@ -164,7 +164,9 @@ export interface ChatMessage {
   isRead: boolean;
   containsContactInfo: boolean;
   createdAt: string;
-  sender: { id: string; firstName: string; lastName: string; avatarUrl: string | null };
+  // Sin apellido a propósito: es un dato de Güau, no de las partes — un
+  // dueño y un paseador nunca ven el apellido del otro.
+  sender: { id: string; firstName: string; avatarUrl: string | null };
 }
 
 export const chatAPI = {

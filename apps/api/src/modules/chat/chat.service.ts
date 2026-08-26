@@ -121,8 +121,12 @@ export class ChatService {
       where: { conversationId },
       orderBy: { createdAt: "asc" },
       include: {
+        // El apellido es un dato de Güau, no de las partes — un dueño y un
+        // paseador no se ven el apellido en ninguna pantalla. La cabecera
+        // de la conversación ya mostraba solo el nombre; el sender de cada
+        // mensaje no tiene por qué llevar más que eso.
         sender: {
-          select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+          select: { id: true, firstName: true, avatarUrl: true },
         },
       },
       take: 200,
@@ -172,8 +176,12 @@ export class ChatService {
         containsContactInfo,
       },
       include: {
+        // El apellido es un dato de Güau, no de las partes — un dueño y un
+        // paseador no se ven el apellido en ninguna pantalla. La cabecera
+        // de la conversación ya mostraba solo el nombre; el sender de cada
+        // mensaje no tiene por qué llevar más que eso.
         sender: {
-          select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+          select: { id: true, firstName: true, avatarUrl: true },
         },
       },
     });
