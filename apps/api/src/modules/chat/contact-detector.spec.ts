@@ -31,6 +31,37 @@ describe('hasBlockingContactInfo() — nivel 1, bloquea', () => {
     expect(hasBlockingContactInfo('mi fijo es 01153626985')).toBe(true);
   });
 
+  // Encontrados en auditoría (2026-08-26): === 10 || === 11 dejaba pasar
+  // cualquier corrida MÁS larga, y un número con código de país (+549 + el
+  // número, la forma más natural de compartir un contacto argentino) tiene
+  // 13 dígitos — pasaba limpio. El umbral se cambió a >= 8.
+
+  it('detecta un teléfono de 12 dígitos con un digito de mas al final', () => {
+    expect(hasBlockingContactInfo('mi numero es 11 5362 6985 99')).toBe(true);
+  });
+
+  it('detecta un teléfono de 13 dígitos con código de país (+54 9 + número)', () => {
+    expect(hasBlockingContactInfo('te paso: 5 4 9 1 1 5 3 6 2 6 9 8 5')).toBe(true);
+  });
+
+  it('detecta un fijo de 8 dígitos sin característica', () => {
+    expect(hasBlockingContactInfo('el fijo es 4788 3921')).toBe(true);
+  });
+
+  // Costo aceptado del piso en 8, a propósito (ver el comentario del
+  // umbral en hasBlockingContactInfo): estos dos bloquean aunque no sean
+  // datos de contacto, porque son corridas de 8+ dígitos separadas solo
+  // por espacios. Quedan escritos como decisión, no como sorpresa el día
+  // que alguien los encuentre.
+
+  it('bloquea (a propósito) una lista de fechas que suma 8+ dígitos pegados por espacios', () => {
+    expect(hasBlockingContactInfo('los dias 24 25 26 27 no puedo')).toBe(true);
+  });
+
+  it('bloquea (a propósito) un código largo separado por un espacio', () => {
+    expect(hasBlockingContactInfo('el codigo del portero es 1234 5678')).toBe(true);
+  });
+
   it('detecta un mail', () => {
     expect(hasBlockingContactInfo('escribime a juan.perez@gmail.com')).toBe(true);
   });
@@ -49,7 +80,7 @@ describe('hasBlockingContactInfo() — nivel 1, bloquea', () => {
 
   it('NO confunde números sueltos de la conversación normal con un teléfono', () => {
     // "10:30" y "45" y "3000" quedan separados por palabras (nunca por solo
-    // espacio/punto/guion) — no se juntan en una corrida de 10-11 dígitos.
+    // espacio/punto/guion) — no se juntan en una sola corrida de 8+ dígitos.
     expect(
       hasBlockingContactInfo('dale, nos vemos a las 10:30 y dura 45 minutos, sale 3000'),
     ).toBe(false);

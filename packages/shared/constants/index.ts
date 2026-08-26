@@ -271,14 +271,30 @@ export const PHONE_DIGIT_RUN_PATTERN = /\d[\d\s.-]*\d/g;
 
 // true si el mensaje trae un dato de contacto real (nivel 1) — bloquea el
 // envío. Normaliza antes de buscar, no suma más patrones: "hablame 11 53 6
-// 26 9 85" pasa a "1153626985" y ahí se cuentan los 10 dígitos.
+// 26 9 85" pasa a "1153626985" y ahí se cuentan los dígitos.
 export function hasBlockingContactInfo(text: string): boolean {
   if (CONTACT_INFO_PATTERNS.some((pattern) => pattern.test(text))) return true;
 
   const runs = text.match(PHONE_DIGIT_RUN_PATTERN) ?? [];
   return runs.some((run) => {
     const digitsOnly = run.replace(/\D/g, "");
-    return digitsOnly.length === 10 || digitsOnly.length === 11;
+    // >= 8, no === 10 || === 11 (ese exacto dejaba pasar corridas más
+    // largas: "5 4 9 1 1 5 3 6 2 6 9 8 5" son 13 dígitos — +54 9 + el
+    // número, el formato más natural para compartir un contacto argentino
+    // con código de país — y no veía los fijos de 8 dígitos sin
+    // característica ("4788 3921"). 8 es el piso real: un fijo argentino
+    // sin código de área no baja de ahí.
+    //
+    // El costo aceptado, a propósito: esto también bloquea una lista de
+    // fechas ("los dias 24 25 26 27") o un código largo ("el codigo del
+    // portero es 1234 5678") si quedan pegados solo por espacios. En la
+    // práctica los códigos de portero argentinos no llegan a 8 cifras, así
+    // que el riesgo real es bajo — y el bloqueo es duro a propósito (no
+    // hay "mandar igual", decisión de Joa): si a alguien se le traba un
+    // mensaje legítimo, se comunica con soporte. El día que alguien quiera
+    // subir este número, que decida con este razonamiento a la vista, no
+    // suponiéndolo.
+    return digitsOnly.length >= 8;
   });
 }
 
