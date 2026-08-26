@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { UserRole, WalkStatus } from '@prisma/client';
 import { ChatService } from './chat.service';
 import { PrismaService } from '../../database/prisma.service';
@@ -220,6 +220,94 @@ describe('ChatService', () => {
           WalkStatus.CANCELLED_WALKER, WalkStatus.NOT_PERFORMED,
         ]),
       );
+    });
+  });
+
+  // ─── El detector de contacto, ya cableado en sendMessage() (1.4) ─────────
+  // Los casos del detector en sí (los dos ejemplos textuales, guiones,
+  // puntos, mail, @handle) están en contact-detector.spec.ts, contra las
+  // funciones puras — acá solo se prueba que sendMessage() las use bien.
+
+  describe('sendMessage() — detector de contacto (dos niveles)', () => {
+    function setupSendMessage() {
+      prisma.conversation.findUnique.mockResolvedValue({
+        ...conversationRow(WalkStatus.CONFIRMED),
+        owner:  { user: { id: OWNER_USER_ID } },
+        walker: { user: { id: WALKER_USER_ID } },
+      });
+    }
+
+    it('nivel 1 (teléfono ofuscado): 400, NO crea el mensaje, NO emite por socket', async () => {
+      setupSendMessage();
+
+      await expect(
+        service.sendMessage(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID, {
+          content: 'hablame 11 53 6 26 9 85',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.message.create).not.toHaveBeenCalled();
+      expect(trackingGateway.emitMessage).not.toHaveBeenCalled();
+    });
+
+    it('el 400 de nivel 1 no delata qué patrón saltó (no menciona "10" ni "dígitos")', async () => {
+      setupSendMessage();
+      let message: string | undefined;
+      try {
+        await service.sendMessage(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID, {
+          content: 'hablame 11 53 6 26 9 85',
+        });
+      } catch (e) {
+        message = (e as BadRequestException).message;
+      }
+      expect(message).toBeDefined();
+      expect(message).not.toMatch(/10|11|dígito|digit/i);
+    });
+
+    it('nivel 2 ("no tengo WhatsApp"): NO bloquea, crea el mensaje con containsContactInfo true', async () => {
+      setupSendMessage();
+      prisma.message.create.mockResolvedValue({ id: 'msg-1' });
+
+      await service.sendMessage(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID, {
+        content: 'Te escribo por aca porque no tengo WhatsApp',
+      });
+
+      expect(prisma.message.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ containsContactInfo: true }),
+        }),
+      );
+    });
+
+    it('mensaje sin dato ni mención: crea con containsContactInfo false', async () => {
+      setupSendMessage();
+      prisma.message.create.mockResolvedValue({ id: 'msg-1' });
+
+      await service.sendMessage(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID, {
+        content: 'Dale, nos vemos mañana en la puerta del edificio',
+      });
+
+      expect(prisma.message.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ containsContactInfo: false }),
+        }),
+      );
+    });
+
+    it('el bloqueo por estado cerrado corta ANTES que el detector de contacto', async () => {
+      prisma.conversation.findUnique.mockResolvedValue({
+        ...conversationRow(WalkStatus.COMPLETED),
+        owner:  { user: { id: OWNER_USER_ID } },
+        walker: { user: { id: WALKER_USER_ID } },
+      });
+
+      await expect(
+        service.sendMessage(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID, {
+          content: 'hola, mensaje inocente',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(prisma.message.create).not.toHaveBeenCalled();
     });
   });
 });

@@ -2,11 +2,12 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from "@nestjs/common";
 import { PrismaService } from "../../database/prisma.service";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { SendMessageDto } from "./dto/send-message.dto";
-import { CONTACT_PATTERNS } from "@guau/shared";
+import { hasBlockingContactInfo, hasContactChannelMention } from "@guau/shared";
 import { UserRole, WalkStatus } from "@prisma/client";
 
 // El chat vive mientras el paseo está abierto (decisión de Joa, guau-
@@ -149,10 +150,19 @@ export class ChatService {
 
     await this.assertConversationAccess(userId, role, conversation);
 
-    // Detectar información de contacto (anti-fuga off-platform)
-    const containsContactInfo = CONTACT_PATTERNS.some((pattern) =>
-      pattern.test(dto.content)
-    );
+    // Nivel 1 — dato de contacto real: bloquea. La API es la defensa real,
+    // no el front (regla 7 de CLAUDE.md) — si el front avisa y acá se
+    // aceptara igual, el bloqueo sería cosmético.
+    if (hasBlockingContactInfo(dto.content)) {
+      throw new BadRequestException(
+        "Este mensaje no se pudo enviar: parece tener un dato de contacto (teléfono, mail, " +
+        "usuario o link). Sacalo y reescribilo — el chat es para coordinar el paseo.",
+      );
+    }
+
+    // Nivel 2 — mención de un canal sin ningún dato (si hubiera un dato,
+    // nivel 1 ya bloqueó arriba). No bloquea, solo se registra.
+    const containsContactInfo = hasContactChannelMention(dto.content);
 
     const message = await this.prisma.message.create({
       data: {

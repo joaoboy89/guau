@@ -241,13 +241,59 @@ export const BLOCKING_PENDING_QUESTION_TYPES: readonly PendingQuestionType[] = [
   PENDING_QUESTION_TYPES.NO_CODE_START,
 ];
 
-export const CONTACT_PATTERNS = [
-  /\b\d{10,11}\b/,
-  /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
+// ─── Detector de datos de contacto en el chat (dos niveles) ────────────────
+// Antes era una sola lista que fallaba en las dos direcciones: dejaba pasar
+// "11 53 6 26 9 85" (el regex de teléfono pedía 10-11 dígitos SEGUIDOS) y
+// bloqueaba "no tengo WhatsApp" (mencionar el nombre de un canal no es dar
+// un dato). Se separa en nivel 1 (dato real → bloquea) y nivel 2 (mención
+// de canal sin dato → no bloquea, solo se registra). Usado por API y front
+// desde acá — una sola fuente de verdad, sin duplicar regex.
+
+// Nivel 1 — mail, @handle y URL se prueban tal cual contra el mensaje
+// completo. El teléfono NO entra como un patrón más: un regex de una sola
+// pasada no puede a la vez "juntar dígitos separados por espacios/puntos/
+// guiones" y "no juntar números sueltos que la propia prosa separa con
+// palabras" — hace falta extraer la corrida y contarla aparte (ver
+// hasBlockingContactInfo).
+export const CONTACT_INFO_PATTERNS = [
+  /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/, // mail
+  /@[a-zA-Z0-9._]+/,                                 // @handle
+  /\bhttps?:\/\/\S+/i,                               // URL con esquema
+  /\b[a-z0-9-]+\.(com|net|org|ar|io|me|co|app)\b/i,  // dominio sin esquema (wa.me, instagram.com/juan)
+] as const;
+
+// Corrida de dígitos separados solo por espacio, punto o guion — nunca por
+// una letra. Por eso "10:30 y dura 45 minutos" NO se une en una sola corrida
+// (la palabra "y" la corta, y ":" tampoco está en la clase de separadores),
+// pero "11 53 6 26 9 85" sí cuenta como una sola. Se prueba cada corrida por
+// separado: se le sacan los separadores y se cuentan los dígitos que quedan.
+export const PHONE_DIGIT_RUN_PATTERN = /\d[\d\s.-]*\d/g;
+
+// true si el mensaje trae un dato de contacto real (nivel 1) — bloquea el
+// envío. Normaliza antes de buscar, no suma más patrones: "hablame 11 53 6
+// 26 9 85" pasa a "1153626985" y ahí se cuentan los 10 dígitos.
+export function hasBlockingContactInfo(text: string): boolean {
+  if (CONTACT_INFO_PATTERNS.some((pattern) => pattern.test(text))) return true;
+
+  const runs = text.match(PHONE_DIGIT_RUN_PATTERN) ?? [];
+  return runs.some((run) => {
+    const digitsOnly = run.replace(/\D/g, "");
+    return digitsOnly.length === 10 || digitsOnly.length === 11;
+  });
+}
+
+// Nivel 2 — mención de un canal SIN ningún dato real adentro (nivel 1 ya
+// habría bloqueado si lo hubiera). No bloquea: solo marca
+// Message.containsContactInfo para que quede registrado, sin trabar a
+// alguien que escribe "no tengo WhatsApp".
+export const CHANNEL_MENTION_PATTERNS = [
   /whatsapp/i,
   /wasap/i,
   /instagram/i,
   /insta\b/i,
-  /ig\b/i,
-  /@[a-zA-Z0-9._]+/,
+  /\big\b/i,
 ] as const;
+
+export function hasContactChannelMention(text: string): boolean {
+  return CHANNEL_MENTION_PATTERNS.some((pattern) => pattern.test(text));
+}
