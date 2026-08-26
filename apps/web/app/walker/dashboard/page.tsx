@@ -18,6 +18,7 @@ import { findNearestBarrio, type Barrio } from "@/lib/barrios";
 import BarrioSelect from "@/components/BarrioSelect";
 import { Badge, Button } from "@/components/ui";
 import CancelWalkDialog from "@/components/CancelWalkDialog";
+import ChatDialog from "@/components/ChatDialog";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import StartWalkDialog from "@/components/StartWalkDialog";
 import { AxiosError } from "axios";
@@ -208,6 +209,11 @@ export default function WalkerDashboardPage() {
   const [cancelDialogWalkId, setCancelDialogWalkId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Chat — se abre desde la tarjeta de un paseo activo, no hay pantalla de
+  // detalle del lado del paseador (bloque 2.1: la puerta es el paseo).
+  const [chatWalkId, setChatWalkId] = useState<string | null>(null);
+  const [chatDogName, setChatDogName] = useState("");
 
   const [zoneSaving, setZoneSaving] = useState(false);
   const [zoneError, setZoneError]   = useState<string | null>(null);
@@ -986,6 +992,22 @@ export default function WalkerDashboardPage() {
                         )}
                       </div>
                     )}
+                    {/* Chat — habilitado desde "voy en camino", igual que del
+                        lado del dueño. No hay pantalla de detalle acá, así
+                        que se abre como diálogo desde la tarjeta misma. */}
+                    {(walk.status === "WALKER_ON_WAY" || walk.status === "IN_PROGRESS") && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => {
+                          setChatDogName(dogName);
+                          setChatWalkId(walk.id);
+                        }}
+                      >
+                        Chat
+                      </Button>
+                    )}
                     {/* Cancelar sigue apareciendo donde ya aparecia: CONFIRMED
                         sin pagar. Un paseo ya arrancado no se cancela — el
                         backend tampoco lo permite. */}
@@ -1123,6 +1145,14 @@ export default function WalkerDashboardPage() {
         onConfirm={() => cancelDialogWalkId && handleCancel(cancelDialogWalkId)}
         confirming={actioning === cancelDialogWalkId}
         error={cancelError}
+      />
+
+      <ChatDialog
+        open={chatWalkId !== null}
+        walkId={chatWalkId}
+        dogName={chatDogName}
+        onDismiss={() => setChatWalkId(null)}
+        fallbackFocusId="mis-paseos"
       />
     </main>
   );

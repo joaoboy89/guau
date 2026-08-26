@@ -9,6 +9,7 @@ import { AxiosError } from "axios";
 import { STATUS_LABEL, canCancelWalk } from "@/lib/walk-status";
 import { Container, Button } from "@/components/ui";
 import CancelWalkDialog from "@/components/CancelWalkDialog";
+import ChatPanel from "@/components/ChatPanel";
 
 interface WalkDetail {
   id: string;
@@ -311,12 +312,23 @@ export default function WalkDetailPage() {
             que se veia un segundo antes. Es un mensaje neutro, no
             funcionalidad nueva del lado del dueño. */}
         {(walk.status === "WALKER_ON_WAY" || walk.status === "IN_PROGRESS") && (
-          <div className="px-4 py-3 rounded-xl bg-brand-primary-soft border border-brand-primary/20 text-sm text-brand-primary">
-            {walk.status === "WALKER_ON_WAY"
-              ? "El paseador está yendo a buscar a tu perro."
-              : "El paseo está en curso."}
-            {walk.isPaid && " Ya está pagado."}
-          </div>
+          <>
+            <div className="px-4 py-3 rounded-xl bg-brand-primary-soft border border-brand-primary/20 text-sm text-brand-primary">
+              {walk.status === "WALKER_ON_WAY"
+                ? "El paseador está yendo a buscar a tu perro."
+                : "El paseo está en curso."}
+              {walk.isPaid && " Ya está pagado."}
+            </div>
+
+            {/* El chat se habilita desde "voy en camino", aunque la
+                conversación exista desde antes (se crea en confirm()) — no
+                tiene sentido coordinar por chat un paseo que todavía no
+                arrancó a moverse. */}
+            <section className="bg-brand-surface rounded-2xl p-5 shadow-card border border-brand-border flex flex-col gap-3">
+              <span className="text-sm font-semibold text-brand-text-body">Chat</span>
+              <ChatPanel walkId={walk.id} />
+            </section>
+          </>
         )}
 
         {walk.status === "COMPLETED" && (

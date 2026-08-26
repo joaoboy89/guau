@@ -142,6 +142,38 @@ export const paymentsAPI = {
   walkerConnect:    ()              => api.get<{ url: string }>("/payments/walker-connect"),
 };
 
+// ─── Chat ───────────────────────────────────────────────────────────────────
+
+export interface ChatParty {
+  id: string;
+  user: { firstName: string; avatarUrl: string | null };
+}
+
+export interface ChatConversation {
+  id: string;
+  walk: { id: string; status: string; scheduledAt: string } | null;
+  owner: ChatParty;
+  walker: ChatParty;
+  messages: Array<{ content: string; createdAt: string; isRead: boolean; senderId: string }>;
+}
+
+export interface ChatMessage {
+  id: string;
+  content: string;
+  senderId: string;
+  isRead: boolean;
+  containsContactInfo: boolean;
+  createdAt: string;
+  sender: { id: string; firstName: string; lastName: string; avatarUrl: string | null };
+}
+
+export const chatAPI = {
+  list:     ()                                    => api.get<ChatConversation[]>("/conversations"),
+  messages: (conversationId: string)              => api.get<ChatMessage[]>(`/conversations/${conversationId}/messages`),
+  send:     (conversationId: string, content: string) =>
+                          api.post<ChatMessage>(`/conversations/${conversationId}/messages`, { content }),
+};
+
 export const notificationsAPI = {
   list:     ()           => api.get<Notification[]>("/notifications"),
   markRead: (id: string) => api.put<Notification>(`/notifications/${id}/read`),
