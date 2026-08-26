@@ -100,9 +100,15 @@ export class ChatService {
   async sendMessage(userId: string, role: string, conversationId: string, dto: SendMessageDto) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: {
-        owner: { include: { user: { select: { id: true } } } },
-        walker: { include: { user: { select: { id: true } } } },
+      select: {
+        ownerId: true,
+        walkerId: true,
+        // select, no include (Ventana #2: un include es un spread con otro
+        // nombre) — acá solo hace falta el id del User de cada lado para
+        // decidir a quién avisar por socket, nada de OwnerProfile ni
+        // WalkerProfile completos.
+        owner: { select: { user: { select: { id: true } } } },
+        walker: { select: { user: { select: { id: true } } } },
       },
     });
     if (!conversation) throw new NotFoundException("Conversación no encontrada");
@@ -166,15 +172,24 @@ export class ChatService {
   private conversationInclude() {
     return {
       walk: { select: { id: true, status: true, scheduledAt: true } },
+      // select explícito en los dos lados, simétrico — Ventana #2: un
+      // include es un spread con otro nombre. OwnerProfile tiene address/
+      // neighborhood/lat/lng; un include acá se los mandaba al paseador
+      // completos desde el momento en que confirma() crea la conversación,
+      // días antes del paseo — se saltea entera la ofuscación del bloque B
+      // sin apretar ningún botón. Solo lo que la pantalla necesita: el id
+      // del perfil, nombre y avatar. Ni apellido, ni teléfono, ni nada más
+      // de OwnerProfile.
       owner: {
-        include: {
-          user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        select: {
+          id: true,
+          user: { select: { firstName: true, avatarUrl: true } },
         },
       },
       walker: {
         select: {
           id: true,
-          user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+          user: { select: { firstName: true, avatarUrl: true } },
         },
       },
       messages: {
