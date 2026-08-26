@@ -43,6 +43,11 @@ export class ChatService {
   // ─── Mis conversaciones ──────────────────────────────────
 
   async getMyConversations(userId: string, role: string) {
+    // Toda lista lleva LIMIT, sin excepción (CLAUDE.md) — esta no tenía
+    // ninguno. take: 50 es backstop, no paginación real: nadie tiene 50
+    // conversaciones simultáneas con paseos suyos.
+    const take = 50;
+
     if (role === UserRole.WALKER) {
       const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
       if (!walker) throw new NotFoundException("Perfil de paseador no encontrado");
@@ -51,6 +56,7 @@ export class ChatService {
         where: { walkerId: walker.id },
         include: this.conversationInclude(),
         orderBy: { createdAt: "desc" },
+        take,
       });
     }
 
@@ -61,6 +67,7 @@ export class ChatService {
       where: { ownerId: owner.id },
       include: this.conversationInclude(),
       orderBy: { createdAt: "desc" },
+      take,
     });
   }
 
@@ -84,6 +91,10 @@ export class ChatService {
       data: { isRead: true },
     });
 
+    // Backstop, no paginación: una conversación real son 20-50 mensajes en
+    // 4-5 horas. 200 no lo toca nunca un uso honesto — si algún día se
+    // toca, esa misma señal es la que dice que hace falta paginar de verdad
+    // (con cursor, no con esto agrandado a mano).
     return this.prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: "asc" },
@@ -92,6 +103,7 @@ export class ChatService {
           select: { id: true, firstName: true, lastName: true, avatarUrl: true },
         },
       },
+      take: 200,
     });
   }
 

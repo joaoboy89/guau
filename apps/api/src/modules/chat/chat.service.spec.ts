@@ -90,4 +90,34 @@ describe('ChatService', () => {
       expect(select.walker).toEqual({ select: { user: { select: { id: true } } } });
     });
   });
+
+  // ─── Las dos listas sin techo (1.2) ──────────────────────────────────────
+
+  describe('getMyConversations() — take: 50 (backstop)', () => {
+    it('lleva take: 50', async () => {
+      prisma.conversation.findMany.mockResolvedValue([]);
+      await service.getMyConversations(OWNER_USER_ID, UserRole.OWNER);
+      expect(prisma.conversation.findMany.mock.calls[0][0].take).toBe(50);
+    });
+
+    it('lleva take: 50 también del lado paseador', async () => {
+      prisma.conversation.findMany.mockResolvedValue([]);
+      await service.getMyConversations(WALKER_USER_ID, UserRole.WALKER);
+      expect(prisma.conversation.findMany.mock.calls[0][0].take).toBe(50);
+    });
+  });
+
+  describe('getMessages() — take: 200 (backstop)', () => {
+    it('lleva take: 200', async () => {
+      prisma.conversation.findUnique.mockResolvedValue({
+        ownerId: OWNER_PROFILE_ID,
+        walkerId: WALKER_PROFILE_ID,
+      });
+      prisma.message.findMany.mockResolvedValue([]);
+
+      await service.getMessages(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID);
+
+      expect(prisma.message.findMany.mock.calls[0][0].take).toBe(200);
+    });
+  });
 });
