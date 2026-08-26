@@ -7,7 +7,19 @@ import { PrismaService } from "../../database/prisma.service";
 import { TrackingGateway } from "../tracking/tracking.gateway";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { CONTACT_PATTERNS } from "@guau/shared";
-import { UserRole } from "@prisma/client";
+import { UserRole, WalkStatus } from "@prisma/client";
+
+// El chat vive mientras el paseo está abierto (decisión de Joa, guau-
+// politicas.md): "es evidencia para Güau, no para que las partes litiguen
+// entre sí". Un paseo en estos cuatro estados ya llegó a su desenlace —
+// dueño y paseador dejan de ver y de poder escribir; soporte (ADMIN) sigue
+// viendo siempre, entra por el id del paseo.
+const CLOSED_WALK_STATUSES: WalkStatus[] = [
+  WalkStatus.COMPLETED,
+  WalkStatus.CANCELLED_OWNER,
+  WalkStatus.CANCELLED_WALKER,
+  WalkStatus.NOT_PERFORMED,
+];
 
 @Injectable()
 export class ChatService {
@@ -44,16 +56,20 @@ export class ChatService {
 
   async getMyConversations(userId: string, role: string) {
     // Toda lista lleva LIMIT, sin excepción (CLAUDE.md) — esta no tenía
-    // ninguno. take: 50 es backstop, no paginación real: nadie tiene 50
-    // conversaciones simultáneas con paseos suyos.
+    // ninguno. take: 50 es backstop, no paginación real: con el filtro de
+    // abajo (paseo abierto) esto no pasa de 10-15 en la práctica.
     const take = 50;
+    // "No ven" (decisión de Joa, guau-politicas.md): un paseo cerrado sale
+    // de la lista, no solo del acceso a los mensajes — filtrado acá en la
+    // query, nunca después en memoria.
+    const walkOpenFilter = { walk: { status: { notIn: CLOSED_WALK_STATUSES } } };
 
     if (role === UserRole.WALKER) {
       const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
       if (!walker) throw new NotFoundException("Perfil de paseador no encontrado");
 
       return this.prisma.conversation.findMany({
-        where: { walkerId: walker.id },
+        where: { walkerId: walker.id, ...walkOpenFilter },
         include: this.conversationInclude(),
         orderBy: { createdAt: "desc" },
         take,
@@ -64,7 +80,7 @@ export class ChatService {
     if (!owner) throw new NotFoundException("Perfil de dueño no encontrado");
 
     return this.prisma.conversation.findMany({
-      where: { ownerId: owner.id },
+      where: { ownerId: owner.id, ...walkOpenFilter },
       include: this.conversationInclude(),
       orderBy: { createdAt: "desc" },
       take,
@@ -76,6 +92,11 @@ export class ChatService {
   async getMessages(userId: string, role: string, conversationId: string) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
+      select: {
+        ownerId: true,
+        walkerId: true,
+        walk: { select: { status: true } },
+      },
     });
     if (!conversation) throw new NotFoundException("Conversación no encontrada");
 
@@ -115,6 +136,7 @@ export class ChatService {
       select: {
         ownerId: true,
         walkerId: true,
+        walk: { select: { status: true } },
         // select, no include (Ventana #2: un include es un spread con otro
         // nombre) — acá solo hace falta el id del User de cada lado para
         // decidir a quién avisar por socket, nada de OwnerProfile ni
@@ -165,19 +187,40 @@ export class ChatService {
   private async assertConversationAccess(
     userId: string,
     role: string,
-    conversation: { ownerId: string; walkerId: string },
+    conversation: { ownerId: string; walkerId: string; walk: { status: WalkStatus } | null },
   ) {
+    // El chat es evidencia para Güau, no para que las partes litiguen entre
+    // sí (decisión de Joa) — soporte entra siempre, sea cual sea el estado
+    // del paseo. Antes que el chequeo de pertenencia: un admin no es dueño
+    // ni paseador de nada.
+    if (role === UserRole.ADMIN) return;
+
     if (role === UserRole.WALKER) {
       const walker = await this.prisma.walkerProfile.findUnique({ where: { userId } });
       if (!walker || conversation.walkerId !== walker.id) {
         throw new ForbiddenException("No tenés acceso a esta conversación");
       }
-      return;
+    } else {
+      const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
+      if (!owner || conversation.ownerId !== owner.id) {
+        throw new ForbiddenException("No tenés acceso a esta conversación");
+      }
     }
 
-    const owner = await this.prisma.ownerProfile.findUnique({ where: { userId } });
-    if (!owner || conversation.ownerId !== owner.id) {
-      throw new ForbiddenException("No tenés acceso a esta conversación");
+    // El chat vive mientras el paseo está abierto. Falla cerrado: sin paseo
+    // del que leer el estado (Conversation.walkId es opcional en el schema,
+    // aunque hoy siempre venga de uno), no se abre.
+    //
+    // Mismo CÓDIGO 403 que la falta de pertenencia de arriba (nunca un 404
+    // aparte para "cerrado"), pero acá sí con un mensaje específico — y no
+    // es una inconsistencia: a este punto SOLO llega alguien que ya
+    // demostró ser dueño o paseador de esta conversación puntual (si no lo
+    // fuera, ya cortó arriba con el mensaje genérico). No hay nada que
+    // ocultarle a quien ya sabía que este paseo existía y era suyo; lo que
+    // hay que evitar es que el CÓDIGO de respuesta le sirva de oráculo a
+    // alguien que NO es parte — y para esos, este bloque nunca se alcanza.
+    if (!conversation.walk || CLOSED_WALK_STATUSES.includes(conversation.walk.status)) {
+      throw new ForbiddenException("Este paseo ya cerró — el chat no está disponible.");
     }
   }
 

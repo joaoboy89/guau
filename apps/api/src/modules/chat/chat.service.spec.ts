@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UserRole } from '@prisma/client';
+import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { UserRole, WalkStatus } from '@prisma/client';
 import { ChatService } from './chat.service';
 import { PrismaService } from '../../database/prisma.service';
 import { TrackingGateway } from '../tracking/tracking.gateway';
@@ -9,8 +10,17 @@ import { TrackingGateway } from '../tracking/tracking.gateway';
 const CONVERSATION_ID = 'conv-1';
 const OWNER_USER_ID    = 'owner-user-1';
 const WALKER_USER_ID   = 'walker-user-1';
+const ADMIN_USER_ID    = 'admin-user-1';
 const OWNER_PROFILE_ID  = 'op-1';
 const WALKER_PROFILE_ID = 'wp-1';
+
+function conversationRow(status: WalkStatus | null) {
+  return {
+    ownerId: OWNER_PROFILE_ID,
+    walkerId: WALKER_PROFILE_ID,
+    walk: status === null ? null : { status },
+  };
+}
 
 function buildPrismaMock() {
   return {
@@ -76,8 +86,7 @@ describe('ChatService', () => {
   describe('sendMessage() — select mínimo para determinar el destinatario', () => {
     it('el select de owner/walker no trae domicilio ni nombre completo, solo el id del User', async () => {
       prisma.conversation.findUnique.mockResolvedValue({
-        ownerId: OWNER_PROFILE_ID,
-        walkerId: WALKER_PROFILE_ID,
+        ...conversationRow(WalkStatus.CONFIRMED),
         owner:  { user: { id: OWNER_USER_ID } },
         walker: { user: { id: WALKER_USER_ID } },
       });
@@ -109,15 +118,108 @@ describe('ChatService', () => {
 
   describe('getMessages() — take: 200 (backstop)', () => {
     it('lleva take: 200', async () => {
-      prisma.conversation.findUnique.mockResolvedValue({
-        ownerId: OWNER_PROFILE_ID,
-        walkerId: WALKER_PROFILE_ID,
-      });
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(WalkStatus.CONFIRMED));
       prisma.message.findMany.mockResolvedValue([]);
 
       await service.getMessages(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID);
 
       expect(prisma.message.findMany.mock.calls[0][0].take).toBe(200);
+    });
+  });
+
+  // ─── El acceso depende del estado del paseo, no solo de quién sos (1.3) ──
+
+  describe('acceso a getMessages() / sendMessage() según el estado del paseo', () => {
+    it('parte del lado dueño + paseo abierto (CONFIRMED) → accede', async () => {
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(WalkStatus.CONFIRMED));
+      prisma.message.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.getMessages(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID),
+      ).resolves.toEqual([]);
+    });
+
+    it('parte del lado paseador + paseo abierto (WALKER_ON_WAY) → accede', async () => {
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(WalkStatus.WALKER_ON_WAY));
+      prisma.message.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.getMessages(WALKER_USER_ID, UserRole.WALKER, CONVERSATION_ID),
+      ).resolves.toEqual([]);
+    });
+
+    it.each([
+      WalkStatus.COMPLETED,
+      WalkStatus.CANCELLED_OWNER,
+      WalkStatus.CANCELLED_WALKER,
+      WalkStatus.NOT_PERFORMED,
+    ])('parte + paseo cerrado (%s) → 403, aunque sea dueño/paseador real', async (status) => {
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(status));
+
+      await expect(
+        service.getMessages(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('admin + paseo cerrado (COMPLETED) → accede igual', async () => {
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(WalkStatus.COMPLETED));
+      prisma.message.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.getMessages(ADMIN_USER_ID, UserRole.ADMIN, CONVERSATION_ID),
+      ).resolves.toEqual([]);
+      // El admin no pasa por ninguno de los dos perfiles — no es dueño ni paseador de nada.
+      expect(prisma.ownerProfile.findUnique).not.toHaveBeenCalled();
+      expect(prisma.walkerProfile.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('admin + paseo abierto → accede igual', async () => {
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(WalkStatus.IN_PROGRESS));
+      prisma.message.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.getMessages(ADMIN_USER_ID, UserRole.ADMIN, CONVERSATION_ID),
+      ).resolves.toEqual([]);
+    });
+
+    it('conversación sin paseo asociado (walkId null) → falla cerrado, 403 aunque sea parte', async () => {
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(null));
+
+      await expect(
+        service.getMessages(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('quien no es parte de la conversación → 403, sin llegar a mirar el estado del paseo', async () => {
+      prisma.conversation.findUnique.mockResolvedValue(conversationRow(WalkStatus.CONFIRMED));
+      prisma.ownerProfile.findUnique.mockResolvedValue({ id: 'otro-owner', userId: OWNER_USER_ID });
+
+      await expect(
+        service.getMessages(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('conversación inexistente → 404, no 403', async () => {
+      prisma.conversation.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.getMessages(OWNER_USER_ID, UserRole.OWNER, CONVERSATION_ID),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('getMyConversations() — filtra paseos cerrados (1.3, "no ven")', () => {
+    it('el where lleva walk.status.notIn con los cuatro estados cerrados', async () => {
+      prisma.conversation.findMany.mockResolvedValue([]);
+      await service.getMyConversations(WALKER_USER_ID, UserRole.WALKER);
+
+      const where = prisma.conversation.findMany.mock.calls[0][0].where;
+      expect(where.walk.status.notIn).toEqual(
+        expect.arrayContaining([
+          WalkStatus.COMPLETED, WalkStatus.CANCELLED_OWNER,
+          WalkStatus.CANCELLED_WALKER, WalkStatus.NOT_PERFORMED,
+        ]),
+      );
     });
   });
 });
