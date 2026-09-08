@@ -47,12 +47,36 @@ describe('NotificationsService', () => {
 
       const result = await service.getMyNotifications('user-1');
 
-      expect(prisma.notification.findMany).toHaveBeenCalledWith({
-        where:   { userId: 'user-1' },
-        orderBy: { createdAt: 'desc' },
-        take:    50,
-      });
+      expect(prisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where:   { userId: 'user-1' },
+          orderBy: { createdAt: 'desc' },
+          take:    50,
+        }),
+      );
       expect(result).toEqual([{ id: 'n-1' }]);
+    });
+
+    // Ventana #2 de CLAUDE.md: un findMany sin select es una blacklist
+    // implicita — la columna que alguien agregue mañana viaja sola en el
+    // mismo deploy que la crea. Lista blanca con las ocho columnas reales
+    // de Notification (schema.prisma), ni una mas ni una menos.
+    it('pide un select explicito con las ocho columnas de Notification, ninguna de mas', async () => {
+      prisma.notification.findMany.mockResolvedValue([]);
+
+      await service.getMyNotifications('user-1');
+
+      const call = prisma.notification.findMany.mock.calls[0][0];
+      expect(call.select).toEqual({
+        id:        true,
+        userId:    true,
+        title:     true,
+        body:      true,
+        type:      true,
+        data:      true,
+        isRead:    true,
+        createdAt: true,
+      });
     });
   });
 

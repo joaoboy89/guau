@@ -82,9 +82,27 @@ export class NotificationsService {
 
   // ─── Mis notificaciones ──────────────────────────────────
 
+  // Lista blanca explicita (Ventana #2 de CLAUDE.md): un findMany sin select
+  // es una blacklist implicita — la columna que alguien agregue mañana (un
+  // internalNote de admin, un deviceToken) empieza a viajar al navegador de
+  // todos los usuarios en el mismo deploy que la crea, sin que nadie lo
+  // decida. Las ocho de aca son las columnas reales de Notification hoy
+  // (schema.prisma:382-392) — no se achica a lo que el front usa hoy
+  // (lib/store.ts declara seis) porque esa es una decision de producto
+  // aparte, no un detalle de esta poda (decision de Joa, 2026-08-24).
   async getMyNotifications(userId: string) {
     return this.prisma.notification.findMany({
       where: { userId },
+      select: {
+        id:        true,
+        userId:    true,
+        title:     true,
+        body:      true,
+        type:      true,
+        data:      true,
+        isRead:    true,
+        createdAt: true,
+      },
       orderBy: { createdAt: "desc" },
       take: 50,
     });
