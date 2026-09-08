@@ -598,31 +598,6 @@ export class PaymentsService {
       },
     });
 
-    const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
-    weekEnd.setHours(23, 59, 59, 999);
-
-    await this.prisma.payout.upsert({
-      where: {
-        id: `${walk.walkerId}-${weekStart.toISOString().slice(0, 10)}`,
-      },
-      update: {
-        amount: { increment: realWalkerAmount },
-      },
-      create: {
-        id: `${walk.walkerId}-${weekStart.toISOString().slice(0, 10)}`,
-        walkerId: walk.walkerId,
-        amount: realWalkerAmount,
-        periodStart: weekStart,
-        periodEnd: weekEnd,
-        status: PayoutStatus.PENDING,
-      },
-    });
-
     this.logger.log(
       `Pago aprobado para walk ${walk.id} — $ ${realWalkerAmount} acreditado al paseador`
     );

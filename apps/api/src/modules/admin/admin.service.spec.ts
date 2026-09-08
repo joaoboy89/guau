@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { VerificationStatus, WalkStatus, PayoutStatus } from '@prisma/client';
+import { VerificationStatus, WalkStatus } from '@prisma/client';
 import { NOTIFICATION_TYPES } from '@guau/shared';
 import { AdminService } from './admin.service';
 import { PrismaService } from '../../database/prisma.service';
@@ -17,12 +17,6 @@ const BASE_WALKER_PROFILE = {
   verificationStatus: VerificationStatus.PENDING,
   user: { id: WALKER_USER_ID, firstName: 'Juan' },
 };
-
-// Payouts con estructura completa que usa processPayouts()
-const PENDING_PAYOUTS = [
-  { id: 'pay-1', amount: 1500, walker: { user: { id: 'wu-1', firstName: 'Juan' } } },
-  { id: 'pay-2', amount: 2500, walker: { user: { id: 'wu-2', firstName: 'María' } } },
-];
 
 // ─── Mock factories ───────────────────────────────────────────────────────────
 
@@ -43,10 +37,6 @@ function buildPrismaMock() {
     },
     user: {
       count: jest.fn(),
-    },
-    payout: {
-      findMany:   jest.fn(),
-      updateMany: jest.fn(),
     },
   };
 }
@@ -276,69 +266,6 @@ describe('AdminService', () => {
         totalWalkerPaid:   8500,
         thisWeekGross:     2000,
         thisWeekFee:        300,
-      });
-    });
-  });
-
-  // ─── processPayouts() ─────────────────────────────────────────────────────
-
-  describe('processPayouts()', () => {
-    it('sin pagos pendientes: devuelve { processed: 0 } sin llamar a updateMany', async () => {
-      prisma.payout.findMany.mockResolvedValue([]);
-
-      const result = await service.processPayouts();
-
-      expect(result).toEqual({
-        processed: 0,
-        message:   'No hay pagos pendientes para procesar',
-      });
-      expect(prisma.payout.updateMany).not.toHaveBeenCalled();
-    });
-
-    it('con pagos pendientes: llama a updateMany dos veces (PROCESSING → COMPLETED)', async () => {
-      prisma.payout.findMany.mockResolvedValue(PENDING_PAYOUTS);
-      prisma.payout.updateMany.mockResolvedValue({});
-
-      await service.processPayouts();
-
-      expect(prisma.payout.updateMany).toHaveBeenCalledTimes(2);
-      // Primera llamada: PROCESSING
-      expect(prisma.payout.updateMany).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({ data: { status: PayoutStatus.PROCESSING } }),
-      );
-      // Segunda llamada: COMPLETED
-      expect(prisma.payout.updateMany).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({ data: { status: PayoutStatus.COMPLETED } }),
-      );
-    });
-
-    it('con pagos pendientes: llama a notifications.create una vez por payout', async () => {
-      prisma.payout.findMany.mockResolvedValue(PENDING_PAYOUTS);
-      prisma.payout.updateMany.mockResolvedValue({});
-
-      await service.processPayouts();
-
-      expect(notifications.create).toHaveBeenCalledTimes(PENDING_PAYOUTS.length);
-      expect(notifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: PENDING_PAYOUTS[0].walker.user.id,
-          type:   NOTIFICATION_TYPES.WALK_COMPLETED,
-        }),
-      );
-    });
-
-    it('con pagos pendientes: calcula totalTransferred sumando amounts y devuelve conteo correcto', async () => {
-      prisma.payout.findMany.mockResolvedValue(PENDING_PAYOUTS);
-      prisma.payout.updateMany.mockResolvedValue({});
-
-      const result = await service.processPayouts();
-
-      const expectedTotal = PENDING_PAYOUTS.reduce((s, p) => s + p.amount, 0); // 4000
-      expect(result).toMatchObject({
-        processed:        PENDING_PAYOUTS.length,
-        totalTransferred: expectedTotal,
       });
     });
   });

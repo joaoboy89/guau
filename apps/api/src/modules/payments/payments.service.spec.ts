@@ -8,7 +8,7 @@ import {
   BadRequestException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { WalkStatus, PayoutStatus } from '@prisma/client';
+import { WalkStatus } from '@prisma/client';
 import { PaymentsService } from './payments.service';
 import { PrismaService } from '../../database/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -83,7 +83,6 @@ function buildPrismaMock() {
     walkerProfile:   { findUnique: jest.fn(), update: jest.fn() },
     walkParticipant: { findMany: jest.fn() },
     walk:            { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
-    payout:          { upsert: jest.fn() },
   };
 }
 
@@ -537,7 +536,6 @@ describe('PaymentsService', () => {
         mockPaymentGet.mockResolvedValue(approvedPayment()); // net_received_amount: 1320
         prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
         prisma.walk.update.mockResolvedValue({});
-        prisma.payout.upsert.mockResolvedValue({});
 
         await service.handleWebhook(
           { type: 'payment', data: { id: '99999' } },
@@ -556,7 +554,6 @@ describe('PaymentsService', () => {
         mockPaymentGet.mockResolvedValue(approvedPayment({ transaction_details: null }));
         prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
         prisma.walk.update.mockResolvedValue({});
-        prisma.payout.upsert.mockResolvedValue({});
 
         await service.handleWebhook(
           { type: 'payment', data: { id: '99999' } },
@@ -570,30 +567,10 @@ describe('PaymentsService', () => {
         );
       });
 
-      it('pago aprobado: llama a payout.upsert con walkerId y net_received_amount', async () => {
-        mockPaymentGet.mockResolvedValue(approvedPayment()); // net_received_amount: 1320
-        prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
-        prisma.walk.update.mockResolvedValue({});
-        prisma.payout.upsert.mockResolvedValue({});
-
-        await service.handleWebhook(
-          { type: 'payment', data: { id: '99999' } },
-          undefined, undefined,
-        );
-
-        expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
-        const upsertCall = prisma.payout.upsert.mock.calls[0][0];
-        expect(upsertCall.create.walkerId).toBe('walker-1');
-        expect(upsertCall.create.amount).toBe(1320);
-        expect(upsertCall.create.status).toBe(PayoutStatus.PENDING);
-        expect(upsertCall.update.amount).toEqual({ increment: 1320 });
-      });
-
       it('devuelve { status: "processed" } en el camino feliz', async () => {
         mockPaymentGet.mockResolvedValue(approvedPayment());
         prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
         prisma.walk.update.mockResolvedValue({});
-        prisma.payout.upsert.mockResolvedValue({});
 
         const result = await service.handleWebhook(
           { type: 'payment', data: { id: '99999' } },
@@ -610,7 +587,6 @@ describe('PaymentsService', () => {
         mockPaymentGet.mockResolvedValue(approvedPayment());
         prisma.walk.findUnique.mockResolvedValue(WALK_ROW_WITH_WALKER);
         prisma.walk.update.mockResolvedValue({});
-        prisma.payout.upsert.mockResolvedValue({});
 
         await service.handleWebhook(
           { type: 'payment', data: { id: '99999' } },
@@ -621,7 +597,6 @@ describe('PaymentsService', () => {
         expect(MercadoPago as jest.Mock).toHaveBeenCalledWith(
           expect.objectContaining({ accessToken: 'walker-token-xyz' }),
         );
-        expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
       });
 
       it('(d) devuelve { status: "reference_mismatch" } si external_reference no empieza con walkId', async () => {
@@ -636,7 +611,7 @@ describe('PaymentsService', () => {
         );
 
         expect(result).toEqual({ status: 'reference_mismatch' });
-        expect(prisma.payout.upsert).not.toHaveBeenCalled();
+        expect(prisma.walk.update).not.toHaveBeenCalled();
       });
 
       it('devuelve { status: "walk_not_found" } si el walk no existe', async () => {
@@ -653,7 +628,7 @@ describe('PaymentsService', () => {
     // ─── Idempotencia ──────────────────────────────────────────────────────
 
     describe('idempotencia', () => {
-      it('(b) si walk.mpPaymentId ya es el mismo payment.id, no llama a payout.upsert ni walk.update', async () => {
+      it('(b) si walk.mpPaymentId ya es el mismo payment.id, no llama a walk.update', async () => {
         mockPaymentGet.mockResolvedValue(approvedPayment()); // payment.id = 99999
         prisma.walk.findUnique.mockResolvedValue({
           ...WALK_ROW,
@@ -665,7 +640,6 @@ describe('PaymentsService', () => {
           undefined, undefined,
         );
 
-        expect(prisma.payout.upsert).not.toHaveBeenCalled();
         expect(prisma.walk.update).not.toHaveBeenCalled();
       });
 
@@ -676,14 +650,13 @@ describe('PaymentsService', () => {
           mpPaymentId: 'pref-abc', // preference ID, no es el payment.id
         });
         prisma.walk.update.mockResolvedValue({});
-        prisma.payout.upsert.mockResolvedValue({});
 
         await service.handleWebhook(
           { type: 'payment', data: { id: '99999' } },
           undefined, undefined,
         );
 
-        expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
+        expect(prisma.walk.update).toHaveBeenCalledTimes(1);
       });
     });
   });
@@ -706,7 +679,7 @@ describe('PaymentsService', () => {
       global.fetch = jest.fn();
     });
 
-    it('(c) reconcilia un walk con pago approved: llama a walk.update y payout.upsert', async () => {
+    it('(c) reconcilia un walk con pago approved: llama a walk.update', async () => {
       prisma.walk.findMany.mockResolvedValue([WALK_UNRESOLVED]);
       (global.fetch as jest.Mock).mockResolvedValue({
         ok:   true,
@@ -714,14 +687,12 @@ describe('PaymentsService', () => {
       });
       mockPaymentGet.mockResolvedValue(approvedPayment());
       prisma.walk.update.mockResolvedValue({});
-      prisma.payout.upsert.mockResolvedValue({});
 
       await service.reconcilePendingPayments();
 
       expect(prisma.walk.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'walk-1' } }),
       );
-      expect(prisma.payout.upsert).toHaveBeenCalledTimes(1);
     });
 
     it('omite walks con mpPaymentId numérico (ya procesados como payment ID)', async () => {
@@ -761,7 +732,6 @@ describe('PaymentsService', () => {
         approvedPayment({ external_reference: 'walk-2|owner-1' }),
       );
       prisma.walk.update.mockResolvedValue({});
-      prisma.payout.upsert.mockResolvedValue({});
 
       await service.reconcilePendingPayments();
 
@@ -847,7 +817,6 @@ describe('PaymentsService', () => {
 
       expect(signedPrisma.walk.findUnique).not.toHaveBeenCalled();
       expect(signedPrisma.walk.update).not.toHaveBeenCalled();
-      expect(signedPrisma.payout.upsert).not.toHaveBeenCalled();
     });
 
     it('firma válida (HMAC correcto) → no lanza UnauthorizedException', async () => {
@@ -873,7 +842,6 @@ describe('PaymentsService', () => {
       );
       signedPrisma.walk.findUnique.mockResolvedValue(WALK_ROW);
       signedPrisma.walk.update.mockResolvedValue({});
-      signedPrisma.payout.upsert.mockResolvedValue({});
 
       const result = await signedService.handleWebhook(
         { type: 'payment', data: { id: DATA_ID } },
@@ -883,7 +851,6 @@ describe('PaymentsService', () => {
 
       expect(result).toEqual({ status: 'processed' });
       expect(signedPrisma.walk.update).toHaveBeenCalledTimes(1);
-      expect(signedPrisma.payout.upsert).toHaveBeenCalledTimes(1);
     });
 
     it('firma con ts alterado → lanza UnauthorizedException (HMAC no coincide)', async () => {
@@ -970,7 +937,6 @@ describe('PaymentsService', () => {
 
       expect(noSecretPrisma.walk.findUnique).not.toHaveBeenCalled();
       expect(noSecretPrisma.walk.update).not.toHaveBeenCalled();
-      expect(noSecretPrisma.payout.upsert).not.toHaveBeenCalled();
     });
 
     it('fuera de producción sin secret → loguea warning y sigue procesando (no rompe tests/dev)', async () => {
@@ -980,7 +946,6 @@ describe('PaymentsService', () => {
       mockPaymentGet.mockResolvedValue(approvedPayment());
       noSecretPrisma.walk.findUnique.mockResolvedValue(WALK_ROW);
       noSecretPrisma.walk.update.mockResolvedValue({});
-      noSecretPrisma.payout.upsert.mockResolvedValue({});
 
       const result = await noSecretService.handleWebhook(
         { type: 'payment', data: { id: '99999' } },
@@ -1014,7 +979,6 @@ describe('PaymentsService', () => {
 
       expect(prisma.walk.findUnique).not.toHaveBeenCalled();
       expect(prisma.walk.update).not.toHaveBeenCalled();
-      expect(prisma.payout.upsert).not.toHaveBeenCalled();
     });
 
     it('NODE_ENV=production con solo x-signature (sin x-request-id) → UnauthorizedException', async () => {
@@ -1037,7 +1001,6 @@ describe('PaymentsService', () => {
       mockPaymentGet.mockResolvedValue(approvedPayment());
       prisma.walk.findUnique.mockResolvedValue(WALK_ROW);
       prisma.walk.update.mockResolvedValue({});
-      prisma.payout.upsert.mockResolvedValue({});
 
       const result = await service.handleWebhook(
         { type: 'payment', data: { id: '99999' } },

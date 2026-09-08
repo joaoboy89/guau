@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../../database/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
-import { VerificationStatus, WalkStatus, PayoutStatus, UserRole } from "@prisma/client";
+import { VerificationStatus, WalkStatus, UserRole } from "@prisma/client";
 import { NOTIFICATION_TYPES } from "@guau/shared";
 import { VerifyWalkerDto } from "./dto/verify-walker.dto";
 import { QueryAdminWalksDto } from "./dto/query-admin-walks.dto";
@@ -247,66 +247,6 @@ export class AdminService {
         thisWeekGross:   revenueThisWeek._sum.totalAmount  ?? 0,
         thisWeekFee:     revenueThisWeek._sum.platformFee  ?? 0,
       },
-    };
-  }
-
-  // ─── Procesar pagos semanales ────────────────────────────
-  // Encuentra los Payout PENDING del período anterior y los marca como COMPLETED.
-  // En producción aquí iría la llamada a la API de Transferencias de MercadoPago.
-
-  async processPayouts() {
-    const now = new Date();
-
-    const pendingPayouts = await this.prisma.payout.findMany({
-      where: {
-        status: PayoutStatus.PENDING,
-        periodEnd: { lt: now },
-      },
-      include: {
-        walker: {
-          select: { user: { select: { id: true, firstName: true } } },
-        },
-      },
-    });
-
-    if (pendingPayouts.length === 0) {
-      return { processed: 0, message: "No hay pagos pendientes para procesar" };
-    }
-
-    // Marcar como PROCESSING primero (para no procesar dos veces si el job falla)
-    await this.prisma.payout.updateMany({
-      where: { id: { in: pendingPayouts.map((p) => p.id) } },
-      data: { status: PayoutStatus.PROCESSING },
-    });
-
-    // En producción: llamar MP Transfers API por cada payout
-    // const mpTransfer = await mercadopago.transfers.create({ ... })
-
-    // Para MVP: marcar directamente como COMPLETED
-    await this.prisma.payout.updateMany({
-      where: { id: { in: pendingPayouts.map((p) => p.id) } },
-      data: { status: PayoutStatus.COMPLETED },
-    });
-
-    // Notificar a cada paseador
-    await Promise.all(
-      pendingPayouts.map((payout) =>
-        this.notifications.create({
-          userId: payout.walker.user.id,
-          title:  "¡Recibiste tu pago! 💰",
-          body:   `Transferimos $${payout.amount.toLocaleString("es-AR")} a tu cuenta de MercadoPago.`,
-          type:   NOTIFICATION_TYPES.WALK_COMPLETED,
-          data:   { payoutId: payout.id, amount: payout.amount },
-        })
-      )
-    );
-
-    const totalTransferred = pendingPayouts.reduce((s, p) => s + p.amount, 0);
-
-    return {
-      processed: pendingPayouts.length,
-      totalTransferred,
-      message: `${pendingPayouts.length} pagos procesados por $${totalTransferred.toLocaleString("es-AR")} ARS`,
     };
   }
 }

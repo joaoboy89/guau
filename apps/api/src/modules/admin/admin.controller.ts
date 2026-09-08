@@ -44,12 +44,6 @@ export class AdminController {
     return this.admin.getStats();
   }
 
-  @Post("payouts/process")
-  @ApiOperation({ summary: "Procesar cobros semanales pendientes a paseadores" })
-  processPayouts() {
-    return this.admin.processPayouts();
-  }
-
   @Post("walks/:id/refund")
   @ApiOperation({
     summary: "Reembolso total del pago de un paseo (ej. no-show del paseador) — sin acción del vendedor",
