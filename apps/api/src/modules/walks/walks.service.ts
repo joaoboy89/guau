@@ -60,7 +60,7 @@ const WALK_INCLUDE = {
       isAvailable: true,
       verificationStatus: true,
       maxDogsPerWalk: true,
-      user: { select: { firstName: true, lastName: true, avatarUrl: true, phone: true } },
+      user: { select: { firstName: true, avatarUrl: true } },
     },
   },
   participants: {
@@ -69,7 +69,7 @@ const WALK_INCLUDE = {
       owner: {
         select: {
           id: true,
-          user: { select: { firstName: true, lastName: true, avatarUrl: true } },
+          user: { select: { firstName: true, avatarUrl: true } },
         },
       },
     },
@@ -98,9 +98,7 @@ function toPublicWalker(walker: WalkWithInclude["walker"]) {
     maxDogsPerWalk: walker.maxDogsPerWalk,
     user: {
       firstName: walker.user.firstName,
-      lastName: walker.user.lastName,
       avatarUrl: walker.user.avatarUrl,
-      phone: walker.user.phone,
     },
   };
 }
@@ -123,7 +121,6 @@ function toPublicOwner(owner: ParticipantWithInclude["owner"]) {
     id: owner.id,
     user: {
       firstName: owner.user.firstName,
-      lastName: owner.user.lastName,
       avatarUrl: owner.user.avatarUrl,
     },
   };

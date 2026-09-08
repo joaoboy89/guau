@@ -25,7 +25,7 @@ interface WalkDetail {
   pickupCode?: string;
   walkType: { label: string; durationMinutes: number };
   walker: {
-    user: { firstName: string; lastName: string };
+    user: { firstName: string };
   };
   participants: Array<{
     dog: { name: string; size: string };
@@ -144,7 +144,7 @@ export default function WalkDetailPage() {
   }
 
   const dogs = walk.participants.map((p) => p.dog);
-  const walkerName = `${walk.walker.user.firstName} ${walk.walker.user.lastName}`;
+  const walkerName = walk.walker.user.firstName;
   const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
     dateStyle: "long",
     timeStyle: "short",

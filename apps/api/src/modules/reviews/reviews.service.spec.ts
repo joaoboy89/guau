@@ -6,10 +6,15 @@ import { PrismaService } from "../../database/prisma.service";
 const WALKER_PROFILE_ID = "walker-profile-1";
 const WALKER_USER_ID = "walker-user-1";
 
+const OWNER_USER_ID = "owner-user-1";
+const WALK_ID = "walk-1";
+
 function buildPrismaMock() {
   return {
-    walkerProfile: { findUnique: jest.fn() },
-    review: { findMany: jest.fn() },
+    walkerProfile: { findUnique: jest.fn(), update: jest.fn() },
+    walk: { findUnique: jest.fn() },
+    user: { findUnique: jest.fn() },
+    review: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), aggregate: jest.fn() },
   };
 }
 
@@ -28,6 +33,48 @@ describe("ReviewsService", () => {
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  // ─── create() ───────────────────────────────────────────────────────────────
+
+  describe("create()", () => {
+    it("camino feliz OWNER→WALKER: la respuesta no lleva el apellido de ninguna de las dos partes", async () => {
+      prisma.walk.findUnique.mockResolvedValue({
+        id: WALK_ID,
+        status: "COMPLETED",
+        walker: { id: WALKER_PROFILE_ID, user: { id: WALKER_USER_ID } },
+        participants: [{ owner: { user: { id: OWNER_USER_ID } } }],
+      });
+      prisma.user.findUnique.mockResolvedValue({ id: WALKER_USER_ID });
+      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.create.mockResolvedValue({
+        id: "review-1",
+        rating: 5,
+        comment: "Todo perfecto",
+        reviewer: { id: OWNER_USER_ID, firstName: "Ana", avatarUrl: null },
+        reviewee: { id: WALKER_USER_ID, firstName: "Juan" },
+      });
+      prisma.walkerProfile.findUnique.mockResolvedValue({ rating: 4.5, totalReviews: 3 });
+
+      const result = await service.create(OWNER_USER_ID, "OWNER", {
+        walkId: WALK_ID,
+        revieweeId: WALKER_USER_ID,
+        rating: 5,
+        comment: "Todo perfecto",
+      });
+
+      expect(result.reviewer).not.toHaveProperty("lastName");
+      expect(result.reviewee).not.toHaveProperty("lastName");
+      // El select que se le pide a Prisma tampoco debe pedir el apellido de nadie
+      expect(prisma.review.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: {
+            reviewer: { select: { id: true, firstName: true, avatarUrl: true } },
+            reviewee: { select: { id: true, firstName: true } },
+          },
+        })
+      );
+    });
+  });
 
   // ─── getWalkerReviews() ─────────────────────────────────────────────────────
 

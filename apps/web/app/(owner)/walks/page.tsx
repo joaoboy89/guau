@@ -15,7 +15,7 @@ interface Walk {
   isPaid: boolean;
   isExpired: boolean;
   walkType: { label: string };
-  walker: { user: { firstName: string; lastName: string } };
+  walker: { user: { firstName: string } };
 }
 
 interface WalksMeta {
@@ -155,7 +155,7 @@ function WalkCard({ walk, showPayCta }: { walk: Walk; showPayCta?: boolean }) {
     dateStyle: "long",
     timeStyle: "short",
   });
-  const walkerName = `${walk.walker.user.firstName} ${walk.walker.user.lastName}`;
+  const walkerName = walk.walker.user.firstName;
 
   return (
     <li>

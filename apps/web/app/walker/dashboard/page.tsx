@@ -92,7 +92,7 @@ interface WalkItem {
   walkType: { label: string; durationMinutes: number };
   participants: Array<{
     dog:   { name: string };
-    owner: { user: { firstName: string; lastName: string } };
+    owner: { user: { firstName: string } };
   }>;
 }
 
@@ -864,9 +864,7 @@ export default function WalkerDashboardPage() {
               const dateStr = formatDateTimeBA(new Date(walk.scheduledAt));
               const first = walk.participants[0];
               const dogName   = first?.dog.name ?? "—";
-              const ownerName = first
-                ? `${first.owner.user.firstName} ${first.owner.user.lastName}`
-                : "—";
+              const ownerName = first ? first.owner.user.firstName : "—";
               const isActioning = actioning === walk.id;
 
               return (
@@ -928,9 +926,7 @@ export default function WalkerDashboardPage() {
               const dateStr = formatDateTimeBA(new Date(walk.scheduledAt));
               const first     = walk.participants[0];
               const dogName   = first?.dog.name ?? "—";
-              const ownerName = first
-                ? `${first.owner.user.firstName} ${first.owner.user.lastName}`
-                : "—";
+              const ownerName = first ? first.owner.user.firstName : "—";
               const next        = nextWalkAction(walk.status);
               const availability = next
                 ? walkActionAvailability(next.action, {

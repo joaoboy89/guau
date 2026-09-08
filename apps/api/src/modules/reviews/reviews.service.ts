@@ -73,8 +73,11 @@ export class ReviewsService {
     const review = await this.prisma.review.create({
       data: { walkId, reviewerId: userId, revieweeId, rating, comment },
       include: {
-        reviewer: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
-        reviewee: { select: { id: true, firstName: true, lastName: true } },
+        // Apellido: dato de Guau, no de las partes — ninguno de los dos
+        // extremos de una review se ven el apellido del otro. Mismo criterio
+        // que getWalkerReviews() de mas abajo.
+        reviewer: { select: { id: true, firstName: true, avatarUrl: true } },
+        reviewee: { select: { id: true, firstName: true } },
       },
     });
 

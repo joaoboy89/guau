@@ -93,7 +93,7 @@ const WALK_FULL = {
     isAvailable:         true,
     verificationStatus:  VerificationStatus.VERIFIED,
     maxDogsPerWalk:      3,
-    user: { firstName: 'Juan', lastName: 'Pérez', avatarUrl: null, phone: null },
+    user: { firstName: 'Juan', avatarUrl: null },
   },
   participants: [],
 };
@@ -644,6 +644,9 @@ describe('WalksService', () => {
       // WALK_FULL no tiene mpPaymentId (undefined) → isPaid false;
       // scheduledAt 2026-07-06 ya pasó → isExpired true.
       expect(result.data).toEqual([expectedPublicWalk(WALK_FULL, false)]);
+      // Apellido y telefono: dato de Guau, el dueño nunca ve el del paseador.
+      expect(result.data[0].walker.user).not.toHaveProperty('lastName');
+      expect(result.data[0].walker.user).not.toHaveProperty('phone');
     });
 
     it('OWNER: lanza NotFoundException si no existe ownerProfile', async () => {
@@ -670,6 +673,9 @@ describe('WalksService', () => {
         }),
       );
       expect(result.data).toEqual([expectedPublicWalk(WALK_FULL, false)]);
+      // El dueño ve al paseador de su walk: apellido y telefono no cruzan.
+      expect(result.data[0].walker.user).not.toHaveProperty('lastName');
+      expect(result.data[0].walker.user).not.toHaveProperty('phone');
     });
 
     it('OWNER: findMyWalks ya no hace la consulta previa de walkParticipant.findMany', async () => {
@@ -803,6 +809,7 @@ describe('WalksService', () => {
       expect(owner).not.toHaveProperty('neighborhood');
       expect(owner).not.toHaveProperty('lat');
       expect(owner).not.toHaveProperty('lng');
+      expect(owner.user).not.toHaveProperty('lastName');
     });
 
     // ─── Paginación (Ventana 4) ──────────────────────────────────────────────
@@ -963,6 +970,8 @@ describe('WalksService', () => {
       expect(result).toEqual(expectedPublicWalk(WALK_FULL, false));
       expect(result.walker).not.toHaveProperty('mpAccessToken');
       expect(result.walker).not.toHaveProperty('mpUserId');
+      expect(result.walker.user).not.toHaveProperty('lastName');
+      expect(result.walker.user).not.toHaveProperty('phone');
     });
 
     it('camino feliz OWNER: un participante puede ver el walk', async () => {
@@ -974,6 +983,9 @@ describe('WalksService', () => {
 
       const result = await service.findById(OWNER_USER_ID, UserRole.OWNER, WALK_ID);
       expect(result).toEqual(expectedPublicWalk(WALK_FULL, false));
+      // El dueño ve al paseador de su walk: apellido y telefono no cruzan.
+      expect(result.walker.user).not.toHaveProperty('lastName');
+      expect(result.walker.user).not.toHaveProperty('phone');
     });
 
     it('isPaid es true cuando mpPaymentId es numérico (pago real confirmado)', async () => {
@@ -1058,6 +1070,7 @@ describe('WalksService', () => {
       expect(owner).not.toHaveProperty('neighborhood');
       expect(owner).not.toHaveProperty('lat');
       expect(owner).not.toHaveProperty('lng');
+      expect(owner.user).not.toHaveProperty('lastName');
     });
   });
 
