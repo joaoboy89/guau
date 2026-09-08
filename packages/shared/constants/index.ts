@@ -315,7 +315,15 @@ export const CHANNEL_MENTION_PATTERNS = [
   /\btel\b/i,
   /celular/i,
   /\bcel\b/i,
-  /\bn[uú]mero/i,
+  // "numero" solo, sin contexto, marcaba la coordinacion mas comun del chat
+  // ("el numero de la casa", "el numero del depto") — puro ruido para el
+  // dia que exista un panel de admin mirando esta bandera. Se ata a dos
+  // contextos que sí son un dato personal: "numero de <canal>" (la excusa
+  // explicita) y el posesivo "tu/mi numero" (que separa el dato propio de
+  // la direccion — "el numero" es casi siempre la casa, "tu numero" nunca
+  // lo es). Decision de Joa, 2026-09-07.
+  /n[uú]mero\s+de\s+(tel[eé]fono|tel|cel(ular)?|whats\w*|wasap|telegram|contacto)/i,
+  /\b(tu|mi)\s+n[uú]mero\b/i,
   /\bll[aá]mame\b/i,
   /telegram/i,
   /mail/i,

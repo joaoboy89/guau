@@ -170,4 +170,28 @@ describe('hasContactChannelMention() — nivel 2, no bloquea, solo marca', () =>
     expect(hasContactChannelMention('te cancelo el paseo de mañana')).toBe(false);
     expect(hasContactChannelMention('lo pasea Marcelo hoy')).toBe(false);
   });
+
+  // "numero" atado al contexto (decisión de Joa, 2026-09-07): sin esto, la
+  // palabra suelta marcaba la coordinación más común del chat ("el numero
+  // de la casa") — puro ruido para el panel de admin del día de mañana. Se
+  // ata a "numero de <canal>" y al posesivo "tu/mi numero", que es lo que
+  // separa el dato personal de una dirección.
+
+  it('detecta "numero"/"número" con posesivo (tu/mi) — el dato personal', () => {
+    expect(hasContactChannelMention('pasame tu numero')).toBe(true);
+    expect(hasContactChannelMention('cual es tu numero?')).toBe(true);
+    expect(hasContactChannelMention('te paso mi numero')).toBe(true);
+  });
+
+  it('detecta "numero de <canal>" aunque no lleve posesivo', () => {
+    expect(hasContactChannelMention('me das tu numero de telefono?')).toBe(true);
+    expect(hasContactChannelMention('numero de celular?')).toBe(true);
+  });
+
+  it('NO detecta "numero" sin posesivo ni canal — es una dirección, no un dato personal', () => {
+    expect(hasContactChannelMention('cual es el numero de la casa?')).toBe(false);
+    expect(hasContactChannelMention('toca el numero 4')).toBe(false);
+    expect(hasContactChannelMention('el numero del depto es 3B')).toBe(false);
+    expect(hasContactChannelMention('que numero de calle es?')).toBe(false);
+  });
 });
