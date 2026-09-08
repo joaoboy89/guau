@@ -111,4 +111,63 @@ describe('hasContactChannelMention() — nivel 2, no bloquea, solo marca', () =>
   it('no detecta nada en un mensaje sin mención de canal', () => {
     expect(hasContactChannelMention('dale, nos vemos a las 10:30')).toBe(false);
   });
+
+  // Encontrado probando el chat en staging (2026-09-07): "me pasas tu nro de
+  // telefono?" pasaba sin marcarse — la lista tenía cinco patrones y ninguno
+  // era el teléfono.
+
+  it('detecta "telefono"', () => {
+    expect(hasContactChannelMention('me pasas tu nro de telefono?')).toBe(true);
+  });
+
+  it('detecta "teléfono" con tilde', () => {
+    expect(hasContactChannelMention('mejor decime tu teléfono')).toBe(true);
+  });
+
+  it('detecta "tel" como palabra sola', () => {
+    expect(hasContactChannelMention('pasame el tel')).toBe(true);
+  });
+
+  it('detecta "celular"', () => {
+    expect(hasContactChannelMention('no tengo tu celular anotado')).toBe(true);
+  });
+
+  it('detecta "cel" como palabra sola', () => {
+    expect(hasContactChannelMention('dale tu cel')).toBe(true);
+  });
+
+  it('detecta "numero"/"número"', () => {
+    expect(hasContactChannelMention('cual es tu numero')).toBe(true);
+    expect(hasContactChannelMention('cual es tu número')).toBe(true);
+  });
+
+  it('detecta "llamame"/"llámame"', () => {
+    expect(hasContactChannelMention('llamame cuando puedas')).toBe(true);
+    expect(hasContactChannelMention('llámame cuando puedas')).toBe(true);
+  });
+
+  it('detecta "telegram"', () => {
+    expect(hasContactChannelMention('tenes telegram?')).toBe(true);
+  });
+
+  it('detecta "mail"', () => {
+    expect(hasContactChannelMention('te lo mando por mail')).toBe(true);
+  });
+
+  it('detecta "correo"', () => {
+    expect(hasContactChannelMention('pasame tu correo')).toBe(true);
+  });
+
+  // Falsos positivos de "tel"/"cel" como substring suelto — el motivo del
+  // \b en los dos patrones.
+
+  it('NO detecta "tel" adentro de "hotel" ni "cartel"', () => {
+    expect(hasContactChannelMention('nos encontramos en el hotel de la esquina')).toBe(false);
+    expect(hasContactChannelMention('vi un cartel en la plaza')).toBe(false);
+  });
+
+  it('NO detecta "cel" adentro de "cancelo" ni "marcelo"', () => {
+    expect(hasContactChannelMention('te cancelo el paseo de mañana')).toBe(false);
+    expect(hasContactChannelMention('lo pasea Marcelo hoy')).toBe(false);
+  });
 });

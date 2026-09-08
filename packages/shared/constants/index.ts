@@ -302,12 +302,24 @@ export function hasBlockingContactInfo(text: string): boolean {
 // habría bloqueado si lo hubiera). No bloquea: solo marca
 // Message.containsContactInfo para que quede registrado, sin trabar a
 // alguien que escribe "no tengo WhatsApp".
+// "tel" y "cel" van con \b en las dos puntas: sin eso matchean como
+// substring suelto adentro de palabras comunes ("hoTEL", "carTEL",
+// "canCELo") que no tienen nada que ver con un canal de contacto.
 export const CHANNEL_MENTION_PATTERNS = [
   /whatsapp/i,
   /wasap/i,
   /instagram/i,
   /insta\b/i,
   /\big\b/i,
+  /tel[eé]fono/i,
+  /\btel\b/i,
+  /celular/i,
+  /\bcel\b/i,
+  /\bn[uú]mero/i,
+  /\bll[aá]mame\b/i,
+  /telegram/i,
+  /mail/i,
+  /correo/i,
 ] as const;
 
 export function hasContactChannelMention(text: string): boolean {
