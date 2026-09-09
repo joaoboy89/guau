@@ -10,6 +10,7 @@ import { STATUS_LABEL, canCancelWalk } from "@/lib/walk-status";
 import { Container, Button } from "@/components/ui";
 import CancelWalkDialog from "@/components/CancelWalkDialog";
 import ChatPanel from "@/components/ChatPanel";
+import { WalkIdBadge } from "@/components/WalkIdBadge";
 
 interface WalkDetail {
   id: string;
@@ -161,6 +162,7 @@ export default function WalkDetailPage() {
             ← Mis paseos
           </Link>
           <h1 className="text-xl font-serif font-bold text-brand-text">Detalle del paseo</h1>
+          <WalkIdBadge id={walk.id} />
         </header>
 
         {/* Banner de resultado de pago */}

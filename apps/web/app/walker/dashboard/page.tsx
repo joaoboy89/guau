@@ -21,6 +21,7 @@ import CancelWalkDialog from "@/components/CancelWalkDialog";
 import ChatDialog from "@/components/ChatDialog";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import StartWalkDialog from "@/components/StartWalkDialog";
+import { WalkIdBadge } from "@/components/WalkIdBadge";
 import { AxiosError } from "axios";
 import { START_WITHOUT_CODE_REASON, type StartWithoutCodeReason } from "@guau/shared";
 
@@ -1019,6 +1020,7 @@ export default function WalkerDashboardPage() {
                       </Button>
                     )}
                   </div>
+                  <WalkIdBadge id={walk.id} />
                 </div>
               );
             })}
