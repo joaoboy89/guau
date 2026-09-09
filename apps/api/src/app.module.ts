@@ -17,6 +17,7 @@ import { ReviewsModule } from "./modules/reviews/reviews.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { AdminModule } from "./modules/admin/admin.module";
+import { SupportModule } from "./modules/support/support.module";
 import { WalkTypesModule } from "./modules/walk-types/walk-types.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
@@ -39,6 +40,7 @@ import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
     PaymentsModule,
     NotificationsModule,
     AdminModule,
+    SupportModule,
     WalkTypesModule,
   ],
   providers: [
