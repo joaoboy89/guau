@@ -162,54 +162,6 @@ describe('AdminService', () => {
     });
   });
 
-  // ─── getAllWalks() ────────────────────────────────────────────────────────
-
-  describe('getAllWalks()', () => {
-    it('sin filtros: llama a findMany + count en paralelo y devuelve { data, meta } con defaults page=1 limit=20', async () => {
-      const walks = [{ id: 'w1' }];
-      prisma.walk.findMany.mockResolvedValue(walks);
-      prisma.walk.count.mockResolvedValue(1);
-
-      const result = await service.getAllWalks({});
-
-      expect(prisma.walk.findMany).toHaveBeenCalledTimes(1);
-      expect(prisma.walk.count).toHaveBeenCalledTimes(1);
-      expect(result).toEqual({
-        data: walks,
-        meta: { total: 1, page: 1, limit: 20, totalPages: 1 },
-      });
-    });
-
-    it('con status y walkerId: se agregan como filtros en el where', async () => {
-      prisma.walk.findMany.mockResolvedValue([]);
-      prisma.walk.count.mockResolvedValue(0);
-
-      await service.getAllWalks({ status: 'PENDING', walkerId: 'wp-99' });
-
-      const expected = expect.objectContaining({
-        where: { status: WalkStatus.PENDING, walkerId: 'wp-99' },
-      });
-      expect(prisma.walk.findMany).toHaveBeenCalledWith(expected);
-      expect(prisma.walk.count).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { status: WalkStatus.PENDING, walkerId: 'wp-99' } }),
-      );
-    });
-
-    it('con page/limit custom: skip = (page-1)*limit y totalPages = ceil(total/limit)', async () => {
-      prisma.walk.findMany.mockResolvedValue([]);
-      prisma.walk.count.mockResolvedValue(45);
-
-      const result = await service.getAllWalks({ page: 3, limit: 10 });
-
-      // skip = (3-1)*10 = 20
-      expect(prisma.walk.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ skip: 20, take: 10 }),
-      );
-      // totalPages = ceil(45/10) = 5
-      expect(result.meta).toEqual({ total: 45, page: 3, limit: 10, totalPages: 5 });
-    });
-  });
-
   // ─── getStats() ───────────────────────────────────────────────────────────
 
   describe('getStats()', () => {

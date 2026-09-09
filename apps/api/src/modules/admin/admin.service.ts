@@ -4,7 +4,6 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { VerificationStatus, WalkStatus, UserRole } from "@prisma/client";
 import { NOTIFICATION_TYPES } from "@guau/shared";
 import { VerifyWalkerDto } from "./dto/verify-walker.dto";
-import { QueryAdminWalksDto } from "./dto/query-admin-walks.dto";
 
 @Injectable()
 export class AdminService {
@@ -102,58 +101,6 @@ export class AdminService {
     }
 
     return updated;
-  }
-
-  // ─── Todos los paseos ────────────────────────────────────
-
-  async getAllWalks(query: QueryAdminWalksDto) {
-    const { status, walkerId, page = 1, limit = 20 } = query;
-    const skip = (page - 1) * limit;
-
-    const where = {
-      ...(status && { status: status as WalkStatus }),
-      ...(walkerId && { walkerId }),
-    };
-
-    const [walks, total] = await Promise.all([
-      this.prisma.walk.findMany({
-        where,
-        include: {
-          walkType: true,
-          walker: {
-            select: {
-              id: true,
-              rating: true,
-              user: { select: { firstName: true, lastName: true, email: true } },
-            },
-          },
-          participants: {
-            include: {
-              dog: { select: { name: true, size: true } },
-              owner: {
-                include: {
-                  user: { select: { firstName: true, lastName: true } },
-                },
-              },
-            },
-          },
-        },
-        orderBy: { scheduledAt: "desc" },
-        skip,
-        take: limit,
-      }),
-      this.prisma.walk.count({ where }),
-    ]);
-
-    return {
-      data: walks,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
   }
 
   // ─── Métricas generales ──────────────────────────────────
