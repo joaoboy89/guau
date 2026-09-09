@@ -128,6 +128,7 @@ describe('PaymentsService', () => {
   let prisma: ReturnType<typeof buildPrismaMock>;
   let config: ReturnType<typeof buildConfigMock>;
   let notificationsService: ReturnType<typeof buildNotificationsServiceMock>;
+  let cryptoMock: { encrypt: jest.Mock; decrypt: jest.Mock };
 
   beforeEach(async () => {
     prisma = buildPrismaMock();
@@ -141,7 +142,7 @@ describe('PaymentsService', () => {
     (Preference as jest.Mock).mockImplementation(() => ({ create: mockPreferenceCreate }));
     (Payment as jest.Mock).mockImplementation(() => ({ get: mockPaymentGet }));
 
-    const cryptoMock = {
+    cryptoMock = {
       encrypt: jest.fn((s: string) => s),
       decrypt: jest.fn((s: string) => s),
     };
@@ -250,6 +251,23 @@ describe('PaymentsService', () => {
       });
       await expect(service.createPreference('user-1', DTO))
         .rejects.toThrow(BadRequestException);
+    });
+
+    // El comportamiento que le importa al usuario del fix de crypto.service.ts:
+    // un token que existe pero no se puede desencriptar (ENCRYPTION_KEY
+    // rotada, o el dato viene de otro ambiente) NO puede tirar un 500 —
+    // decrypt() ya lo resuelve devolviendo "", y acá se prueba que
+    // createPreference lo trata exactamente igual que "no conectó su cuenta"
+    // (mismo BadRequestException, mismo mensaje), no como un error interno.
+    it('token indescifrable (clave rotada u otro ambiente): 400 claro, NO 500', async () => {
+      setupHappyPath();
+      cryptoMock.decrypt.mockReturnValue('');
+
+      await expect(service.createPreference('user-1', DTO))
+        .rejects.toThrow(BadRequestException);
+      await expect(service.createPreference('user-1', DTO))
+        .rejects.toThrow('El paseador todavía no conectó su cuenta de MercadoPago');
+      expect(mockPreferenceCreate).not.toHaveBeenCalled();
     });
 
     // Con UN solo participante, unit_price y marketplace_fee coinciden con lo

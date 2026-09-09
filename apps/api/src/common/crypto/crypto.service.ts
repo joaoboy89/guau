@@ -41,8 +41,36 @@ export class CryptoService {
     const iv = Buffer.from(ivHex, "hex");
     const tag = Buffer.from(tagHex, "hex");
     const ciphertext = Buffer.from(ciphertextHex, "hex");
-    const decipher = crypto.createDecipheriv(ALGO, this.key, iv, { authTagLength: TAG_BYTES });
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    try {
+      const decipher = crypto.createDecipheriv(ALGO, this.key, iv, { authTagLength: TAG_BYTES });
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    } catch {
+      // AES-256-GCM verifica el tag de autenticacion en decipher.final() —
+      // un token cifrado con OTRA clave tiene el formato iv:tag:ciphertext
+      // igual que uno valido (pasa el chequeo de arriba) y recien acá
+      // revienta. Mismo hecho del mundo real que el caso legacy de arriba
+      // ("este token no sirve"), pero nivel `error` en vez de `warn`: un
+      // token legacy es historia; una clave que no corresponde significa
+      // una rotacion en curso (esperada, transitoria) o datos cruzados
+      // entre ambientes (nada esperado) — las dos merecen que alguien
+      // mire. Sin este catch, decipher.final() tira y sube sin atrapar a
+      // los cuatro llamadores de payments.service.ts como un 500 generico
+      // — exactamente el "Ocurrio un error" que CLAUDE.md prohibe, y la
+      // razon practica de que ENCRYPTION_KEY nunca se rote: rotarla hoy
+      // tira la pasarela de pagos abajo.
+      //
+      // Limitacion conocida: decrypt() solo recibe el string cifrado, no
+      // sabe de que paseador es — el log no puede nombrarlo. Darle ese
+      // contexto exige cambiar la firma y tocar los cuatro call sites de
+      // payments.service.ts; mas grande que este fix, decision de Joa.
+      this.logger.error(
+        "No se pudo desencriptar mpAccessToken: la clave no corresponde (ENCRYPTION_KEY rotada, " +
+        "o el dato viene de otro ambiente). Se trata al paseador como NO CONECTADO — va a tener " +
+        "que reconectar su cuenta de MercadoPago. El cobro se rechaza con el mensaje normal, no " +
+        "con un 500.",
+      );
+      return "";
+    }
   }
 }
