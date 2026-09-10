@@ -53,5 +53,10 @@ apps/api/prisma/migrations/dev.db
 *.crt
 infra/vps/ssl/
 
+# Credenciales de Google Cloud (service accounts, ADC)
+gcp-key.json
+*-key.json
+*credentials*.json
+
 # Coverage
 coverage/
