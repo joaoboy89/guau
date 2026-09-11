@@ -1,4 +1,4 @@
-const BUENOS_AIRES_TIMEZONE = "America/Argentina/Buenos_Aires";
+export const BUENOS_AIRES_TIMEZONE = "America/Argentina/Buenos_Aires";
 
 /**
  * Toda hora que se le muestra a un humano tiene que ser la de Buenos Aires,
@@ -23,7 +23,7 @@ export function formatTimeBA(date: Date): string {
 }
 
 /** "YYYY-MM-DD" en hora de Buenos Aires — clave de dia, no para mostrar. */
-function dateKeyBA(date: Date): string {
+export function dateKeyBA(date: Date): string {
   return date.toLocaleDateString("en-CA", { timeZone: BUENOS_AIRES_TIMEZONE });
 }
 
