@@ -1,9 +1,24 @@
-import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from "@nestjs/common";
 import { PrismaService } from "../../database/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
-import { VerificationStatus, WalkStatus, UserRole } from "@prisma/client";
+import { VerificationStatus, VerificationMethod, WalkStatus, UserRole, Prisma } from "@prisma/client";
 import { NOTIFICATION_TYPES } from "@guau/shared";
-import { VerifyWalkerDto } from "./dto/verify-walker.dto";
+import { VerifyWalkerDto, VerifyWalkerAction } from "./dto/verify-walker.dto";
+import { QueryWalkersDto } from "./dto/query-walkers.dto";
+
+// reject/suspend/reinstate necesitan que quede escrito el motivo — approve
+// no, porque "aprobado" no necesita justificarse de la misma forma.
+const ACTIONS_THAT_REQUIRE_NOTES: VerifyWalkerAction[] = ["reject", "suspend", "reinstate"];
+
+// Una linea por evento, con fecha — nunca se pisa (ver verifyWalker). Antes
+// era `dto.notes ?? null`, que borraba el historial entero al ejecutar una
+// accion sin nota nueva (docs/diseños/verificacion-de-paseadores.md §1/§6).
+const ACTION_LABEL: Record<VerifyWalkerAction, string> = {
+  approve:   "APROBADO",
+  reject:    "RECHAZADO",
+  suspend:   "SUSPENDIDO",
+  reinstate: "REACTIVADO",
+};
 
 @Injectable()
 export class AdminService {
@@ -12,95 +27,203 @@ export class AdminService {
     private notifications: NotificationsService,
   ) {}
 
-  // ─── Paseadores pendientes de verificación ───────────────
+  // ─── Paseadores por estado de verificación ───────────────
 
-  async getPendingWalkers() {
-    return this.prisma.walkerProfile.findMany({
-      where: { verificationStatus: VerificationStatus.PENDING },
-      select: {
-        id: true,
-        userId: true,
-        bio: true,
-        dniNumber: true,
-        dniPhotoUrl: true,
-        selfieUrl: true,
-        rating: true,
-        totalReviews: true,
-        isAvailable: true,
-        maxDogsPerWalk: true,
-        centerLat: true,
-        centerLng: true,
-        radiusKm: true,
-        verificationStatus: true,
-        verificationNotes: true,
-        user: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-            phone: true,
-            createdAt: true,
+  async getWalkers(query: QueryWalkersDto) {
+    const status = query.status ?? VerificationStatus.PENDING;
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.walkerProfile.findMany({
+        where: { verificationStatus: status },
+        select: {
+          id: true,
+          userId: true,
+          bio: true,
+          rating: true,
+          totalReviews: true,
+          isAvailable: true,
+          maxDogsPerWalk: true,
+          centerLat: true,
+          centerLng: true,
+          radiusKm: true,
+          verificationStatus: true,
+          verificationNotes: true,
+          verificationMethod: true,
+          verifiedAt: true,
+          verifiedById: true,
+          // dniNumber / dniPhotoUrl / selfieUrl quedan afuera a proposito:
+          // en la etapa 1 estan vacios y no se van a llenar — "no se saca
+          // de la salida: no se trae de la base" (verificacion-de-paseadores.md §3).
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+              createdAt: true,
+            },
           },
         },
-      },
-      orderBy: { user: { createdAt: "asc" } },
-    });
+        orderBy: { user: { createdAt: "asc" } },
+        skip,
+        take: limit,
+      }),
+      this.prisma.walkerProfile.count({ where: { verificationStatus: status } }),
+    ]);
+
+    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
-  // ─── Aprobar / rechazar paseador ─────────────────────────
+  // ─── Verificar identidad: aprobar / rechazar / suspender / reactivar ─────
 
-  async verifyWalker(walkerProfileId: string, dto: VerifyWalkerDto) {
-    if (dto.action === "reject" && !dto.notes) {
+  async verifyWalker(walkerProfileId: string, dto: VerifyWalkerDto, adminId: string) {
+    if (ACTIONS_THAT_REQUIRE_NOTES.includes(dto.action) && !dto.notes) {
       throw new BadRequestException(
-        "Debés incluir una nota explicando el motivo del rechazo"
+        `Debés incluir una nota explicando el motivo para "${dto.action}"`
       );
     }
 
     const walker = await this.prisma.walkerProfile.findUnique({
       where: { id: walkerProfileId },
-      include: { user: { select: { id: true, firstName: true } } },
+      include: { user: { select: { id: true, firstName: true, email: true } } },
     });
     if (!walker) throw new NotFoundException("Paseador no encontrado");
 
-    const newStatus =
-      dto.action === "approve"
-        ? VerificationStatus.VERIFIED
-        : VerificationStatus.REJECTED;
+    // REJECTED es terminal: no hay accion que lo saque de ahi (§6).
+    if (walker.verificationStatus === VerificationStatus.REJECTED) {
+      throw new ConflictException(
+        "Este paseador fue rechazado definitivamente. El rechazo no se revierte."
+      );
+    }
+
+    if (dto.action === "reinstate" && walker.verificationStatus !== VerificationStatus.SUSPENDED) {
+      throw new ConflictException(
+        "Solo se puede reactivar a un paseador que está SUSPENDED"
+      );
+    }
+
+    // Sin esto, "approve" sobre un SUSPENDED llegaría a VERIFIED sin pasar
+    // por la nota obligatoria de "reinstate" — el mismo destino, sin dejar
+    // rastro de por qué se levantó la suspensión.
+    if (dto.action === "approve" && walker.verificationStatus === VerificationStatus.SUSPENDED) {
+      throw new ConflictException(
+        'Este paseador está SUSPENDED. Para volver a VERIFIED usá la acción "reinstate" (exige nota).'
+      );
+    }
+
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      select: { email: true },
+    });
+
+    const data: Prisma.WalkerProfileUpdateInput = {
+      verificationStatus: this.nextStatus(dto.action),
+      verificationNotes: this.appendNote(
+        walker.verificationNotes,
+        dto.action,
+        dto.notes,
+        admin?.email ?? adminId,
+      ),
+    };
+
+    if (dto.action === "approve") {
+      data.verificationMethod = VerificationMethod.PERSONAL;
+      data.verifiedAt = new Date();
+      data.verifiedById = adminId;
+    }
 
     const updated = await this.prisma.walkerProfile.update({
       where: { id: walkerProfileId },
-      data: {
-        verificationStatus: newStatus,
-        verificationNotes: dto.notes ?? null,
-      },
+      data,
       select: {
         id: true,
         verificationStatus: true,
         verificationNotes: true,
+        verificationMethod: true,
+        verifiedAt: true,
+        verifiedById: true,
       },
     });
 
-    // Notificar al paseador
-    if (dto.action === "approve") {
-      await this.notifications.create({
-        userId: walker.user.id,
-        title: "¡Tu cuenta fue verificada! 🎉",
-        body: "Ya podés activar tu disponibilidad y empezar a recibir reservas en Güau.",
-        type: NOTIFICATION_TYPES.WALK_CONFIRMED,
-        data: { walkerProfileId },
-      });
-    } else {
-      await this.notifications.create({
-        userId: walker.user.id,
-        title: "Verificación pendiente",
-        body: `Revisamos tu solicitud y necesitamos que ajustes algo: ${dto.notes}`,
-        type: NOTIFICATION_TYPES.WALK_REJECTED,
-        data: { walkerProfileId, notes: dto.notes },
-      });
-    }
+    await this.notifyWalker(dto.action, walker.user.id, walkerProfileId, dto.notes);
 
     return updated;
+  }
+
+  private nextStatus(action: VerifyWalkerAction): VerificationStatus {
+    switch (action) {
+      case "approve":
+        return VerificationStatus.VERIFIED;
+      case "reject":
+        return VerificationStatus.REJECTED;
+      case "suspend":
+        return VerificationStatus.SUSPENDED;
+      case "reinstate":
+        return VerificationStatus.VERIFIED;
+    }
+  }
+
+  private appendNote(
+    existing: string | null,
+    action: VerifyWalkerAction,
+    note: string | undefined,
+    adminEmail: string,
+  ): string | null {
+    if (!note) return existing;
+    const date = new Date().toISOString().slice(0, 10);
+    const line = `[${date}] ${ACTION_LABEL[action]} por ${adminEmail}: ${note}`;
+    return existing ? `${existing}\n${line}` : line;
+  }
+
+  private async notifyWalker(
+    action: VerifyWalkerAction,
+    userId: string,
+    walkerProfileId: string,
+    notes: string | undefined,
+  ) {
+    switch (action) {
+      case "approve":
+        // NOTIFICATION_TYPES no tiene un tipo para "verificacion de cuenta
+        // aprobada" — se reutiliza WALK_CONFIRMED (mismatch preexistente,
+        // no se inventa uno nuevo sin consultarlo con Joa).
+        return this.notifications.create({
+          userId,
+          title: "¡Tu cuenta fue verificada! 🎉",
+          body: "Ya podés activar tu disponibilidad y empezar a recibir reservas en Güau.",
+          type: NOTIFICATION_TYPES.WALK_CONFIRMED,
+          data: { walkerProfileId },
+        });
+      case "reject":
+        // Texto sin "ajustá y reenviá": REJECTED es terminal, no hay
+        // segunda vuelta (antes el mensaje sugería que sí la había).
+        return this.notifications.create({
+          userId,
+          title: "Verificación rechazada",
+          body: `Revisamos tu solicitud y no vamos a poder verificarte: ${notes}`,
+          type: NOTIFICATION_TYPES.WALK_REJECTED,
+          data: { walkerProfileId, notes },
+        });
+      case "suspend":
+        return this.notifications.create({
+          userId,
+          title: "Tu cuenta fue suspendida",
+          body: `Tu verificación de identidad quedó en revisión: ${notes}`,
+          type: NOTIFICATION_TYPES.WALKER_SUSPENDED,
+          data: { walkerProfileId, notes },
+        });
+      case "reinstate":
+        return this.notifications.create({
+          userId,
+          title: "Tu cuenta fue reactivada",
+          body: `Ya podés volver a trabajar en Güau: ${notes}`,
+          type: NOTIFICATION_TYPES.WALKER_REINSTATED,
+          data: { walkerProfileId, notes },
+        });
+    }
   }
 
   // ─── Métricas generales ──────────────────────────────────
@@ -177,9 +300,10 @@ export class AdminService {
         total: totalOwners + totalWalkers,
       },
       walkers: {
-        pending:  walkerStatusMap[VerificationStatus.PENDING]  ?? 0,
-        verified: walkerStatusMap[VerificationStatus.VERIFIED] ?? 0,
-        rejected: walkerStatusMap[VerificationStatus.REJECTED] ?? 0,
+        pending:   walkerStatusMap[VerificationStatus.PENDING]   ?? 0,
+        verified:  walkerStatusMap[VerificationStatus.VERIFIED]  ?? 0,
+        suspended: walkerStatusMap[VerificationStatus.SUSPENDED] ?? 0,
+        rejected:  walkerStatusMap[VerificationStatus.REJECTED]  ?? 0,
         activeNow: activeWalkers,
       },
       walks: {

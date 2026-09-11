@@ -207,6 +207,11 @@ export const NOTIFICATION_TYPES = {
   // dueño; ver el comentario del punto 0 en walks.service.ts).
   WALK_PICKUP_CODE_EXHAUSTED: "walk_pickup_code_exhausted",
   WALK_STARTED_NO_CODE:       "walk_started_no_code",
+  // Verificacion de identidad del paseador (docs/diseños/verificacion-de-paseadores.md
+  // §6) — accion sobre la CUENTA, no sobre un paseo puntual. Ningun WALK_* le
+  // queda bien: por eso son tipos nuevos, no una reutilizacion.
+  WALKER_SUSPENDED:  "walker_suspended",
+  WALKER_REINSTATED: "walker_reinstated",
 } as const;
 
 export type NotificationType = typeof NOTIFICATION_TYPES[keyof typeof NOTIFICATION_TYPES];

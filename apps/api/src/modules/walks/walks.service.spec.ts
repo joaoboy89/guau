@@ -439,6 +439,16 @@ describe('WalksService', () => {
       await expect(service.create(OWNER_USER_ID, CREATE_DTO)).rejects.toThrow(UnprocessableEntityException);
     });
 
+    it('lanza UnprocessableEntityException si el walker está SUSPENDED', async () => {
+      prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
+      prisma.dog.findMany.mockResolvedValue([{ id: DOG_ID }]);
+      prisma.walkType.findUnique.mockResolvedValue(BASE_WALK_TYPE);
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_WALKER, verificationStatus: VerificationStatus.SUSPENDED,
+      });
+      await expect(service.create(OWNER_USER_ID, CREATE_DTO)).rejects.toThrow(UnprocessableEntityException);
+    });
+
     it('lanza UnprocessableEntityException si el walker no está isAvailable', async () => {
       prisma.ownerProfile.findUnique.mockResolvedValue(BASE_OWNER);
       prisma.dog.findMany.mockResolvedValue([{ id: DOG_ID }]);

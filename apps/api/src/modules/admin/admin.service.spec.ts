@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { VerificationStatus, WalkStatus } from '@prisma/client';
 import { NOTIFICATION_TYPES } from '@guau/shared';
 import { AdminService } from './admin.service';
@@ -10,12 +10,15 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 const WALKER_PROFILE_ID = 'wp-1';
 const WALKER_USER_ID    = 'wu-1';
+const ADMIN_ID           = 'admin-1';
+const ADMIN_EMAIL        = 'admin@guau.com';
 
 const BASE_WALKER_PROFILE = {
   id:                 WALKER_PROFILE_ID,
   userId:             WALKER_USER_ID,
   verificationStatus: VerificationStatus.PENDING,
-  user: { id: WALKER_USER_ID, firstName: 'Juan' },
+  verificationNotes:  null as string | null,
+  user: { id: WALKER_USER_ID, firstName: 'Juan', email: 'juan@test.com' },
 };
 
 // ─── Mock factories ───────────────────────────────────────────────────────────
@@ -36,7 +39,8 @@ function buildPrismaMock() {
       aggregate: jest.fn(),
     },
     user: {
-      count: jest.fn(),
+      count:      jest.fn(),
+      findUnique: jest.fn(),
     },
   };
 }
@@ -51,6 +55,7 @@ describe('AdminService', () => {
   beforeEach(async () => {
     prisma        = buildPrismaMock();
     notifications = { create: jest.fn().mockResolvedValue({}) };
+    prisma.user.findUnique.mockResolvedValue({ email: ADMIN_EMAIL });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -65,26 +70,54 @@ describe('AdminService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // ─── getPendingWalkers() ──────────────────────────────────────────────────
+  // ─── getWalkers() ─────────────────────────────────────────────────────────
 
-  describe('getPendingWalkers()', () => {
-    it('camino feliz: llama a walkerProfile.findMany con filtro PENDING y select explícito (sin mpAccessToken)', async () => {
+  describe('getWalkers()', () => {
+    it('camino feliz: filtra por status, pagina, y el select no trae DNI/selfie ni campos de OAuth', async () => {
       const profiles = [BASE_WALKER_PROFILE];
       prisma.walkerProfile.findMany.mockResolvedValue(profiles);
+      prisma.walkerProfile.count.mockResolvedValue(1);
 
-      const result = await service.getPendingWalkers();
+      const result = await service.getWalkers({ status: VerificationStatus.PENDING, page: 1, limit: 20 });
 
       expect(prisma.walkerProfile.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where:  { verificationStatus: VerificationStatus.PENDING },
           select: expect.objectContaining({ user: expect.anything() }),
+          skip: 0,
+          take: 20,
         }),
       );
-      // El select no debe incluir campos sensibles de OAuth
       const callArg = prisma.walkerProfile.findMany.mock.calls[0][0];
+      expect(callArg.select).not.toHaveProperty('dniNumber');
+      expect(callArg.select).not.toHaveProperty('dniPhotoUrl');
+      expect(callArg.select).not.toHaveProperty('selfieUrl');
       expect(callArg.select).not.toHaveProperty('mpAccessToken');
       expect(callArg.select).not.toHaveProperty('mpUserId');
-      expect(result).toEqual(profiles);
+      expect(result).toEqual({ data: profiles, meta: { total: 1, page: 1, limit: 20, totalPages: 1 } });
+    });
+
+    it('tambien puede filtrar por SUSPENDED (la pantalla necesita ver ambas colas)', async () => {
+      prisma.walkerProfile.findMany.mockResolvedValue([]);
+      prisma.walkerProfile.count.mockResolvedValue(0);
+
+      await service.getWalkers({ status: VerificationStatus.SUSPENDED, page: 1, limit: 20 });
+
+      expect(prisma.walkerProfile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { verificationStatus: VerificationStatus.SUSPENDED } }),
+      );
+    });
+
+    it('pagina: page 2 con limit 10 pide skip 10', async () => {
+      prisma.walkerProfile.findMany.mockResolvedValue([]);
+      prisma.walkerProfile.count.mockResolvedValue(25);
+
+      const result = await service.getWalkers({ status: VerificationStatus.PENDING, page: 2, limit: 10 });
+
+      expect(prisma.walkerProfile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 10, take: 10 }),
+      );
+      expect(result.meta).toEqual({ total: 25, page: 2, limit: 10, totalPages: 3 });
     });
   });
 
@@ -92,28 +125,78 @@ describe('AdminService', () => {
 
   describe('verifyWalker()', () => {
     it('lanza BadRequestException si action es "reject" y no viene notes', async () => {
-      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'reject' }))
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'reject' }, ADMIN_ID))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('lanza BadRequestException si action es "suspend" y no viene notes', async () => {
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'suspend' }, ADMIN_ID))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('lanza BadRequestException si action es "reinstate" y no viene notes', async () => {
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'reinstate' }, ADMIN_ID))
         .rejects.toThrow(BadRequestException);
     });
 
     it('lanza NotFoundException si el walkerProfile no existe', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(null);
-      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }))
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID))
         .rejects.toThrow(NotFoundException);
     });
 
-    it('action "approve": actualiza a VERIFIED y notifica con WALK_CONFIRMED', async () => {
+    it('REJECTED es terminal: cualquier accion sobre un rechazado tira ConflictException', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_WALKER_PROFILE,
+        verificationStatus: VerificationStatus.REJECTED,
+      });
+
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID))
+        .rejects.toThrow(ConflictException);
+      await expect(
+        service.verifyWalker(WALKER_PROFILE_ID, { action: 'suspend', notes: 'x' }, ADMIN_ID),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.walkerProfile.update).not.toHaveBeenCalled();
+    });
+
+    it('"reinstate" solo es valido desde SUSPENDED — desde PENDING tira ConflictException', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_WALKER_PROFILE,
+        verificationStatus: VerificationStatus.PENDING,
+      });
+
+      await expect(
+        service.verifyWalker(WALKER_PROFILE_ID, { action: 'reinstate', notes: 'motivo' }, ADMIN_ID),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.walkerProfile.update).not.toHaveBeenCalled();
+    });
+
+    it('"approve" sobre un SUSPENDED tira ConflictException — el camino de vuelta es "reinstate"', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_WALKER_PROFILE,
+        verificationStatus: VerificationStatus.SUSPENDED,
+      });
+
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID))
+        .rejects.toThrow(ConflictException);
+      expect(prisma.walkerProfile.update).not.toHaveBeenCalled();
+    });
+
+    it('action "approve": pasa a VERIFIED, guarda metodo/fecha/admin y notifica con WALK_CONFIRMED', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER_PROFILE);
       const updated = { ...BASE_WALKER_PROFILE, verificationStatus: VerificationStatus.VERIFIED };
       prisma.walkerProfile.update.mockResolvedValue(updated);
 
-      const result = await service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' });
+      const result = await service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID);
 
       expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: WALKER_PROFILE_ID },
           data:  expect.objectContaining({
             verificationStatus: VerificationStatus.VERIFIED,
+            verificationMethod: 'PERSONAL',
+            verifiedAt: expect.any(Date),
+            verifiedById: ADMIN_ID,
           }),
         }),
       );
@@ -128,25 +211,25 @@ describe('AdminService', () => {
       expect(result).not.toHaveProperty('mpUserId');
     });
 
-    it('action "reject" con notes: actualiza a REJECTED con verificationNotes y notifica con WALK_REJECTED', async () => {
+    it('action "reject" con notes: pasa a REJECTED y notifica con WALK_REJECTED', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(BASE_WALKER_PROFILE);
       const updated = {
         ...BASE_WALKER_PROFILE,
         verificationStatus: VerificationStatus.REJECTED,
-        verificationNotes: 'Foto ilegible',
       };
       prisma.walkerProfile.update.mockResolvedValue(updated);
 
-      const result = await service.verifyWalker(WALKER_PROFILE_ID, {
-        action: 'reject',
-        notes:  'Foto ilegible',
-      });
+      const result = await service.verifyWalker(
+        WALKER_PROFILE_ID,
+        { action: 'reject', notes: 'Foto ilegible' },
+        ADMIN_ID,
+      );
 
       expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             verificationStatus: VerificationStatus.REJECTED,
-            verificationNotes:  'Foto ilegible',
+            verificationNotes: expect.stringContaining('RECHAZADO por admin@guau.com: Foto ilegible'),
           }),
         }),
       );
@@ -157,8 +240,83 @@ describe('AdminService', () => {
         }),
       );
       expect(result).toEqual(updated);
-      expect(result).not.toHaveProperty('mpAccessToken');
-      expect(result).not.toHaveProperty('mpUserId');
+    });
+
+    it('action "suspend" con notes: pasa a SUSPENDED y notifica con WALKER_SUSPENDED', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_WALKER_PROFILE,
+        verificationStatus: VerificationStatus.VERIFIED,
+      });
+      prisma.walkerProfile.update.mockResolvedValue({
+        ...BASE_WALKER_PROFILE,
+        verificationStatus: VerificationStatus.SUSPENDED,
+      });
+
+      await service.verifyWalker(
+        WALKER_PROFILE_ID,
+        { action: 'suspend', notes: 'Denuncia de un dueño, en revision' },
+        ADMIN_ID,
+      );
+
+      expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ verificationStatus: VerificationStatus.SUSPENDED }),
+        }),
+      );
+      expect(notifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({ type: NOTIFICATION_TYPES.WALKER_SUSPENDED }),
+      );
+    });
+
+    it('action "reinstate" desde SUSPENDED con notes: vuelve a VERIFIED y notifica con WALKER_REINSTATED', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_WALKER_PROFILE,
+        verificationStatus: VerificationStatus.SUSPENDED,
+        verificationNotes: '[2026-09-01] SUSPENDIDO por admin@guau.com: denuncia',
+      });
+      prisma.walkerProfile.update.mockResolvedValue({
+        ...BASE_WALKER_PROFILE,
+        verificationStatus: VerificationStatus.VERIFIED,
+      });
+
+      await service.verifyWalker(
+        WALKER_PROFILE_ID,
+        { action: 'reinstate', notes: 'Se aclaro el malentendido' },
+        ADMIN_ID,
+      );
+
+      expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            verificationStatus: VerificationStatus.VERIFIED,
+            // Append, no overwrite: la nota vieja de la suspension sigue ahi.
+            verificationNotes: expect.stringContaining('[2026-09-01] SUSPENDIDO por admin@guau.com: denuncia'),
+          }),
+        }),
+      );
+      const savedNotes = prisma.walkerProfile.update.mock.calls[0][0].data.verificationNotes;
+      expect(savedNotes).toContain('REACTIVADO por admin@guau.com: Se aclaro el malentendido');
+      expect(notifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({ type: NOTIFICATION_TYPES.WALKER_REINSTATED }),
+      );
+    });
+
+    it('las notas se ACUMULAN, nunca se pisan: approve sin nota no borra el historial existente', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_WALKER_PROFILE,
+        verificationNotes: '[2026-08-01] RECHAZADO por otro@guau.com: motivo viejo',
+      });
+      prisma.walkerProfile.update.mockResolvedValue(BASE_WALKER_PROFILE);
+
+      await service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID);
+
+      expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            verificationNotes: '[2026-08-01] RECHAZADO por otro@guau.com: motivo viejo',
+          }),
+        }),
+      );
     });
   });
 
@@ -166,7 +324,7 @@ describe('AdminService', () => {
 
   describe('getStats()', () => {
     it('camino feliz: arma walkerStatusMap y walkStatusMap con valores concretos; status ausente devuelve 0', async () => {
-      // walkersByStatus: VERIFIED=5, PENDING=3 — REJECTED ausente → debe devolver 0
+      // walkersByStatus: VERIFIED=5, PENDING=3 — SUSPENDED/REJECTED ausentes → deben devolver 0
       const walkersByStatus = [
         { verificationStatus: VerificationStatus.VERIFIED, _count: 5 },
         { verificationStatus: VerificationStatus.PENDING,  _count: 3 },
@@ -198,11 +356,12 @@ describe('AdminService', () => {
       // Usuarios
       expect(result.users).toEqual({ totalOwners: 100, totalWalkers: 50, total: 150 });
 
-      // walkers: REJECTED ausente → 0
+      // walkers: SUSPENDED/REJECTED ausentes → 0
       expect(result.walkers).toEqual({
         pending:   3,
         verified:  5,
-        rejected:  0,   // no estaba en walkersByStatus
+        suspended: 0,
+        rejected:  0,
         activeNow: 12,
       });
 

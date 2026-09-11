@@ -180,6 +180,16 @@ describe('WalkersService', () => {
       );
     });
 
+    it('el filtro de verificación en la query cruda es VERIFIED — un SUSPENDED nunca puede matchear', async () => {
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await service.search(BASE_DTO);
+
+      const callArgs = prisma.$queryRaw.mock.calls[0];
+      expect(callArgs).toContain(VerificationStatus.VERIFIED);
+      expect(callArgs).not.toContain(VerificationStatus.SUSPENDED);
+    });
+
     it('con walkTypeId: NO filtra el array (comportamiento documentado — la lógica se resuelve al crear reserva)', async () => {
       const walker1 = { ...BASE_WALKER_ROW, id: 'walker-1' };
       const walker2 = { ...BASE_WALKER_ROW, id: 'walker-2' };
@@ -208,6 +218,16 @@ describe('WalkersService', () => {
       prisma.walkerProfile.findUnique.mockResolvedValue({
         ...BASE_PROFILE,
         verificationStatus: VerificationStatus.PENDING,
+        user:      { firstName: 'Juan', lastName: 'Pérez', avatarUrl: null, createdAt: new Date() },
+        schedules: [],
+      });
+      await expect(service.getPublicProfile(PROFILE_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('lanza NotFoundException si verificationStatus es SUSPENDED', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_PROFILE,
+        verificationStatus: VerificationStatus.SUSPENDED,
         user:      { firstName: 'Juan', lastName: 'Pérez', avatarUrl: null, createdAt: new Date() },
         schedules: [],
       });
@@ -347,6 +367,15 @@ describe('WalkersService', () => {
       prisma.walkerProfile.findUnique.mockResolvedValue({
         ...BASE_PROFILE,
         verificationStatus: VerificationStatus.PENDING,
+      });
+      await expect(service.updateAvailability(USER_ID, { isAvailable: true }))
+        .rejects.toThrow(ForbiddenException);
+    });
+
+    it('lanza ForbiddenException si isAvailable=true y estado es SUSPENDED', async () => {
+      prisma.walkerProfile.findUnique.mockResolvedValue({
+        ...BASE_PROFILE,
+        verificationStatus: VerificationStatus.SUSPENDED,
       });
       await expect(service.updateAvailability(USER_ID, { isAvailable: true }))
         .rejects.toThrow(ForbiddenException);

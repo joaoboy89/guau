@@ -16,10 +16,29 @@ enum UserRole {
   ADMIN
 }
 
+// PENDING → VERIFIED es el camino normal. SUSPENDED es el estado "congelado"
+// para el caso dudoso — de ahi se puede volver a VERIFIED (reinstate).
+// REJECTED es TERMINAL: nunca se vuelve a VERIFIED desde ahi (ver
+// docs/diseños/verificacion-de-paseadores.md §6). Los cuatro candados que
+// gatean el trabajo del paseador (walkers.service.ts:87,161,230 y
+// walks.service.ts:321) preguntan "!== VERIFIED" — SUSPENDED cae del lado
+// cerrado solo, sin tocar ninguno de los cuatro.
 enum VerificationStatus {
   PENDING
   VERIFIED
+  SUSPENDED
   REJECTED
+}
+
+// El METODO con el que se verifico, no el estado. Etapa 1 usa solo PERSONAL
+// (Joa conoce a la persona) — los otros tres son el cableado para cuando
+// haga falta escalar (docs/diseños/verificacion-de-paseadores.md §4): subir
+// de etapa es agregar un flujo nuevo, no migrar datos.
+enum VerificationMethod {
+  PERSONAL // etapa 1: Joa conoce personalmente a la persona
+  DOCUMENT // etapa 2: alguien miro un documento
+  SID      // etapa 3: RENAPER directo
+  DIDIT    // etapa 3: proveedor KYC
 }
 
 enum WalkStatus {
@@ -144,7 +163,17 @@ model WalkerProfile {
   dniPhotoUrl        String?
   selfieUrl          String?
   verificationStatus VerificationStatus @default(PENDING)
+  // Historial con fecha, una linea por evento — nunca se pisa (ver
+  // AdminService.verifyWalker). Antes esto era `dto.notes ?? null`, que
+  // borraba el historial entero al ejecutar una accion sin nota nueva.
   verificationNotes  String?
+  // Etapa 1 (docs/diseños/verificacion-de-paseadores.md §3): NO hay subida
+  // de documentos. Se registra el HECHO de la verificacion y como se hizo,
+  // nunca la imagen. Los tres quedan null hasta approve(); verifiedById es
+  // un id plano, no una relacion — no hace falta mas que eso hoy.
+  verificationMethod VerificationMethod?
+  verifiedAt         DateTime?
+  verifiedById       String?
   rating             Float              @default(0)
   totalReviews       Int                @default(0)
   isAvailable        Boolean            @default(false)
