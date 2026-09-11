@@ -101,9 +101,18 @@ export interface SupportMessage {
   sender: { id: string; firstName: string; lastName: string; role: string };
 }
 
+// Distingue "el paseo nunca llegó a tener conversación" (nunca se
+// confirmó) de "la conversación existe pero nadie escribió" — los dos daban
+// data: [] antes de este campo, y el front no los podía diferenciar
+// (hallazgo del testeo en staging, 2026-09-11). El conversationId nunca
+// viaja: no hace falta para esto, es dato interno.
+export interface SupportMessagesMeta extends SupportListMeta {
+  conversationExists: boolean;
+}
+
 export interface SupportMessagesResponse {
   data: SupportMessage[];
-  meta: SupportListMeta;
+  meta: SupportMessagesMeta;
 }
 
 export const supportAPI = {

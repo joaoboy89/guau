@@ -5,6 +5,7 @@ import { AxiosError } from "axios";
 import { Button, Badge, Spinner } from "@/components/ui";
 import { formatDateTimeBA } from "@/lib/format-date";
 import { supportAPI, type SupportMessage } from "@/lib/support/api";
+import { getEmptyChatMessage } from "@/lib/support/chat-messages";
 
 // El botón del chat (docs/diseños/modulo-soporte.md §7bis): leer la
 // conversación privada de dos personas es un acto deliberado, no algo que
@@ -18,6 +19,7 @@ export function ChatSection({ walkId }: { walkId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<SupportMessage[] | null>(null);
+  const [conversationExists, setConversationExists] = useState<boolean | null>(null);
 
   const handleOpen = async () => {
     setOpen(true);
@@ -27,6 +29,7 @@ export function ChatSection({ walkId }: { walkId: string }) {
     try {
       const res = await supportAPI.getMessages(walkId);
       setMessages(res.data.data);
+      setConversationExists(res.data.meta.conversationExists);
     } catch (err) {
       const msg = (err as AxiosError<{ message: string }>)?.response?.data?.message;
       setError(msg ?? "No se pudo cargar la conversación. Probá de nuevo en un momento.");
@@ -73,7 +76,9 @@ export function ChatSection({ walkId }: { walkId: string }) {
           )}
 
           {!loading && !error && messages !== null && messages.length === 0 && (
-            <p className="text-sm text-brand-text-muted">Este paseo todavía no tiene conversación.</p>
+            <p className="text-sm text-brand-text-muted">
+              {getEmptyChatMessage(conversationExists ?? false)}
+            </p>
           )}
 
           {!loading && !error && messages !== null && messages.length > 0 && (

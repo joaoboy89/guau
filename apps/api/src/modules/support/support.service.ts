@@ -276,11 +276,30 @@ export class SupportService {
       select: { id: true },
     });
 
+    // Se registra el ACCESO, no lo leído (§6 del diseño) — que la
+    // conversación esté vacía es una propiedad del PASEO, no del acceso.
+    // Antes de este fix el log vivía después del return temprano de abajo,
+    // así que nunca se emitía cuando el paseo no tenía conversación: hacía
+    // imposible distinguir "nunca intentó abrir ese chat" de "lo abrió y
+    // estaba vacío" — las dos se veían igual, silencio. Va ANTES de
+    // cualquier return, para que se emita siempre que alguien pida la
+    // conversación de un paseo. El mensaje sigue sin contenido de mensajes.
+    logger.log(
+      `[Support] usuario ${requestingUser.id} (${requestingUser.role}) leyo el chat del paseo ${walkId}`,
+    );
+
     // Un PENDING nunca confirmado no tiene conversación (se crea en
     // confirm()) — "no hay chat" es un estado válido, no un error. NUNCA
     // 404 acá.
+    //
+    // conversationExists: false distingue esto de una conversación real sin
+    // mensajes (hallazgo del testeo en staging, 2026-09-11): las dos daban
+    // data: [] y el front no podía diferenciarlas — "no llegó a existir el
+    // canal" y "existía y nadie escribió" son dos hechos del mundo distintos
+    // y una disputa puede depender de cuál de los dos pasó. NO se expone
+    // conversation.id: no hace falta para esto, es dato interno.
     if (!conversation) {
-      return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+      return { data: [], meta: { total: 0, page, limit, totalPages: 0, conversationExists: false } };
     }
 
     const skip = (page - 1) * limit;
@@ -302,18 +321,9 @@ export class SupportService {
       this.prisma.message.count({ where: { conversationId: conversation.id } }),
     ]);
 
-    // Se audita lo privilegiado y lo irreversible, nada más (§6 del
-    // diseño): leer la conversación privada de dos personas sí se audita;
-    // buscar en el listado o abrir el caso, no. Una línea, sin tabla —
-    // la tabla llega con la rebanada 2. Nunca el CONTENIDO del mensaje:
-    // se registra el acceso, no lo leído.
-    logger.log(
-      `[Support] usuario ${requestingUser.id} (${requestingUser.role}) leyo el chat del paseo ${walkId}`,
-    );
-
     return {
       data: messages,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit), conversationExists: true },
     };
   }
 }

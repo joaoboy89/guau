@@ -282,8 +282,32 @@ describe("SupportService", () => {
 
       const result = await service.getMessages("walk-sin-chat", {}, REQUESTING_USER);
 
-      expect(result).toEqual({ data: [], meta: { total: 0, page: 1, limit: 50, totalPages: 0 } });
+      expect(result).toEqual({
+        data: [],
+        meta: { total: 0, page: 1, limit: 50, totalPages: 0, conversationExists: false },
+      });
       expect(prisma.message.findMany).not.toHaveBeenCalled();
+    });
+
+    // El bug que esto corrige (testeo en staging, 2026-09-11): "no hay
+    // conversacion" (nunca se confirmo el paseo) y "la conversacion existe
+    // pero nadie escribio" daban las dos data: [] — el front no las podia
+    // distinguir, y en una disputa "no te escribi porque no podia" se cae si
+    // el canal SI estaba disponible. conversationExists distingue los dos
+    // hechos; el conversationId NUNCA se expone, no hace falta para esto.
+    it("una conversacion que EXISTE pero no tiene mensajes: conversationExists true, distinto de 'no hay conversacion'", async () => {
+      prisma.conversation.findUnique.mockResolvedValue({ id: "conv-1" });
+      prisma.message.findMany.mockResolvedValue([]);
+      prisma.message.count.mockResolvedValue(0);
+
+      const result = await service.getMessages("walk-1", {}, REQUESTING_USER);
+
+      expect(result).toEqual({
+        data: [],
+        meta: { total: 0, page: 1, limit: 50, totalPages: 0, conversationExists: true },
+      });
+      // conversation.id (interno) no aparece en ningun lado de la salida.
+      expect(JSON.stringify(result)).not.toContain("conv-1");
     });
 
     it("camino feliz: devuelve id, content, createdAt, containsContactInfo, isRead y el sender con apellido y rol", async () => {
@@ -302,6 +326,7 @@ describe("SupportService", () => {
       const result = await service.getMessages("walk-1", {}, REQUESTING_USER);
 
       expect(result.data).toEqual([MESSAGE]);
+      expect(result.meta.conversationExists).toBe(true);
     });
 
     it("respeta page/limit con default 50", async () => {
@@ -358,6 +383,22 @@ describe("SupportService", () => {
       await service.getCase("walk-1");
 
       expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("leyo el chat"));
+    });
+
+    // El bug que esto corrige: el log vivia DESPUES del return temprano de
+    // "no hay conversacion", asi que nunca se emitia en ese caso — hacia
+    // imposible distinguir "nunca intento abrir el chat" de "lo abrio y
+    // estaba vacio". Se registra el ACCESO (que alguien pidio), no lo
+    // LEIDO (que habia para leer) — son dos cosas distintas.
+    it("getMessages() emite el log TAMBIEN cuando el paseo no tiene conversacion", async () => {
+      const logSpy = jest.spyOn(Logger.prototype, "log");
+      prisma.conversation.findUnique.mockResolvedValue(null);
+
+      await service.getMessages("walk-sin-chat", {}, REQUESTING_USER);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("usuario admin-1 (ADMIN) leyo el chat del paseo walk-sin-chat"),
+      );
     });
   });
 
