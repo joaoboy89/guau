@@ -40,3 +40,62 @@ export function toBusinessDayAndTime(date: Date): BusinessDayAndTime {
     timeStr: `${hour}:${minute}`,
   };
 }
+
+// Offset de una IANA timezone en un instante dado, en minutos, tal que
+// wallClock(instante) === instante + offset (los dos leídos como el número
+// de timestamp UTC-equivalente de esa fecha/hora). No hardcodea -03:00 a
+// propósito: Argentina hoy no tiene horario de verano, pero lo tuvo y podría
+// volver a tenerlo — un offset fijo es una bomba con retardo. Formatea el
+// instante en la timezone pedida y vuelve a leerlo como si fuera UTC; la
+// diferencia contra el instante real ES el offset.
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(date);
+
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? "0");
+  const asUTC = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return (asUTC - date.getTime()) / 60_000;
+}
+
+// "YYYY-MM-DD" (o el prefijo de un ISO mas largo) interpretado como un DIA DE
+// CALENDARIO EN HORA ARGENTINA, no como un instante UTC. `new Date("2026-09-
+// 10")` da medianoche UTC — 21:00 del dia anterior en ART — que es
+// exactamente el bug que esto reemplaza (ver el fix del filtro de fechas de
+// soporte, y antes "fix(walks): validacion de horarios usaba la TZ del
+// proceso, no ART": es la segunda vez que este mismo error se cuela).
+function parseBusinessCalendarDate(dateStr: string): { y: number; m: number; d: number } {
+  const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
+  return { y, m, d };
+}
+
+// El offset se calcula SIEMPRE sobre un instante redondeado al segundo — los
+// milisegundos se suman aparte, después. Intl.DateTimeFormat no reporta
+// milisegundos, así que calcular el offset directo sobre un instante con
+// .999ms (el fin del día) reintroducía esos .999ms como ruido en el propio
+// offset (una resta de dos instantes que difieren solo en el redondeo del
+// formatter) y corría el resultado casi un segundo entero. Separar "a qué
+// hora entera" de "con qué milisegundo" evita el problema de raíz.
+function businessCalendarInstant(
+  y: number, m: number, d: number,
+  hh: number, mm: number, ss: number, ms: number,
+): Date {
+  const naiveUTCSeconds = Date.UTC(y, m - 1, d, hh, mm, ss, 0);
+  const offsetMin = getTimeZoneOffsetMinutes(new Date(naiveUTCSeconds), BUSINESS_TIMEZONE);
+  return new Date(naiveUTCSeconds - offsetMin * 60_000 + ms);
+}
+
+/** El instante en que arranca ese día de calendario en hora argentina (00:00:00.000 ART). */
+export function startOfBusinessDay(dateStr: string): Date {
+  const { y, m, d } = parseBusinessCalendarDate(dateStr);
+  return businessCalendarInstant(y, m, d, 0, 0, 0, 0);
+}
+
+/** El instante en que termina ese día de calendario en hora argentina (23:59:59.999 ART). */
+export function endOfBusinessDay(dateStr: string): Date {
+  const { y, m, d } = parseBusinessCalendarDate(dateStr);
+  return businessCalendarInstant(y, m, d, 23, 59, 59, 999);
+}

@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../database/prisma.service";
 import { QuerySupportWalksDto } from "./dto/query-support-walks.dto";
 import { QuerySupportMessagesDto } from "./dto/query-support-messages.dto";
+import { startOfBusinessDay, endOfBusinessDay } from "../../common/utils/schedule-timezone";
 
 // Logger de módulo, no de instancia: toSupportWalkRow()/toSupportWalk() son
 // funciones puras (mismo criterio que toPublicWalk en walks.service.ts) y no
@@ -204,10 +205,15 @@ export class SupportService {
       });
     }
     if (desde || hasta) {
+      // Días de calendario en hora argentina, no instantes UTC (ver
+      // schedule-timezone.ts): new Date("2026-09-10") es medianoche UTC —
+      // 21:00 del día anterior en ART — así que "desde = hasta" con esa
+      // interpretación buscaba un rango de duración cero y devolvía cero
+      // resultados en el caso más común de todos.
       conditions.push({
         scheduledAt: {
-          ...(desde ? { gte: new Date(desde) } : {}),
-          ...(hasta ? { lte: new Date(hasta) } : {}),
+          ...(desde ? { gte: startOfBusinessDay(desde) } : {}),
+          ...(hasta ? { lte: endOfBusinessDay(hasta) } : {}),
         },
       });
     }

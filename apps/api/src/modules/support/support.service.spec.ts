@@ -2,6 +2,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { Logger, NotFoundException } from "@nestjs/common";
 import { SupportService } from "./support.service";
 import { PrismaService } from "../../database/prisma.service";
+import { startOfBusinessDay, endOfBusinessDay } from "../../common/utils/schedule-timezone";
 
 const REQUESTING_USER = { id: "admin-1", role: "ADMIN" };
 
@@ -127,7 +128,7 @@ describe("SupportService", () => {
       });
     });
 
-    it("filtro desde/hasta: arma el rango sobre scheduledAt", async () => {
+    it("filtro desde/hasta: arma el rango sobre scheduledAt en DIAS DE CALENDARIO ART, no instantes UTC", async () => {
       prisma.walk.findMany.mockResolvedValue([SEARCH_ROW]);
       prisma.walk.count.mockResolvedValue(1);
 
@@ -135,8 +136,24 @@ describe("SupportService", () => {
 
       const call = prisma.walk.findMany.mock.calls[0][0];
       expect(call.where).toEqual({
-        AND: [{ scheduledAt: { gte: new Date("2026-09-01"), lte: new Date("2026-09-30") } }],
+        AND: [{
+          scheduledAt: {
+            gte: startOfBusinessDay("2026-09-01"),
+            lte: endOfBusinessDay("2026-09-30"),
+          },
+        }],
       });
+    });
+
+    it("filtro desde = hasta (el mismo dia en los dos campos): NO es un rango vacio", async () => {
+      prisma.walk.findMany.mockResolvedValue([SEARCH_ROW]);
+      prisma.walk.count.mockResolvedValue(1);
+
+      await service.searchWalks({ desde: "2026-09-10", hasta: "2026-09-10" });
+
+      const call = prisma.walk.findMany.mock.calls[0][0];
+      const { gte, lte } = call.where.AND[0].scheduledAt;
+      expect(gte.getTime()).toBeLessThan(lte.getTime());
     });
 
     it("varios filtros a la vez se combinan con AND", async () => {
