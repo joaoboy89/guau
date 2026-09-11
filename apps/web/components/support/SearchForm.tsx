@@ -37,7 +37,16 @@ export function SearchForm({
 
   return (
     <Card as="form" onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* grid-cols-3 con dos inputs de fecha adentro de UN TERCIO de la
+          grilla desbordaba: un <input type="date"> no se achica por debajo
+          de su ancho de contenido salvo que se le fuerce min-width:0 en toda
+          la cadena de flex/grid — sin eso, el segundo campo ("hasta") queda
+          literalmente afuera del recuadro. Dos arreglos, no uno: el bloque
+          de fechas pasa a ocupar la fila entera en pantallas intermedias
+          (md:col-span-2) en vez de pelear por un tercio angosto, y cada
+          input de fecha va en su propio min-w-0 para que, aun compartiendo
+          espacio, se achique en vez de desbordar. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         <Input
           label="Código del paseo"
           placeholder="a3f1b2c4"
@@ -52,7 +61,7 @@ export function SearchForm({
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5 md:col-span-2 xl:col-span-1">
           <span className="text-sm font-medium text-brand-text">Rango de fechas</span>
           {/* Atajos: llenan los mismos dos campos de abajo, no son otra
               logica (docs/diseños/modulo-soporte.md §7bis). Seleccionado
@@ -83,18 +92,22 @@ export function SearchForm({
             })}
           </div>
           <div className="flex gap-2">
-            <Input
-              type="date"
-              aria-label="Desde"
-              value={desde}
-              onChange={(e) => setDesde(e.target.value)}
-            />
-            <Input
-              type="date"
-              aria-label="Hasta"
-              value={hasta}
-              onChange={(e) => setHasta(e.target.value)}
-            />
+            <div className="min-w-0 flex-1">
+              <Input
+                type="date"
+                aria-label="Desde"
+                value={desde}
+                onChange={(e) => setDesde(e.target.value)}
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <Input
+                type="date"
+                aria-label="Hasta"
+                value={hasta}
+                onChange={(e) => setHasta(e.target.value)}
+              />
+            </div>
           </div>
         </div>
       </div>
