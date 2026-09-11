@@ -132,7 +132,7 @@ export default function PaseadoresPage() {
                         hace falta: si aparece acá, ya está verificado.
                       */}
                       <Badge variant="success" className="w-fit">
-                        Verificado
+                        Identidad verificada
                       </Badge>
 
                       {w.bio && (

@@ -111,7 +111,7 @@ export default function WalkerProfilePage() {
                 </h1>
                 {/* getPublicProfile ya tira 404 si no está VERIFIED — llegar
                     hasta acá implica que lo está. */}
-                <Badge variant="success">Verificado</Badge>
+                <Badge variant="success">Identidad verificada</Badge>
               </div>
 
               <p className="text-sm text-brand-text-muted">

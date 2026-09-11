@@ -37,7 +37,7 @@ interface WalkerProfile {
   id:                 string;
   bio:                string | null;
   isAvailable:        boolean;
-  verificationStatus: "PENDING" | "VERIFIED" | "REJECTED";
+  verificationStatus: "PENDING" | "VERIFIED" | "SUSPENDED" | "REJECTED";
   centerLat:          number | null;
   centerLng:          number | null;
   radiusKm:           number | null;
@@ -157,9 +157,10 @@ const BADGE: Record<
   WalkerProfile["verificationStatus"],
   { label: string; className: string }
 > = {
-  PENDING:  { label: "En revisión", className: "bg-amber-50 text-amber-700" },
-  VERIFIED: { label: "Verificado",  className: "bg-brand-green-soft text-brand-green" },
-  REJECTED: { label: "Rechazado",   className: "bg-red-50 text-red-700" },
+  PENDING:   { label: "En revisión",         className: "bg-amber-50 text-amber-700" },
+  VERIFIED:  { label: "Identidad verificada", className: "bg-brand-green-soft text-brand-green" },
+  SUSPENDED: { label: "Suspendida",           className: "bg-amber-50 text-amber-700" },
+  REJECTED:  { label: "Rechazado",            className: "bg-red-50 text-red-700" },
 };
 
 export default function WalkerDashboardPage() {
@@ -613,6 +614,9 @@ export default function WalkerDashboardPage() {
   if (profile.verificationStatus === "PENDING") {
     missingItems.push({ text: "Que verifiquemos tu cuenta" });
   }
+  if (profile.verificationStatus === "SUSPENDED") {
+    missingItems.push({ text: "Que reactivemos tu cuenta" });
+  }
   if (profile.schedules.length === 0) {
     missingItems.push({ text: "Cargar tus horarios", anchor: "#horarios" });
   }
@@ -638,6 +642,8 @@ export default function WalkerDashboardPage() {
             ? "Estamos revisando tu cuenta. Te notificamos cuando esté lista."
             : profile.verificationStatus === "VERIFIED"
             ? "Tu cuenta está verificada y podés recibir solicitudes."
+            : profile.verificationStatus === "SUSPENDED"
+            ? "Tu cuenta está suspendida y no podés recibir solicitudes. Contactanos para más información."
             : "Tu cuenta fue rechazada. Contactanos para más información."}
         </span>
       </div>

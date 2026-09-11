@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRequireAuth, useLogout } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
+import { buttonStyles } from "@/components/ui";
 
 export default function AdminPage() {
   const { user, ready } = useRequireAuth("admin");
@@ -26,6 +28,12 @@ export default function AdminPage() {
           Salir
         </button>
       </header>
+
+      <div className="flex flex-col gap-3">
+        <Link href="/admin/walkers" className={buttonStyles({ size: "md", className: "w-fit" })}>
+          Verificar paseadores
+        </Link>
+      </div>
 
       <div className="flex-1 flex items-center justify-center rounded-3xl border border-dashed border-brand-border min-h-40">
         <p className="text-sm text-brand-text-muted">
