@@ -4,6 +4,7 @@ import { PrismaService } from "../../database/prisma.service";
 import { QuerySupportWalksDto } from "./dto/query-support-walks.dto";
 import { QuerySupportMessagesDto } from "./dto/query-support-messages.dto";
 import { startOfBusinessDay, endOfBusinessDay } from "../../common/utils/schedule-timezone";
+import { isWalkPaid } from "../walks/walk-payment.util";
 
 // Logger de módulo, no de instancia: toSupportWalkRow()/toSupportWalk() son
 // funciones puras (mismo criterio que toPublicWalk en walks.service.ts) y no
@@ -73,13 +74,21 @@ function toSupportWalkRow(w: SearchRow) {
 
 // El caso completo (docs/diseños/modulo-soporte.md §5). Lo que NO está acá,
 // a propósito:
-//   - mpPaymentId, mpRefundId, refundedAt, platformFee, commissionRate: son
-//     de la vista de admin (otra rebanada) — soporte ve los MONTOS, no los
-//     ids de sistema de MercadoPago que solo hacen falta para ejecutar.
+//   - mpRefundId, platformFee, commissionRate: son de la vista de admin
+//     (otra rebanada) — soporte ve los MONTOS, no los ids de sistema de
+//     MercadoPago que solo hacen falta para ejecutar.
 //   - locations (GPS): sin techo natural, espera a D2 con paginación propia.
 //   - mpAccessToken: NO se saca de la salida, no se trae de la base — ni
 //     siquiera está en este select. Si el dato nunca sale de Postgres, no
 //     hay forma de que se escape.
+//
+// mpPaymentId SÍ se trae, pero solo para derivar `estabaPago` — el mismo
+// criterio que WalkerProfile.mpAccessToken → `mpConnected` en el perfil del
+// paseador: el booleano sale, el id de sistema no. Hallazgo del testeo en
+// staging (2026-09-11): "había plata adentro y el paseo no se completó" es
+// de las señales más importantes de un caso, y sin este campo era invisible
+// para soporte. refundedAt sí se expone directo — no es un id de sistema
+// como mpPaymentId/mpRefundId, es una fecha, y con la fecha alcanza.
 const CASE_SELECT = {
   id: true,
   status: true,
@@ -105,6 +114,8 @@ const CASE_SELECT = {
   totalAmount: true,
   walkerAmount: true,
   cancellationReason: true,
+  mpPaymentId: true,
+  refundedAt: true,
   walkType: { select: { label: true, durationMinutes: true } },
   walker: {
     select: {
@@ -155,6 +166,11 @@ function toSupportWalk(w: CaseRow) {
     totalAmount: w.totalAmount,
     walkerAmount: w.walkerAmount,
     cancellationReason: w.cancellationReason,
+    // Booleano derivado, no el id de sistema — mismo criterio que
+    // mpConnected sobre mpAccessToken. w.mpPaymentId no se copia a la
+    // salida en ningún otro campo.
+    estabaPago: isWalkPaid(w.mpPaymentId),
+    refundedAt: w.refundedAt,
     walkType: { label: w.walkType.label, durationMinutes: w.walkType.durationMinutes },
     walker: {
       id: w.walker.id,

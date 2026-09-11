@@ -1,4 +1,4 @@
-import { getSupportSignals } from "@/lib/support/signals";
+import { getSupportSignals, getEmptySignalsMessage } from "@/lib/support/signals";
 import type { SupportWalkCase } from "@/lib/support/api";
 
 // La franja de señales (docs/diseños/modulo-soporte.md §7bis), arriba de
@@ -6,13 +6,18 @@ import type { SupportWalkCase } from "@/lib/support/api";
 // muestran ~25 campos con el mismo peso, se muestra lo que merece que lo
 // miren. Y cuando no hay nada raro, lo dice: la ausencia tambien informa,
 // nunca un espacio vacio que no se sabe si esta vacio o si no cargo.
+//
+// "Sin señales" SOLO para COMPLETED — un paseo NOT_PERFORMED o CANCELLED_*
+// nunca cae acá (getSupportSignals() siempre les deja al menos una señal);
+// un paseo en curso usa el texto de "todavía no terminó", nunca "transcurrió
+// normal" (todavía no transcurrió). Ver getEmptySignalsMessage().
 export function SignalsBanner({ walk }: { walk: SupportWalkCase }) {
   const signals = getSupportSignals(walk);
 
   if (signals.length === 0) {
     return (
       <div className="rounded-2xl border border-brand-border bg-brand-surface-sand px-4 py-3 text-sm text-brand-text-muted">
-        Sin señales — este paseo transcurrió normal.
+        {getEmptySignalsMessage(walk.status)}
       </div>
     );
   }

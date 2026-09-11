@@ -28,6 +28,8 @@ const BASE_WALK: SupportWalkCase = {
   totalAmount: 3000,
   walkerAmount: 2420.91,
   cancellationReason: null,
+  estabaPago: true,
+  refundedAt: null,
   walkType: { label: "Paseo básico", durationMinutes: 45 },
   walker: PERSON,
   owner: PERSON,

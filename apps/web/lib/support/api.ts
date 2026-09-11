@@ -79,6 +79,14 @@ export interface SupportWalkCase {
   totalAmount: number;
   walkerAmount: number;
   cancellationReason: string | null;
+  // Booleano derivado de mpPaymentId — el id de sistema de MercadoPago NUNCA
+  // sale de la API (mismo criterio que mpConnected sobre mpAccessToken).
+  // "Había plata adentro y el paseo no se completó" es una de las señales
+  // más importantes de un caso (hallazgo del testeo en staging, 2026-09-11).
+  estabaPago: boolean;
+  // A diferencia de mpPaymentId, refundedAt sí se expone directo: no es un
+  // id de sistema, es una fecha, y con la fecha alcanza.
+  refundedAt: string | null;
   walkType: { label: string; durationMinutes: number };
   walker: SupportPerson;
   owner: SupportPerson | null;

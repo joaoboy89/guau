@@ -58,6 +58,8 @@ const CASE_ROW = {
   totalAmount: 3000,
   walkerAmount: 2420.91,
   cancellationReason: null,
+  mpPaymentId: null,
+  refundedAt: null,
   walkType: { label: "Paseo básico", durationMinutes: 45 },
   walker: {
     id: "wp-1",
@@ -209,32 +211,37 @@ describe("SupportService", () => {
       await expect(service.getCase("walk-inexistente")).rejects.toThrow(NotFoundException);
     });
 
-    it("el caso completo NO lleva ids de MercadoPago, montos de plataforma, locations ni nada parecido a un token", async () => {
+    it("el caso completo NO lleva el id de pago, mpRefundId, montos de plataforma, locations ni nada parecido a un token", async () => {
       prisma.walk.findUnique.mockResolvedValue(CASE_ROW);
 
       const result = await service.getCase("walk-1");
 
-      // Ninguno de estos campos existe en la salida...
+      // mpPaymentId NUNCA sale a la salida (solo se usa para derivar
+      // estabaPago) — mismo criterio que mpAccessToken → mpConnected.
       expect(result).not.toHaveProperty("mpPaymentId");
       expect(result).not.toHaveProperty("mpRefundId");
-      expect(result).not.toHaveProperty("refundedAt");
       expect(result).not.toHaveProperty("platformFee");
       expect(result).not.toHaveProperty("commissionRate");
       expect(result).not.toHaveProperty("locations");
       expect(result.walker).not.toHaveProperty("mpAccessToken");
 
-      // ...y la garantia fuerte: el select que se le pide a Prisma tampoco
-      // los pide. Si el dato nunca sale de Postgres, no hay forma de que
-      // se escape.
+      // ...y la garantia fuerte para lo que sigue sin traerse: el select que
+      // se le pide a Prisma tampoco los pide. Si el dato nunca sale de
+      // Postgres, no hay forma de que se escape.
       const select = prisma.walk.findUnique.mock.calls[0][0].select;
-      expect(select).not.toHaveProperty("mpPaymentId");
       expect(select).not.toHaveProperty("mpRefundId");
-      expect(select).not.toHaveProperty("refundedAt");
       expect(select).not.toHaveProperty("platformFee");
       expect(select).not.toHaveProperty("commissionRate");
       expect(select).not.toHaveProperty("locations");
       expect(select.walker.select).not.toHaveProperty("mpAccessToken");
       expect(select.walker.select.user.select).not.toHaveProperty("mpAccessToken");
+
+      // mpPaymentId y refundedAt SI se piden (hallazgo del testeo en
+      // staging: "habia plata adentro y no se completo" es señal fuerte) —
+      // mpPaymentId solo para derivar el booleano, refundedAt se expone
+      // directo porque no es un id de sistema.
+      expect(select).toHaveProperty("mpPaymentId", true);
+      expect(select).toHaveProperty("refundedAt", true);
     });
 
     it("camino feliz: trae los montos (totalAmount, walkerAmount) — eso si es legitimo para soporte", async () => {
@@ -249,6 +256,37 @@ describe("SupportService", () => {
         id: "op-1", firstName: "Ana", lastName: "Gómez", email: "ana@test.com", phone: "2222",
       });
       expect(result.dogs).toEqual([{ name: "Toto", size: "MEDIANO" }]);
+    });
+
+    it("estabaPago: true cuando mpPaymentId es un id de pago real (numerico)", async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...CASE_ROW, mpPaymentId: "99999" });
+      const result = await service.getCase("walk-1");
+      expect(result.estabaPago).toBe(true);
+    });
+
+    it("estabaPago: false cuando mpPaymentId es null (nunca se pago)", async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...CASE_ROW, mpPaymentId: null });
+      const result = await service.getCase("walk-1");
+      expect(result.estabaPago).toBe(false);
+    });
+
+    it("estabaPago: false cuando mpPaymentId es un preference id (checkout abandonado, no es plata real)", async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...CASE_ROW, mpPaymentId: "3541787996-9905f4f5-abc" });
+      const result = await service.getCase("walk-1");
+      expect(result.estabaPago).toBe(false);
+    });
+
+    it("refundedAt se expone directo (fecha, no booleano) cuando tiene valor", async () => {
+      const refundedAt = new Date("2026-09-11T12:00:00Z");
+      prisma.walk.findUnique.mockResolvedValue({ ...CASE_ROW, refundedAt });
+      const result = await service.getCase("walk-1");
+      expect(result.refundedAt).toEqual(refundedAt);
+    });
+
+    it("refundedAt null cuando no se devolvio nada", async () => {
+      prisma.walk.findUnique.mockResolvedValue({ ...CASE_ROW, refundedAt: null });
+      const result = await service.getCase("walk-1");
+      expect(result.refundedAt).toBeNull();
     });
   });
 
