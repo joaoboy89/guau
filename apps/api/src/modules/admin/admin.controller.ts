@@ -53,7 +53,7 @@ export class AdminController {
   @ApiOperation({
     summary: "Reembolso total del pago de un paseo (ej. no-show del paseador) — sin acción del vendedor",
   })
-  refundWalk(@Param("id") id: string) {
+  refundWalk(@Param("id", ParseUUIDPipe) id: string) {
     return this.payments.refundWalkPayment(id);
   }
 }
