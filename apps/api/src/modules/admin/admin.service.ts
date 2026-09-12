@@ -80,7 +80,7 @@ export class AdminService {
 
   // ─── Verificar identidad: aprobar / rechazar / suspender / reactivar ─────
 
-  async verifyWalker(walkerProfileId: string, dto: VerifyWalkerDto, adminId: string) {
+  async verifyWalker(walkerProfileId: string, dto: VerifyWalkerDto, adminId: string, adminEmail: string) {
     if (ACTIONS_THAT_REQUIRE_NOTES.includes(dto.action) && !dto.notes) {
       throw new BadRequestException(
         `Debés incluir una nota explicando el motivo para "${dto.action}"`
@@ -115,19 +115,9 @@ export class AdminService {
       );
     }
 
-    const admin = await this.prisma.user.findUnique({
-      where: { id: adminId },
-      select: { email: true },
-    });
-
     const data: Prisma.WalkerProfileUpdateInput = {
       verificationStatus: this.nextStatus(dto.action),
-      verificationNotes: this.appendNote(
-        walker.verificationNotes,
-        dto.action,
-        dto.notes,
-        admin?.email ?? adminId,
-      ),
+      verificationNotes: this.appendNote(walker.verificationNotes, dto.action, dto.notes, adminEmail),
     };
 
     if (dto.action === "approve") {

@@ -40,7 +40,7 @@ export class AdminController {
     @Body() dto: VerifyWalkerDto,
     @CurrentUser() admin: AuthUser,
   ) {
-    return this.admin.verifyWalker(id, dto, admin.id);
+    return this.admin.verifyWalker(id, dto, admin.id, admin.email);
   }
 
   @Get("stats")

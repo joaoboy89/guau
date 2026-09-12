@@ -39,8 +39,7 @@ function buildPrismaMock() {
       aggregate: jest.fn(),
     },
     user: {
-      count:      jest.fn(),
-      findUnique: jest.fn(),
+      count: jest.fn(),
     },
   };
 }
@@ -55,7 +54,6 @@ describe('AdminService', () => {
   beforeEach(async () => {
     prisma        = buildPrismaMock();
     notifications = { create: jest.fn().mockResolvedValue({}) };
-    prisma.user.findUnique.mockResolvedValue({ email: ADMIN_EMAIL });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -125,23 +123,23 @@ describe('AdminService', () => {
 
   describe('verifyWalker()', () => {
     it('lanza BadRequestException si action es "reject" y no viene notes', async () => {
-      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'reject' }, ADMIN_ID))
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'reject' }, ADMIN_ID, ADMIN_EMAIL))
         .rejects.toThrow(BadRequestException);
     });
 
     it('lanza BadRequestException si action es "suspend" y no viene notes', async () => {
-      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'suspend' }, ADMIN_ID))
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'suspend' }, ADMIN_ID, ADMIN_EMAIL))
         .rejects.toThrow(BadRequestException);
     });
 
     it('lanza BadRequestException si action es "reinstate" y no viene notes', async () => {
-      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'reinstate' }, ADMIN_ID))
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'reinstate' }, ADMIN_ID, ADMIN_EMAIL))
         .rejects.toThrow(BadRequestException);
     });
 
     it('lanza NotFoundException si el walkerProfile no existe', async () => {
       prisma.walkerProfile.findUnique.mockResolvedValue(null);
-      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID))
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID, ADMIN_EMAIL))
         .rejects.toThrow(NotFoundException);
     });
 
@@ -151,10 +149,10 @@ describe('AdminService', () => {
         verificationStatus: VerificationStatus.REJECTED,
       });
 
-      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID))
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID, ADMIN_EMAIL))
         .rejects.toThrow(ConflictException);
       await expect(
-        service.verifyWalker(WALKER_PROFILE_ID, { action: 'suspend', notes: 'x' }, ADMIN_ID),
+        service.verifyWalker(WALKER_PROFILE_ID, { action: 'suspend', notes: 'x' }, ADMIN_ID, ADMIN_EMAIL),
       ).rejects.toThrow(ConflictException);
       expect(prisma.walkerProfile.update).not.toHaveBeenCalled();
     });
@@ -166,7 +164,7 @@ describe('AdminService', () => {
       });
 
       await expect(
-        service.verifyWalker(WALKER_PROFILE_ID, { action: 'reinstate', notes: 'motivo' }, ADMIN_ID),
+        service.verifyWalker(WALKER_PROFILE_ID, { action: 'reinstate', notes: 'motivo' }, ADMIN_ID, ADMIN_EMAIL),
       ).rejects.toThrow(ConflictException);
       expect(prisma.walkerProfile.update).not.toHaveBeenCalled();
     });
@@ -177,7 +175,7 @@ describe('AdminService', () => {
         verificationStatus: VerificationStatus.SUSPENDED,
       });
 
-      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID))
+      await expect(service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID, ADMIN_EMAIL))
         .rejects.toThrow(ConflictException);
       expect(prisma.walkerProfile.update).not.toHaveBeenCalled();
     });
@@ -187,7 +185,7 @@ describe('AdminService', () => {
       const updated = { ...BASE_WALKER_PROFILE, verificationStatus: VerificationStatus.VERIFIED };
       prisma.walkerProfile.update.mockResolvedValue(updated);
 
-      const result = await service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID);
+      const result = await service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID, ADMIN_EMAIL);
 
       expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -223,6 +221,7 @@ describe('AdminService', () => {
         WALKER_PROFILE_ID,
         { action: 'reject', notes: 'Foto ilegible' },
         ADMIN_ID,
+        ADMIN_EMAIL,
       );
 
       expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
@@ -256,6 +255,7 @@ describe('AdminService', () => {
         WALKER_PROFILE_ID,
         { action: 'suspend', notes: 'Denuncia de un dueño, en revision' },
         ADMIN_ID,
+        ADMIN_EMAIL,
       );
 
       expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
@@ -283,6 +283,7 @@ describe('AdminService', () => {
         WALKER_PROFILE_ID,
         { action: 'reinstate', notes: 'Se aclaro el malentendido' },
         ADMIN_ID,
+        ADMIN_EMAIL,
       );
 
       expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
@@ -308,7 +309,7 @@ describe('AdminService', () => {
       });
       prisma.walkerProfile.update.mockResolvedValue(BASE_WALKER_PROFILE);
 
-      await service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID);
+      await service.verifyWalker(WALKER_PROFILE_ID, { action: 'approve' }, ADMIN_ID, ADMIN_EMAIL);
 
       expect(prisma.walkerProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({
