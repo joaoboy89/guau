@@ -14,6 +14,25 @@ export function formatDateTimeBA(date: Date): string {
   });
 }
 
+/**
+ * "23 jul 2026" en hora de Buenos Aires — para listados donde la fecha
+ * completa (formatDateTimeBA) rompe el alto de fila. `dateStyle: "medium"`
+ * en es-AR devuelve "23 de jul de 2026" (con los "de" intercalados); se arma
+ * a mano con formatToParts para sacarlos sin perder el mes en letras ni la
+ * zona horaria correcta.
+ */
+export function formatDateShortBA(date: Date): string {
+  const parts = new Intl.DateTimeFormat("es-AR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: BUENOS_AIRES_TIMEZONE,
+  }).formatToParts(date);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("day")} ${get("month")} ${get("year")}`;
+}
+
 /** Solo "HH:MM" en hora de Buenos Aires — para leyendas cortas. */
 export function formatTimeBA(date: Date): string {
   return date.toLocaleString("es-AR", {

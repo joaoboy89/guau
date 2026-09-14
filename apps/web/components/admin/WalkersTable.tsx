@@ -1,5 +1,6 @@
+import { ChevronRight } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
-import { formatDateTimeBA } from "@/lib/format-date";
+import { formatDateShortBA } from "@/lib/format-date";
 import { STATUS_BADGE } from "@/lib/admin/walker-status";
 import type { AdminWalkersResponse } from "@/lib/admin/api";
 import { cn } from "@/lib/cn";
@@ -29,6 +30,7 @@ export function WalkersTable({
               <th className="px-4 py-2 font-semibold">Mail</th>
               <th className="px-4 py-2 font-semibold">Alta</th>
               <th className="px-4 py-2 font-semibold">Estado</th>
+              <th className="px-4 py-2 w-8" aria-hidden="true" />
             </tr>
           </thead>
           <tbody>
@@ -39,7 +41,7 @@ export function WalkersTable({
                   key={walker.id}
                   onClick={() => onSelect(walker.id)}
                   className={cn(
-                    "border-t border-brand-border cursor-pointer hover:bg-brand-surface-sand",
+                    "border-t border-brand-border cursor-pointer transition-colors hover:bg-brand-surface-sand",
                     selectedId === walker.id && "bg-brand-primary-soft",
                   )}
                 >
@@ -48,10 +50,13 @@ export function WalkersTable({
                   </td>
                   <td className="px-4 py-2 text-brand-text-body">{walker.user.email}</td>
                   <td className="px-4 py-2 text-brand-text-body">
-                    {formatDateTimeBA(new Date(walker.user.createdAt))}
+                    {formatDateShortBA(new Date(walker.user.createdAt))}
                   </td>
                   <td className="px-4 py-2">
                     <Badge variant={badge.variant}>{badge.label}</Badge>
+                  </td>
+                  <td className="px-4 py-2 text-brand-text-muted">
+                    <ChevronRight size={16} aria-hidden="true" />
                   </td>
                 </tr>
               );

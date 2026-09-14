@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { AxiosError } from "axios";
 import { useRequireAuth, useLogout } from "@/lib/auth";
 import { Container, Spinner } from "@/components/ui";
@@ -63,20 +64,28 @@ export default function AdminWalkersPage() {
   return (
     <main className="min-h-dvh bg-brand-bg">
       <Container width="wide" className="flex flex-col gap-6 py-6">
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Logo size={36} />
-            <div>
-              <h1 className="text-xl font-serif font-bold text-brand-text">Verificar paseadores</h1>
-              <p className="text-xs text-brand-text-muted">{user?.email}</p>
-            </div>
-          </div>
-          <button
-            onClick={logout}
-            className="text-sm px-4 py-2 rounded-xl border border-brand-border text-brand-text-muted transition-opacity hover:opacity-70"
+        <header className="flex flex-col gap-2">
+          <Link
+            href="/admin"
+            className="text-sm text-brand-primary font-semibold hover:opacity-80 transition-opacity w-fit"
           >
-            Salir
-          </button>
+            ← Volver al panel
+          </Link>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Logo size={36} />
+              <div>
+                <h1 className="text-xl font-serif font-bold text-brand-text">Verificar paseadores</h1>
+                <p className="text-xs text-brand-text-muted">{user?.email}</p>
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              className="text-sm px-4 py-2 rounded-xl border border-brand-border text-brand-text-muted transition-opacity hover:opacity-70"
+            >
+              Salir
+            </button>
+          </div>
         </header>
 
         <div className="flex gap-1 border-b border-brand-border">

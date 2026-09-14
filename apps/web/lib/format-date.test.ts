@@ -1,4 +1,4 @@
-import { isTodayBA } from "./format-date";
+import { isTodayBA, formatDateShortBA } from "./format-date";
 
 describe("isTodayBA", () => {
   beforeEach(() => {
@@ -25,5 +25,18 @@ describe("isTodayBA", () => {
     // El bug real: un paseo agendado nueve dias despues mostraba "a las 8:15"
     // como si fuera hoy.
     expect(isTodayBA(new Date("2026-08-26T08:15:00-03:00"))).toBe(false);
+  });
+});
+
+describe("formatDateShortBA", () => {
+  it("da 'D mes YYYY' sin los 'de' que mete dateStyle: medium en es-AR", () => {
+    expect(formatDateShortBA(new Date("2026-07-23T11:46:00Z"))).toBe("23 jul 2026");
+  });
+
+  it("interpreta la fecha en hora de Buenos Aires, no UTC", () => {
+    // 23:30 UTC del 17/08 es 20:30 ART del mismo dia — no cruza al 18.
+    expect(formatDateShortBA(new Date("2026-08-17T23:30:00Z"))).toBe("17 ago 2026");
+    // 02:30 UTC del 18/08 es 23:30 ART del 17/08 — sí cruza para atrás.
+    expect(formatDateShortBA(new Date("2026-08-18T02:30:00Z"))).toBe("17 ago 2026");
   });
 });

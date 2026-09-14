@@ -24,7 +24,12 @@ export const STATUS_BADGE: Record<
 };
 
 export const ACTION_LABEL: Record<VerifyAction, string> = {
-  approve: "Aprobar",
+  // "Verificar", no "Aprobar" — la pantalla ya dice "Verificar paseadores"
+  // y la insignia dice "Identidad verificada" (docs/diseños/
+  // verificacion-de-paseadores.md §8: "Tres acciones: verificar / suspender
+  // / dar de baja"). Tres palabras para una sola accion confundio a Joa
+  // mismo probando la pantalla — si le paso a el, le pasa a cualquiera.
+  approve: "Verificar",
   reject: "Rechazar",
   suspend: "Suspender",
   reinstate: "Reactivar",
