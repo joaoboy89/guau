@@ -5,6 +5,7 @@ import {
   Put,
   Body,
   Param,
+  ParseUUIDPipe,
   Query,
   UseGuards,
   HttpCode,
@@ -68,7 +69,7 @@ export class WalksController {
 
   @Get(":id")
   @ApiOperation({ summary: "Detalle de un paseo" })
-  findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  findOne(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.findById(user.id, user.role, id);
   }
 
@@ -76,7 +77,7 @@ export class WalksController {
 
   @Get(":id/locations")
   @ApiOperation({ summary: "Ruta GPS grabada del paseo" })
-  getLocations(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  getLocations(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.getLocations(user.id, user.role, id);
   }
 
@@ -87,7 +88,7 @@ export class WalksController {
   @Roles(UserRole.WALKER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Paseador confirma la reserva (PENDING → CONFIRMED)" })
-  confirm(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  confirm(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.confirm(user.id, id);
   }
 
@@ -96,7 +97,7 @@ export class WalksController {
   @Roles(UserRole.WALKER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Paseador rechaza la reserva (PENDING → CANCELLED_WALKER)" })
-  reject(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  reject(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.reject(user.id, id);
   }
 
@@ -105,7 +106,7 @@ export class WalksController {
   @Roles(UserRole.WALKER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Paseador sale hacia el pickup (CONFIRMED → WALKER_ON_WAY)" })
-  onWay(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  onWay(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.markOnWay(user.id, id);
   }
 
@@ -117,7 +118,7 @@ export class WalksController {
     summary:
       "Iniciar el paseo (WALKER_ON_WAY → IN_PROGRESS). Requiere el código del dueño o un motivo si no lo tiene.",
   })
-  start(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() dto: StartWalkDto) {
+  start(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string, @Body() dto: StartWalkDto) {
     return this.walks.start(user.id, id, dto);
   }
 
@@ -126,7 +127,7 @@ export class WalksController {
   @Roles(UserRole.WALKER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Finalizar el paseo (IN_PROGRESS → COMPLETED)" })
-  finish(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  finish(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.finish(user.id, id);
   }
 
@@ -137,7 +138,7 @@ export class WalksController {
   @ApiOperation({ summary: "Cancelar el paseo — disponible en PENDING y CONFIRMED" })
   cancel(
     @CurrentUser() user: AuthUser,
-    @Param("id") id: string,
+    @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: CancelWalkDto,
   ) {
     return this.walks.cancel(user.id, user.role, id, dto);
@@ -153,7 +154,7 @@ export class WalksController {
     summary:
       "Dueño reporta que el paseador no se presentó (CONFIRMED/WALKER_ON_WAY → NOT_PERFORMED). Desde T+10m, no vence.",
   })
-  reportWalkerNoShow(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  reportWalkerNoShow(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.reportWalkerNoShow(user.id, id);
   }
 
@@ -164,7 +165,7 @@ export class WalksController {
   @ApiOperation({
     summary: "Dueño confirma que recibió a su perro (IN_PROGRESS → COMPLETED). Llave de escape del bloqueo.",
   })
-  confirmReceipt(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  confirmReceipt(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.confirmReceipt(user.id, id);
   }
 
@@ -176,7 +177,7 @@ export class WalksController {
     summary:
       "Dueño confirma que un paseo que arrancó sin código está todo bien. Idempotente, primera gana.",
   })
-  acknowledgeNoCode(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  acknowledgeNoCode(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.walks.acknowledgeNoCode(user.id, id);
   }
 }

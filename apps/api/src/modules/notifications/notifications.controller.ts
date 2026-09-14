@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Param, UseGuards } from "@nestjs/common";
+import { Controller, Get, Put, Param, ParseUUIDPipe, UseGuards } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { NotificationsService } from "./notifications.service";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
@@ -21,7 +21,7 @@ export class NotificationsController {
   @ApiOperation({ summary: "Marcar una notificación como leída" })
   markAsRead(
     @CurrentUser() user: { id: string },
-    @Param("id") id: string,
+    @Param("id", ParseUUIDPipe) id: string,
   ) {
     return this.notifications.markAsRead(user.id, id);
   }

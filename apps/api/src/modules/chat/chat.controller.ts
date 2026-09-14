@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from "@nestjs/common";
+import { Controller, Get, Post, Body, Param, ParseUUIDPipe, UseGuards } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { ChatService } from "./chat.service";
 import { SendMessageDto } from "./dto/send-message.dto";
@@ -25,7 +25,7 @@ export class ChatController {
 
   @Get(":id/messages")
   @ApiOperation({ summary: "Obtener mensajes de una conversación" })
-  getMessages(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+  getMessages(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.chat.getMessages(user.id, user.role, id);
   }
 
@@ -33,7 +33,7 @@ export class ChatController {
   @ApiOperation({ summary: "Enviar un mensaje (detecta info de contacto automáticamente)" })
   sendMessage(
     @CurrentUser() user: AuthUser,
-    @Param("id") id: string,
+    @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: SendMessageDto,
   ) {
     return this.chat.sendMessage(user.id, user.role, id, dto);

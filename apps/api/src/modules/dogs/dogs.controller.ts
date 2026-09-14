@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  ParseUUIDPipe,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -47,7 +48,7 @@ export class DogsController {
   @ApiOperation({ summary: "Editar datos de un perro" })
   update(
     @CurrentUser() user: { id: string },
-    @Param("id") id: string,
+    @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpdateDogDto,
   ) {
     return this.dogs.update(user.id, id, dto);
@@ -58,7 +59,7 @@ export class DogsController {
   @ApiOperation({ summary: "Desactivar un perro (soft delete)" })
   deactivate(
     @CurrentUser() user: { id: string },
-    @Param("id") id: string,
+    @Param("id", ParseUUIDPipe) id: string,
   ) {
     return this.dogs.deactivate(user.id, id);
   }

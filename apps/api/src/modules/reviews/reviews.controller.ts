@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, UseGuards } from "@nestjs/common";
+import { Controller, Post, Get, Body, Param, ParseUUIDPipe, UseGuards } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { ReviewsService } from "./reviews.service";
 import { CreateReviewDto } from "./dto/create-review.dto";
@@ -29,7 +29,7 @@ export class ReviewsController {
 
   @Get("walker/:id")
   @ApiOperation({ summary: "Ver reviews públicas de un paseador (por WalkerProfile ID)" })
-  getWalkerReviews(@Param("id") id: string) {
+  getWalkerReviews(@Param("id", ParseUUIDPipe) id: string) {
     return this.reviews.getWalkerReviews(id);
   }
 }

@@ -5,6 +5,7 @@ import {
   Post,
   Body,
   Param,
+  ParseUUIDPipe,
   Query,
   UseGuards,
 } from "@nestjs/common";
@@ -37,7 +38,7 @@ export class WalkersController {
 
   @Get(":id")
   @ApiOperation({ summary: "Ver perfil público de un paseador" })
-  getPublicProfile(@Param("id") id: string) {
+  getPublicProfile(@Param("id", ParseUUIDPipe) id: string) {
     return this.walkers.getPublicProfile(id);
   }
 
@@ -95,7 +96,7 @@ export class WalkersController {
   @ApiOperation({ summary: "Editar un horario existente" })
   updateSchedule(
     @CurrentUser() user: { id: string },
-    @Param("scheduleId") scheduleId: string,
+    @Param("scheduleId", ParseUUIDPipe) scheduleId: string,
     @Body() dto: UpdateScheduleDto,
   ) {
     return this.walkers.updateSchedule(user.id, scheduleId, dto);
