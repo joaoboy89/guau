@@ -1,5 +1,6 @@
 import path from "path";
 import { fileURLToPath } from "url";
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -11,6 +12,9 @@ const nextConfig = {
     // (warning "Unrecognized key") y el file-tracing colapsa la raiz a apps/web,
     // dejando server.js mal ubicado y sin node_modules en el standalone.
     outputFileTracingRoot: path.join(__dirname, "../../"),
+    // Necesario en Next 14 (en 15+ ya es default) para que instrumentation.ts
+    // se ejecute — sin esto register()/onRequestError de Sentry no corren.
+    instrumentationHook: true,
   },
   transpilePackages: ["@guau/shared"],
   eslint: {
@@ -33,4 +37,12 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Silencia el output promocional del plugin en cada build.
+  silent: true,
+  // No configuramos SENTRY_AUTH_TOKEN/ORG/PROJECT (no lo pidio nadie, y no
+  // hace falta para reportar errores) — sin esto el plugin igual intentaria
+  // subir source maps y fallar en silencio o tirar warnings de mas.
+  // Deshabilitarlo explicito es mas claro que dejarlo a que se de cuenta solo.
+  sourcemaps: { disable: true },
+});
