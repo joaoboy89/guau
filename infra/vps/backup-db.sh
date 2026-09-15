@@ -56,7 +56,19 @@ DB_NAME="guau"
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
 log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"; }
-trap 'log "ERROR: script fallido en línea $LINENO — revisar arriba para detalle"' ERR
+
+# Ping de fallo a healthchecks.io — sin esto, si el script se corta a mitad
+# de camino, healthchecks recién se entera cuando vence el grace de 1 hora.
+# Con esto la alerta llega al instante. Mismo "|| true" que el ping de éxito
+# de más abajo: si healthchecks.io está caído, eso no puede voltear el backup.
+on_error() {
+  local line="$1"
+  log "ERROR: script fallido en línea ${line} — revisar arriba para detalle"
+  if [ -n "${HEALTHCHECK_URL:-}" ]; then
+    curl -fsS --retry 3 --max-time 10 "${HEALTHCHECK_URL}/fail" > /dev/null || true
+  fi
+}
+trap 'on_error "$LINENO"' ERR
 
 log "=== Backup iniciado ==="
 
@@ -94,6 +106,31 @@ docker exec \
 
 DUMP_SIZE="$(du -sh "${DUMP_PATH}" | cut -f1)"
 log "Dump completado: ${DUMP_FILE} (${DUMP_SIZE})"
+
+# ─── Verificar que el dump sirva (antes de subir y antes de pingear) ─────────
+#
+# Hoy nadie verifica que el dump sirva: un dump de 0 bytes se subiria a R2 y
+# pingearia éxito igual — recién te enterás el día que necesitás restaurar.
+# Dos chequeos baratos: tamaño mínimo (un dump real de esta base pesa mucho
+# más que 1000 bytes) y la firma "PGDMP", que es lo que identifica a un dump
+# en formato custom de Postgres (el "-Fc" del pg_dump de arriba). Si
+# cualquiera de los dos falla, el trap ERR se encarga del ping de fallo.
+
+MIN_DUMP_BYTES=1000
+
+DUMP_BYTES="$(wc -c < "${DUMP_PATH}")"
+if [ "${DUMP_BYTES}" -lt "${MIN_DUMP_BYTES}" ]; then
+  log "ERROR: el dump pesa ${DUMP_BYTES} bytes (mínimo esperado: ${MIN_DUMP_BYTES}). pg_dump probablemente falló en silencio o escribió un archivo vacío/truncado — no se sube a R2 ni se pinguea éxito."
+  exit 1
+fi
+
+DUMP_SIGNATURE="$(head -c 5 "${DUMP_PATH}")"
+if [ "${DUMP_SIGNATURE}" != "PGDMP" ]; then
+  log "ERROR: el dump no empieza con la firma PGDMP (formato custom de Postgres, -Fc). El archivo no es un dump válido o está corrupto — no se sube a R2 ni se pinguea éxito."
+  exit 1
+fi
+
+log "Verificación del dump OK: ${DUMP_BYTES} bytes, firma PGDMP presente."
 
 # ─── Subir a R2 ───────────────────────────────────────────────────────────────
 
