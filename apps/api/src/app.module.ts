@@ -19,6 +19,7 @@ import { NotificationsModule } from "./modules/notifications/notifications.modul
 import { AdminModule } from "./modules/admin/admin.module";
 import { SupportModule } from "./modules/support/support.module";
 import { WalkTypesModule } from "./modules/walk-types/walk-types.module";
+import { HealthModule } from "./modules/health/health.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
 
@@ -42,6 +43,7 @@ import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
     AdminModule,
     SupportModule,
     WalkTypesModule,
+    HealthModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
