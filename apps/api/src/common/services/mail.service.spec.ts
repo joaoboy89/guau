@@ -1,4 +1,16 @@
+import * as Sentry from '@sentry/nestjs';
 import { MailService } from './mail.service';
+
+// mockSend se reasigna en cada test que lo necesita — el wrapper de abajo
+// siempre delega al valor actual, así Resend (mockeado a nivel de módulo)
+// no necesita reconstruirse por test.
+let mockSend: jest.Mock;
+
+jest.mock('resend', () => ({
+  Resend: jest.fn().mockImplementation(() => ({
+    emails: { send: (...args: unknown[]) => mockSend(...args) },
+  })),
+}));
 
 function buildService(env: Record<string, string>) {
   const config = { get: jest.fn((key: string) => env[key]) };
@@ -41,5 +53,25 @@ describe('MailService — sendNotPerformedAlert', () => {
     const service = buildService({});
 
     expect(() => service.sendNotPerformedAlert(BASE_DETAILS)).not.toThrow();
+  });
+
+  // Este es el mail que avisa que hay plata en un paseo que no se hizo — si
+  // el envío falla y eso solo se loguea, es silencio de segundo orden: no
+  // te enterás de que no te enteraste.
+  it('si Resend falla al enviar: se reporta a Sentry con el walkId, y no rompe (mismo comportamiento de siempre)', async () => {
+    const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+    const sendError = new Error('Resend: 503 service unavailable');
+    mockSend = jest.fn().mockRejectedValue(sendError);
+    const service = buildService({ RESEND_API_KEY: 'una-clave-real', ADMIN_ALERT_EMAIL: 'joa@guau.com' });
+    const errorSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => {});
+
+    expect(() => service.sendNotPerformedAlert(BASE_DETAILS)).not.toThrow();
+    // El .send() es fire-and-forget — dejar correr el microtask del .catch().
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(captureSpy).toHaveBeenCalledWith(sendError, expect.objectContaining({ tags: { walkId: 'walk-1' } }));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('walk-1'));
+
+    captureSpy.mockRestore();
   });
 });

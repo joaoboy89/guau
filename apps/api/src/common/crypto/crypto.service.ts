@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import * as crypto from "crypto";
+import * as Sentry from "@sentry/nestjs";
 
 const ALGO = "aes-256-gcm";
 const IV_BYTES = 12;
@@ -45,7 +46,16 @@ export class CryptoService {
       const decipher = crypto.createDecipheriv(ALGO, this.key, iv, { authTagLength: TAG_BYTES });
       decipher.setAuthTag(tag);
       return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
-    } catch {
+    } catch (err) {
+      // No es un caso "adyacente al dinero" — es un caso DE dinero, cadena
+      // completa verificada: decrypt() falla → devuelve "" →
+      // createPreference() lo lee como "no hay token" → el dueño ve "El
+      // paseador todavia no conecto su cuenta de MercadoPago", un motivo
+      // FALSO (si la conecto: lo que fallo fue la clave) mientras el
+      // paseador queda inservible sin que nadie lo sepa. El comentario de
+      // abajo ya decia "merece que alguien mire" desde que este catch se
+      // agrego — faltaba el aviso.
+      Sentry.captureException(err);
       // AES-256-GCM verifica el tag de autenticacion en decipher.final() —
       // un token cifrado con OTRA clave tiene el formato iv:tag:ciphertext
       // igual que uno valido (pasa el chequeo de arriba) y recien acá

@@ -9,6 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { WalkStatus } from '@prisma/client';
+import * as Sentry from '@sentry/nestjs';
 import { PaymentsService } from './payments.service';
 import { PrismaService } from '../../database/prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -643,6 +644,33 @@ describe('PaymentsService', () => {
       });
     });
 
+    // ─── Error interno del try (Sentry) ─────────────────────────────────────
+
+    describe('error interno al procesar (MP caído, lo que sea)', () => {
+      it('reporta a Sentry con walkId/dataId como contexto, y devuelve { status: "processed" } igual que hoy', async () => {
+        const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+        prisma.walk.findUnique.mockResolvedValue(WALK_ROW_WITH_WALKER);
+        mockPaymentGet.mockRejectedValue(new Error('MercadoPago no responde'));
+
+        const result = await service.handleWebhook(
+          { type: 'payment', data: { id: '99999' } },
+          undefined, undefined, 'walk-1',
+        );
+
+        // Mismo comportamiento visible de siempre: el webhook no vuelca el
+        // proceso, sigue devolviendo processed — eso NO cambia.
+        expect(result).toEqual({ status: 'processed' });
+
+        expect(captureSpy).toHaveBeenCalledTimes(1);
+        expect(captureSpy.mock.calls[0][0]).toBeInstanceOf(Error);
+        expect(captureSpy.mock.calls[0][1]).toEqual(
+          expect.objectContaining({ tags: { walkId: 'walk-1', paymentDataId: '99999' } }),
+        );
+
+        captureSpy.mockRestore();
+      });
+    });
+
     // ─── Idempotencia ──────────────────────────────────────────────────────
 
     describe('idempotencia', () => {
@@ -757,6 +785,38 @@ describe('PaymentsService', () => {
       expect(prisma.walk.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'walk-2' } }),
       );
+    });
+
+    it('un error en un walk se reporta a Sentry con su walkId, y el job sigue con los demas', async () => {
+      const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+      const WALK_2 = { ...WALK_UNRESOLVED, id: 'walk-2', mpPaymentId: 'pref-def' };
+      prisma.walk.findMany.mockResolvedValue([WALK_UNRESOLVED, WALK_2]);
+
+      const networkError = new Error('network error');
+      (global.fetch as jest.Mock)
+        .mockRejectedValueOnce(networkError)
+        .mockResolvedValueOnce({
+          ok:   true,
+          json: async () => ({ results: [{ id: 99999, status: 'approved' }] }),
+        });
+      mockPaymentGet.mockResolvedValue(
+        approvedPayment({ external_reference: 'walk-2|owner-1' }),
+      );
+      prisma.walk.update.mockResolvedValue({});
+
+      await service.reconcilePendingPayments();
+
+      expect(captureSpy).toHaveBeenCalledTimes(1);
+      expect(captureSpy).toHaveBeenCalledWith(
+        networkError,
+        expect.objectContaining({ tags: { walkId: 'walk-1' } }),
+      );
+      // El job siguio con walk-2 — el reporte a Sentry no lo interrumpe.
+      expect(prisma.walk.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'walk-2' } }),
+      );
+
+      captureSpy.mockRestore();
     });
   });
 

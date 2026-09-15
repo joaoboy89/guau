@@ -1,4 +1,5 @@
 import { Test } from "@nestjs/testing";
+import * as Sentry from "@sentry/nestjs";
 import { CryptoService } from "./crypto.service";
 
 const VALID_KEY = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
@@ -97,6 +98,45 @@ describe("CryptoService", () => {
 
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("clave"));
       expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    describe("reporte a Sentry", () => {
+      let captureSpy: jest.SpyInstance;
+
+      beforeEach(() => {
+        captureSpy = jest.spyOn(Sentry, "captureException").mockImplementation();
+      });
+
+      afterEach(() => {
+        captureSpy.mockRestore();
+      });
+
+      it("clave que no corresponde: se reporta a Sentry (no es adyacente al dinero, es un caso de dinero)", () => {
+        const encrypted = service.encrypt("my-secret-token");
+        const [iv, tag, ciphertext] = encrypted.split(":");
+        const tamperedBuf = Buffer.from(tag, "hex");
+        tamperedBuf[0] ^= 0xff;
+        const badTag = tamperedBuf.toString("hex");
+
+        service.decrypt(`${iv}:${badTag}:${ciphertext}`);
+
+        expect(captureSpy).toHaveBeenCalledTimes(1);
+        // No toBeInstanceOf(Error): el error real de decipher.final() viene
+        // del modulo nativo "crypto" de Node, que Jest/OpenTelemetry cargan
+        // en un contexto distinto al de este archivo de test — mismo
+        // "Error" de nombre, pero identidad de clase distinta (instanceof
+        // da false aunque sea genuinamente un error). Se verifica que es el
+        // error real por duck-typing, no por identidad de clase.
+        const captured = captureSpy.mock.calls[0][0] as { message?: string };
+        expect(typeof captured?.message).toBe("string");
+        expect(captured?.message).toMatch(/authenticate|auth/i);
+      });
+
+      it("token legacy: NO se reporta a Sentry (no es el mismo caso — es historia, no una clave rota)", () => {
+        service.decrypt("APP_USR-legacy-plaintext-without-colons");
+
+        expect(captureSpy).not.toHaveBeenCalled();
+      });
     });
   });
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Resend } from "resend";
+import * as Sentry from "@sentry/nestjs";
 
 @Injectable()
 export class MailService {
@@ -237,6 +238,10 @@ Ningún reembolso se disparó automáticamente.`;
         text,
       })
       .catch((err) => {
+        // Este es el mail que avisa que hay plata en un paseo que no se
+        // hizo. Si el envio falla y eso solo se loguea, es silencio de
+        // segundo orden: no te enteras de que no te enteraste.
+        Sentry.captureException(err, { tags: { walkId: details.walkId } });
         this.logger.error(`No se pudo mandar la alerta de walk ${details.walkId}: ${err}`);
       });
   }

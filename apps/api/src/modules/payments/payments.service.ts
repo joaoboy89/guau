@@ -11,6 +11,7 @@ import { JwtService } from "@nestjs/jwt";
 import { Cron } from "@nestjs/schedule";
 import MercadoPago, { Preference, Payment } from "mercadopago";
 import * as crypto from "crypto";
+import * as Sentry from "@sentry/nestjs";
 import { PrismaService } from "../../database/prisma.service";
 import { CryptoService } from "../../common/crypto/crypto.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -332,6 +333,14 @@ export class PaymentsService {
         }
       }
     } catch (err) {
+      // Un catch que solo loguea es un error que alguien decidio ocultar.
+      // Que el webhook no vuelque el proceso esta bien (no se toca) — pero
+      // ocultarlo del PROCESO no es lo mismo que ocultarlo de la PERSONA
+      // que tiene que arreglarlo. Sin esto, "un pago quedo sin acreditar a
+      // las 3 de la manana" — el escenario que justifica tener Sentry — es
+      // justamente el que no se reportaba: moria en este catch y quedaba en
+      // los logs de Docker del VPS, que nadie abre nunca.
+      Sentry.captureException(err, { tags: { walkId: walkId ?? "sin-walkId", paymentDataId: dataId } });
       const detail = err instanceof Error ? err.message : JSON.stringify(err);
       this.logger.error(`Error procesando webhook ${dataId}: ${detail}`);
     }
@@ -395,6 +404,11 @@ export class PaymentsService {
         await this.handleApprovedPayment(walk, ownerId, payment);
         reconciled++;
       } catch (err) {
+        // Mismo criterio que el catch del webhook (ver el comentario ahi):
+        // esto es el respaldo del webhook — si tambien se traga el error en
+        // silencio, un pago puede quedar sin acreditar indefinidamente y
+        // nadie se entera hasta que el paseador pregunte por su plata.
+        Sentry.captureException(err, { tags: { walkId: walk.id } });
         this.logger.error(`reconcile: error procesando walk ${walk.id}: ${err}`);
       }
     }
