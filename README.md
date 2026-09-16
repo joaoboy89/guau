@@ -58,7 +58,7 @@ Session tokens live in `httpOnly` cookies (secure, sameSite lax), not in `localS
 
 **5. Staging joined after production did — same decision, revisited when the stakes changed**
 
-At first, every push to `master` deployed straight to production, with no staging environment in between. I was a single developer validating a business with no live users yet: a staging environment duplicates infrastructure, secrets, and maintenance to protect against a risk that, at that point, didn't really exist. The real risk at that stage was not iterating fast enough — so I put the protection where it actually paid off: the full test suite (412 backend tests + 49 frontend tests) running as a gate in CI, blocking any push with failing tests before it could reach production.
+At first, every push to `master` deployed straight to production, with no staging environment in between. I was a single developer validating a business with no live users yet: a staging environment duplicates infrastructure, secrets, and maintenance to protect against a risk that, at that point, didn't really exist. The real risk at that stage was not iterating fast enough — so I put the protection where it actually paid off: the full test suite (585 backend tests + 126 frontend tests) running as a gate in CI, blocking any push with failing tests before it could reach production.
 
 *What changed:* real money started moving through the platform, and a real walker went through onboarding. The cost I'd accepted on purpose back then — "a bug the tests don't catch reaches real users" — stopped being theoretical the moment there was an actual person and actual money on the other end of that bug.
 
@@ -89,18 +89,20 @@ The marketplace commission (`MP_MARKETPLACE_FEE`) is validated inside `WalksServ
 | Payments | MercadoPago Checkout Pro — marketplace split (`marketplace_fee`), seller OAuth Connect, signed webhook, reconciliation job, seller access token encrypted at rest (AES-256-GCM) |
 | Email | Resend |
 | Auth | JWT + refresh tokens in `httpOnly` cookies (not accessible from JS) |
-| Testing | Jest — backend: 412 automated tests across the highest-risk modules (payments, auth, walker search, bookings, admin, encryption, access control); frontend: 49 tests over the API client (auth-refresh-loop regression), the notifications store, and date utilities |
+| Testing | Jest — backend: 585 automated tests across the highest-risk modules (payments, auth, walker search, bookings, the support panel, health checks, access control) — including every catch block on a money-adjacent path that used to fail silently; frontend: 126 tests over the API client (auth-session-error classification, refresh-loop regression), the support panel's search/signal/timeline logic, date utilities, and a rendered-component test |
 | Deploy | Self-managed VPS + Docker Compose + Cloudflare Tunnel |
 | CI/CD | GitHub Actions (push to `master` → test → build → automatic deploy) |
 | Monorepo | npm workspaces + Turborepo |
 
 ## Current status
 
-Implemented and working: full registration/auth (httpOnly cookies, no tokens accessible from JavaScript), owner and walker profiles (including work-zone setup via geolocation), proximity-based walker search, and a booking lifecycle across its real eight states (`PENDING → CONFIRMED → WALKER_ON_WAY → IN_PROGRESS → COMPLETED`, plus `CANCELLED_OWNER`, `CANCELLED_WALKER`, and `NOT_PERFORMED` for bookings that never happened) — backed by a job that runs every 5 minutes to catch bookings stuck in a dead end (never confirmed, walker never showed up, nobody acted) and resolve them automatically. Two anti-fraud mechanisms guard the handoff itself: the exact pickup address stays obfuscated to the walker (a randomized point within ~200m, deterministic per booking) until they tap "on my way", and starting a walk now requires a 4-digit pickup code the owner hands over in person — a code that never reaches the walker's own device — so "the walk started" stops being one person's word against the other's. Real-time in-app notifications (bell icon with unread badge, powered by Socket.io over the Cloudflare Tunnel, verified in production), and 412 automated backend tests plus 49 frontend tests covering the highest-risk modules (payments, auth, search, bookings, admin, encryption, access control).
+Implemented and working: full registration/auth (httpOnly cookies, no tokens accessible from JavaScript), owner and walker profiles (including work-zone setup via geolocation), proximity-based walker search, and a booking lifecycle across its real eight states (`PENDING → CONFIRMED → WALKER_ON_WAY → IN_PROGRESS → COMPLETED`, plus `CANCELLED_OWNER`, `CANCELLED_WALKER`, and `NOT_PERFORMED` for bookings that never happened) — backed by a job that runs every 5 minutes to catch bookings stuck in a dead end (never confirmed, walker never showed up, nobody acted) and resolve them automatically. Two anti-fraud mechanisms guard the handoff itself: the exact pickup address stays obfuscated to the walker (a randomized point within ~200m, deterministic per booking) until they tap "on my way", and starting a walk now requires a 4-digit pickup code the owner hands over in person — a code that never reaches the walker's own device — so "the walk started" stops being one person's word against the other's. Real-time in-app chat between owner and walker (Socket.io) is scoped to the active booking window — it opens once the walker marks "on my way" and the API itself closes it once the booking closes (a 403 past that point, not a frontend convention) — backed by a two-level contact-info filter: an email, an @handle, or a run of 8+ phone digits blocks the message outright, while a bare mention of a channel name ("I don't have WhatsApp") doesn't block, it's just flagged for the record. Real-time in-app notifications (bell icon with unread badge, powered by Socket.io over the Cloudflare Tunnel, verified in production), and 585 automated backend tests plus 126 frontend tests covering the highest-risk modules (payments, auth, search, bookings, admin, encryption, access control).
+
+A read-only support panel (`/support`) lets an admin look up a booking and diagnose a dispute without writing anything: search by the booking's short ID, either party's email, or a date range — no filter at all returns nothing, on purpose, and that cut happens before the database is ever queried, not by trimming a large result afterward. A case view separates what was agreed (the booking's terms) from what actually happened (a real timeline built from timestamps) and surfaces only the anomalies — started without a code, closed by the owner instead of the walker, a late start — instead of listing around 25 fields with equal weight. Reading a booking's chat is a separate, deliberate action from opening the case, and every read leaves a log line: who looked at what, when. This is the first, read-only slice on purpose — it doesn't write anything yet.
 
 Payments via MercadoPago: **marketplace split validated end-to-end in production, with real money**. The owner pays, and the amount is automatically split between the walker (via their own MercadoPago OAuth Connect) and Güau (`marketplace_fee`). The first real transaction: a $3000 (ARS) walk split into Güau's commission ($450, exactly 15%), MercadoPago's own fee ($129.09, ~4.3% with VAT), and the walker's net payout ($2,420.91) — verified against production logs and the real database numbers. Includes a webhook that queries the payment using the seller's own credentials (delivered in 3.7 seconds on that first real payment), a periodic reconciliation job as a backstop (no serious payments system should depend on a single notification channel), idempotent processing (a duplicate webhook resend from MercadoPago was correctly ignored), and the walker's `mpAccessToken` **encrypted at rest (AES-256-GCM)** and never exposed in HTTP responses.
 
-Pending: map integration (Mapbox is installed, not yet wired up), photo uploads (Cloudflare R2), live GPS tracking on the owner's side, in-app chat between owner and walker (the conversation is already created server-side on booking confirmation, but there's no chat UI yet), browser push notifications, and broader frontend test coverage.
+Pending: map integration (Mapbox is installed, not yet wired up), photo uploads (Cloudflare R2), live GPS tracking on the owner's side, browser push notifications, and broader frontend test coverage.
 
 ## Monorepo structure
 
@@ -149,14 +151,14 @@ Backend available at `http://localhost:3001`, with Swagger at `http://localhost:
 ## Tests
 
 ```bash
-# Backend — 412 tests (Jest)
+# Backend — 585 tests (Jest)
 cd apps/api && npm test
 
-# Frontend — 49 tests (Jest via next/jest)
+# Frontend — 126 tests (Jest via next/jest)
 cd apps/web && npm test
 ```
 
-Coverage is focused on the highest-risk modules (payments, auth, walker search, booking lifecycle, admin panel) rather than chasing 100% line coverage — simple CRUD with no business logic is left uncovered on purpose.
+Coverage is focused on the highest-risk modules (payments, auth, walker search, booking lifecycle, admin panel, support panel) rather than chasing 100% line coverage — simple CRUD with no business logic is left uncovered on purpose.
 
 ## Environment variables
 
@@ -172,7 +174,7 @@ Real values (MercadoPago tokens, JWT secrets, Resend API keys, etc.) are not com
 ```mermaid
 flowchart TD
     A[Work on a feature] --> B[push to staging]
-    B --> C{CI gate<br/>412 + 49 tests}
+    B --> C{CI gate<br/>585 + 126 tests}
     C -->|fails| X[Pipeline stops here]
     C -->|passes| D[Build + deploy]
     D --> E[GCP · Cloud Run + Cloud SQL<br/>behind Cloudflare Access]
@@ -198,6 +200,22 @@ The VPS is only reachable through a Cloudflare Tunnel. Container ports are bound
 A second environment on Google Cloud Platform (Cloud Run + Cloud SQL) mirrors production for validating changes before they go live — deployed from its own branch and pipeline, fully decoupled from the VPS.
 
 Cloud Run services there are IAM-only: they don't accept public traffic directly. A Cloudflare Access layer in front handles human login (SSO via one-time email codes), and a purpose-built Cloudflare Worker bridges authenticated requests into GCP using **Workload Identity Federation** — the Worker signs its own short-lived JWT and exchanges it for a Google-issued token scoped to a single audience, on every request. No downloadable service-account key exists anywhere in that chain, which removes a long-lived credential that would otherwise need storage and rotation.
+
+## Monitoring
+
+Three layers, three different questions — none of them replaces another.
+
+**Is the app alive?** UptimeRobot already pings the frontend every 5 minutes from outside the infrastructure; the API now has its own `GET /health` for the same check. It returns exactly `{"status":"ok"}`, or a 503 with `{"status":"degraded"}` — nothing else. No version, no environment, no uptime, no Postgres version: a chatty health check hands an attacker a fingerprint to go match against known vulnerabilities. It runs a real `SELECT 1` against the database rather than just confirming the process is up — a health check that never touches the database proves less than an ordinary business endpoint. Rate-limited on its own (30/min), stricter than the global throttler.
+
+**Did the scheduled job actually run?** The daily Postgres backup runs inside the server at 4 AM with no URL to poll from outside. healthchecks.io works as a dead man's switch instead: the job pings it after finishing, and the *absence* of that ping — not a failure report — is the alert. Verified end to end, not assumed: a manual run moved `Last Ping` from "Never" to 59 seconds, and — checked for the first time — the dump itself turned out to be restorable: `pg_restore --list` against a real dump listed 89 table entries in Postgres's CUSTOM format. The script now also checks the dump (minimum size, plus the `PGDMP` signature) before uploading it and before pinging success — a 0-byte dump used to upload and ping success exactly the same as a real one.
+
+**What broke while the app was alive?** Sentry, wired into the API and the browser.
+
+Two decisions worth naming on their own. PII: `sendDefaultPii: false`, plus a `beforeSend` hook that recursively scrubs any field named `password`, `token`, `accessToken`, or `mpAccessToken` at any nesting depth, and strips cookies and the `Authorization` header outright — Güau stores emails, phone numbers, and home addresses, and a walker's `mpAccessToken` is never supposed to leave the backend, full stop. No Session Replay, not even as a commented-out option — it would record a screen while someone types their home address. Data is hosted in the EU, chosen on purpose: the EU is on Argentina's AAIP list of countries with adequate data protection (Ley 25.326), the US isn't, and that sidesteps an international-transfer filing entirely.
+
+What gets reported, and why: 4xx responses never reach Sentry, and it's structural, not a status-code check bolted on somewhere — `HttpExceptionFilter` wins for every expected exception before Sentry's own filter ever sees it. The nuance that makes that actually correct: "`HttpException`" isn't a synonym for "4xx" (`InternalServerErrorException` is a 5xx and still an `HttpException`), so the filter checks the status directly and reports anything `>= 500` on its own. Separately: a `catch` block that only logs is an error someone decided to hide — four call sites doing exactly that on money-adjacent paths (the MercadoPago webhook, the reconciliation job, a token-decryption failure, the money-exposure alert email) now report explicitly, with no other change in behavior.
+
+The best evidence it works isn't a claim, it's a result: minutes after Sentry got wired up, it caught a real bug nobody was looking for — a reminder cron aborting its entire run, sending zero reminders, the moment a single database query failed, with no trace of it anywhere else.
 
 ---
 

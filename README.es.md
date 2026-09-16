@@ -58,7 +58,7 @@ Los tokens de sesión viven en cookies `httpOnly` (secure, sameSite lax), no en 
 
 **5. El staging llegó después que producción — misma decisión, revisada cuando cambió lo que había en juego**
 
-Al principio, cada push a `master` deployaba directo a producción, sin ningún ambiente intermedio. Era un solo desarrollador validando un negocio sin usuarios reales todavía: un staging duplica infraestructura, secretos y mantenimiento para proteger contra un riesgo que, en ese momento, no existía de verdad. El riesgo real en esa etapa era no iterar rápido — así que puse la protección donde rendía: la suite completa (412 tests de backend + 49 de frontend) corriendo como gate en CI, bloqueando cualquier push con tests rotos antes de que llegara a producción.
+Al principio, cada push a `master` deployaba directo a producción, sin ningún ambiente intermedio. Era un solo desarrollador validando un negocio sin usuarios reales todavía: un staging duplica infraestructura, secretos y mantenimiento para proteger contra un riesgo que, en ese momento, no existía de verdad. El riesgo real en esa etapa era no iterar rápido — así que puse la protección donde rendía: la suite completa (585 tests de backend + 126 de frontend) corriendo como gate en CI, bloqueando cualquier push con tests rotos antes de que llegara a producción.
 
 *Qué cambió:* empezó a circular dinero real por la plataforma, y una paseadora real pasó por el onboarding. El costo que había aceptado a propósito en ese momento —"un bug que los tests no atrapen llega a usuarios reales"— dejó de ser teórico en el momento en que hubo una persona real y plata real del otro lado de ese bug.
 
@@ -89,18 +89,20 @@ La comisión del marketplace (`MP_MARKETPLACE_FEE`) se valida en el constructor 
 | Pagos | MercadoPago Checkout Pro — split de marketplace (`marketplace_fee`), OAuth Connect del vendedor, webhook firmado, job de reconciliación, token del vendedor cifrado en reposo (AES-256-GCM) |
 | Email | Resend |
 | Auth | JWT + Refresh Tokens, en cookies `httpOnly` (no accesibles desde JS) |
-| Testing | Jest (backend: 412 tests automatizados en los módulos de mayor riesgo — pagos, auth, búsqueda, reservas, admin, cifrado, control de acceso; frontend: 49 tests sobre el cliente API (regresión del loop de auth), el store de notificaciones y utilidades de fechas) |
+| Testing | Jest (backend: 585 tests automatizados en los módulos de mayor riesgo — pagos, auth, búsqueda, reservas, panel de soporte, health check, control de acceso — incluyendo todo catch de un camino con plata que antes fallaba en silencio; frontend: 126 tests sobre el cliente API (clasificación de errores de sesión, regresión del loop de auth), la lógica pura del panel de soporte (búsqueda, señales, línea de tiempo), utilidades de fechas y un test de componente renderizado) |
 | Deploy | VPS propio + Docker Compose + Cloudflare Tunnel |
 | CI/CD | GitHub Actions (push a `master` → tests → build → deploy automático) |
 | Monorepo | npm workspaces + Turborepo |
 
 ## Estado actual
 
-Implementado y funcionando: registro y auth completos (cookies httpOnly, sin tokens accesibles desde JavaScript), perfil de dueño y paseador (incluida carga de zona de trabajo por geolocalización), búsqueda de paseadores por cercanía, y un ciclo de vida de reserva completo a través de sus ocho estados reales (`PENDING → CONFIRMED → WALKER_ON_WAY → IN_PROGRESS → COMPLETED`, más `CANCELLED_OWNER`, `CANCELLED_WALKER` y `NOT_PERFORMED` para las reservas que no llegaron a hacerse) — sostenido por un job que corre cada 5 minutos para detectar reservas que quedaron trabadas en un callejón sin salida (nunca confirmadas, paseador que nunca apareció, nadie actuó) y resolverlas solo. Dos mecanismos anti-fraude protegen la entrega misma: la dirección exacta del punto de encuentro queda ofuscada para el paseador (un punto aleatorio dentro de ~200m, determinístico por reserva) hasta que aprieta "voy en camino", y arrancar un paseo hoy exige un código de 4 dígitos que el dueño entrega en persona — un código que nunca llega al dispositivo del paseador — así que "el paseo arrancó" deja de ser la palabra de una sola parte contra la otra. Notificaciones in-app en tiempo real (campana con badge de no leídas, vía Socket.io sobre el Cloudflare Tunnel, verificado en producción), y 412 tests automatizados de backend más 49 de frontend cubriendo los módulos de mayor riesgo (pagos, auth, búsqueda, reservas, administración, cifrado, control de acceso).
+Implementado y funcionando: registro y auth completos (cookies httpOnly, sin tokens accesibles desde JavaScript), perfil de dueño y paseador (incluida carga de zona de trabajo por geolocalización), búsqueda de paseadores por cercanía, y un ciclo de vida de reserva completo a través de sus ocho estados reales (`PENDING → CONFIRMED → WALKER_ON_WAY → IN_PROGRESS → COMPLETED`, más `CANCELLED_OWNER`, `CANCELLED_WALKER` y `NOT_PERFORMED` para las reservas que no llegaron a hacerse) — sostenido por un job que corre cada 5 minutos para detectar reservas que quedaron trabadas en un callejón sin salida (nunca confirmadas, paseador que nunca apareció, nadie actuó) y resolverlas solo. Dos mecanismos anti-fraude protegen la entrega misma: la dirección exacta del punto de encuentro queda ofuscada para el paseador (un punto aleatorio dentro de ~200m, determinístico por reserva) hasta que aprieta "voy en camino", y arrancar un paseo hoy exige un código de 4 dígitos que el dueño entrega en persona — un código que nunca llega al dispositivo del paseador — así que "el paseo arrancó" deja de ser la palabra de una sola parte contra la otra. El chat in-app en tiempo real entre dueño y paseador (Socket.io) queda acotado a la ventana activa de la reserva — se habilita cuando el paseador marca "voy en camino" y la propia API lo cierra cuando el paseo cierra (403 pasado ese punto, no una convención del front) — con un filtro de datos de contacto en dos niveles: un mail, un @handle o una corrida de 8 o más dígitos de teléfono bloquea el mensaje directamente, mientras que solo mencionar un canal ("no tengo WhatsApp") no bloquea, queda marcado para el registro nomás. Notificaciones in-app en tiempo real (campana con badge de no leídas, vía Socket.io sobre el Cloudflare Tunnel, verificado en producción), y 585 tests automatizados de backend más 126 de frontend cubriendo los módulos de mayor riesgo (pagos, auth, búsqueda, reservas, administración, panel de soporte, cifrado, control de acceso).
+
+Un panel de soporte de solo lectura (`/support`) le permite a un admin buscar una reserva y diagnosticar un reclamo sin escribir nada: por código corto de la reserva, mail de cualquiera de las dos partes, o rango de fechas — sin ningún filtro no devuelve nada, a propósito, y ese corte pasa antes de tocar la base, no filtrando un resultado grande después. La vista del caso separa lo pactado (los términos de la reserva) de lo ocurrido (una línea de tiempo real armada con timestamps) y muestra solo las anomalías — arrancó sin código, lo cerró el dueño en vez del paseador, inicio tardío — en vez de listar unos 25 campos con el mismo peso. Leer el chat de una reserva es una acción aparte y deliberada de abrir el caso, y cada lectura deja una línea de log: quién miró qué, cuándo. Es la primera rebanada, de solo lectura, a propósito — todavía no escribe nada.
 
 Pago vía MercadoPago: **split de marketplace validado end-to-end en producción, con dinero real**. El dueño paga y el monto se reparte automáticamente entre el paseador (vía OAuth Connect de su propia cuenta de MercadoPago) y Güau (`marketplace_fee`). Primera transacción real: un paseo de $3000 dividido en comisión de Güau ($450, 15% exacto), comisión de MercadoPago ($129,09, ~4,3% con IVA) y neto acreditado al paseador ($2.420,91) — verificado contra logs de producción y los números reales de la base de datos. Incluye webhook que consulta el pago con las credenciales del vendedor (entregado en 3,7 segundos en ese primer pago real), job de reconciliación periódico como respaldo (ningún sistema de pagos serio depende de un solo canal de notificación), procesamiento idempotente (un reenvío duplicado de MercadoPago fue correctamente ignorado), y el `mpAccessToken` del paseador **cifrado en reposo (AES-256-GCM)** y nunca expuesto en respuestas HTTP.
 
-Pendiente: integración de mapas (Mapbox ya está instalado, falta conectarlo), upload de fotos (Cloudflare R2), tracking GPS en vivo del lado del dueño, chat in-app entre dueño y paseador (la conversación ya se crea del lado del servidor al confirmar la reserva, pero todavía no tiene interfaz), notificaciones push de navegador, ampliar cobertura de tests de frontend.
+Pendiente: integración de mapas (Mapbox ya está instalado, falta conectarlo), upload de fotos (Cloudflare R2), tracking GPS en vivo del lado del dueño, notificaciones push de navegador, ampliar cobertura de tests de frontend.
 
 ## Estructura del monorepo
 
@@ -149,14 +151,14 @@ Backend disponible en `http://localhost:3001`, con Swagger en `http://localhost:
 ## Tests
 
 ```bash
-# Backend — 412 tests (Jest)
+# Backend — 585 tests (Jest)
 cd apps/api && npm test
 
-# Frontend — 49 tests (Jest vía next/jest)
+# Frontend — 126 tests (Jest vía next/jest)
 cd apps/web && npm test
 ```
 
-Cobertura enfocada en los módulos de mayor riesgo (pagos, autenticación, búsqueda de paseadores, ciclo de vida de una reserva, panel de administración) en vez de perseguir 100% de líneas — CRUD simple sin lógica de negocio queda sin cubrir a propósito.
+Cobertura enfocada en los módulos de mayor riesgo (pagos, autenticación, búsqueda de paseadores, ciclo de vida de una reserva, panel de administración, panel de soporte) en vez de perseguir 100% de líneas — CRUD simple sin lógica de negocio queda sin cubrir a propósito.
 
 ## Variables de entorno
 
@@ -172,7 +174,7 @@ Los valores reales (tokens de MercadoPago, claves JWT, API keys de Resend, etc.)
 ```mermaid
 flowchart TD
     A[Trabajo en una feature] --> B[push a staging]
-    B --> C{Gate de CI<br/>412 + 49 tests}
+    B --> C{Gate de CI<br/>585 + 126 tests}
     C -->|falla| X[Pipeline se corta acá]
     C -->|pasa| D[Build + deploy]
     D --> E[GCP · Cloud Run + Cloud SQL<br/>detrás de Cloudflare Access]
@@ -198,6 +200,22 @@ La conexión al VPS público es únicamente a través de un túnel de Cloudflare
 Un segundo ambiente en Google Cloud Platform (Cloud Run + Cloud SQL) espeja producción para validar cambios antes de que lleguen a usuarios reales — se deploya desde su propia rama y su propio pipeline, totalmente desacoplado del VPS.
 
 Los servicios de Cloud Run ahí son IAM-only: no aceptan tráfico público directo. Una capa de Cloudflare Access por delante maneja el login humano (SSO por código de un solo uso vía email), y un Cloudflare Worker a medida hace de puente de identidad hacia GCP usando **Workload Identity Federation** — el Worker firma su propio JWT de corta duración y lo canjea por un token de Google con audiencia específica, en cada request. No existe ninguna key de service account descargable en ningún punto de esa cadena, lo que elimina una credencial de larga vida que de otro modo habría que guardar y rotar.
+
+## Monitoreo
+
+Tres capas, tres preguntas distintas — ninguna reemplaza a la otra.
+
+**¿Está viva la app?** UptimeRobot ya le pega al front cada 5 minutos desde afuera de la infraestructura; la API ahora tiene su propio `GET /health` para el mismo chequeo. Devuelve exactamente `{"status":"ok"}`, o un 503 con `{"status":"degraded"}` — nada más. Sin versión, sin entorno, sin uptime, sin versión de Postgres: un health check hablador le regala a un atacante el inventario para ir a buscar vulnerabilidades conocidas. Pega en la base de verdad con un `SELECT 1` en vez de solo confirmar que el proceso está vivo — un health check que nunca toca la base prueba menos que un endpoint de negocio cualquiera. Con su propio límite (30/min), más estricto que el throttler global.
+
+**¿Hizo lo que tenía que hacer el job programado?** El backup diario de Postgres corre adentro del servidor a las 4 AM, sin ninguna URL para consultar desde afuera. healthchecks.io funciona como un dead man's switch: el job le pega un ping al terminar, y la *ausencia* de ese ping — no un reporte de falla — es la alerta. Verificado de punta a punta, no supuesto: una corrida manual movió el `Last Ping` de "Never" a 59 segundos, y — chequeado por primera vez — el dump resultó ser restaurable de verdad: `pg_restore --list` sobre un dump real listó 89 entradas de tabla en formato CUSTOM de Postgres. El script ahora también valida el dump (tamaño mínimo, más la firma `PGDMP`) antes de subirlo y antes de pingear éxito — un dump de 0 bytes se subía y pingeaba éxito exactamente igual que uno real.
+
+**¿Qué se rompió con la app viva?** Sentry, en la API y en el navegador.
+
+Dos decisiones que vale la pena nombrar aparte. PII: `sendDefaultPii: false`, más un hook `beforeSend` que recorre el evento entero y reemplaza cualquier campo llamado `password`, `token`, `accessToken` o `mpAccessToken` a cualquier profundidad, y borra las cookies y el header `Authorization` directamente — Güau guarda mails, teléfonos y direcciones de casas, y el `mpAccessToken` de un paseador no tiene que salir del backend nunca, sin excepción. Sin Session Replay, ni siquiera comentado: grabaría la pantalla de alguien mientras escribe su dirección. Los datos quedan alojados en la Unión Europea, elegido a propósito: la UE está en el listado de países con protección adecuada de la AAIP argentina (Ley 25.326) y Estados Unidos no, así que evita un trámite de transferencia internacional directamente.
+
+Qué se reporta, y por qué: los 4xx nunca llegan a Sentry, y es estructural, no una comparación de status pegada en algún lado — `HttpExceptionFilter` le gana a cualquier excepción esperada antes de que el filtro de Sentry la vea siquiera. El matiz que lo hace correcto de verdad: "`HttpException`" no es sinónimo de "4xx" (`InternalServerErrorException` es un 5xx y sigue siendo `HttpException`), así que el filtro chequea el status directamente y reporta él mismo cualquier cosa `>= 500`. Aparte: un `catch` que solo loguea es un error que alguien decidió ocultar — cuatro lugares que hacían exactamente eso en caminos con plata (el webhook de MercadoPago, el job de reconciliación, un fallo al desencriptar un token, el mail de alerta de plata expuesta) ahora reportan de forma explícita, sin ningún otro cambio de comportamiento.
+
+La mejor prueba de que funciona no es una afirmación, es un resultado: minutos después de quedar configurado, Sentry encontró un bug real que nadie estaba buscando — un cron de recordatorios que abortaba la corrida entera, mandando cero recordatorios, apenas fallaba una sola query a la base, sin dejar rastro en ningún otro lado.
 
 ---
 
