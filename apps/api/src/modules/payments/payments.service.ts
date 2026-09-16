@@ -354,22 +354,36 @@ export class PaymentsService {
   async reconcilePendingPayments() {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const walks = await this.prisma.walk.findMany({
-      where: {
-        status: WalkStatus.CONFIRMED,
-        mpPaymentId: { not: null },
-        updatedAt: { gte: sevenDaysAgo },
-      },
-      select: {
-        id: true,
-        walkerAmount: true,
-        walkerId: true,
-        platformFee: true,
-        mpPaymentId: true,
-        walker: { select: { mpAccessToken: true } },
-        participants: { select: { ownerId: true }, take: 1 },
-      },
-    });
+    // El for de abajo ya aisla por walk (ver el catch adentro, commit
+    // 94ddc42) — lo que quedaba desnudo era ESTA consulta: si ella tira,
+    // nunca se llega al for, y sin este try/catch la excepcion se iba sin
+    // loguear nada propio (la instrumentacion automatica de @sentry/nestjs
+    // la reportaba igual, pero como una excepcion mas, indistinguible de
+    // cualquier otra). El mensaje de abajo existe para separar los dos
+    // casos: "ningun walk se pudo revisar" (esto) vs. "un walk puntual
+    // fallo" (el catch de adentro del for).
+    let walks: Awaited<ReturnType<typeof this.fetchReconcileCandidates>>;
+    try {
+      walks = await this.fetchReconcileCandidates(sevenDaysAgo);
+    } catch (err) {
+      Sentry.captureException(err, { tags: { reconcileStage: "fetch-candidates" } });
+      const detail = err instanceof Error ? err.message : JSON.stringify(err);
+      // No es "fallo la consulta" a secas: dice que significa (NINGUN pago
+      // se reconcilio esta corrida) y por que importa (este job es el
+      // respaldo del webhook de MP). La ventana del findMany son 7 dias con
+      // un cron cada 15 min (~672 reintentos) — un fallo aislado se
+      // recupera solo en la corrida siguiente, no hace falta reintentar
+      // acá. Lo que este catch cambia es que un fallo SOSTENIDO (token de
+      // MP vencido, la API de MP caida, la base sin responder) ya no queda
+      // en silencio durante los 7 dias completos hasta que los pagos se
+      // caen de la ventana — Sentry lo marca Escalating y se sabe en
+      // minutos, no en dias.
+      this.logger.error(
+        `reconcile: NINGUN pago se reconcilio en esta corrida — no se pudo traer la lista de ` +
+          `candidatos, el respaldo del webhook de MercadoPago no arranco: ${detail}`,
+      );
+      return;
+    }
 
     // Solo los que todavía tienen preference ID (no numérico = no resuelto como payment ID)
     const unresolved = walks.filter(w => w.mpPaymentId && !/^\d+$/.test(w.mpPaymentId));
@@ -414,6 +428,28 @@ export class PaymentsService {
     }
 
     this.logger.log(`Reconciliación: ${reviewed} revisados, ${reconciled} reconciliados`);
+  }
+
+  // Separado de reconcilePendingPayments() solo para que el try/catch de
+  // arriba pueda tipar `walks` con Awaited<ReturnType<...>> sin repetir el
+  // select a mano — no es una abstraccion para reusar en otro lado.
+  private async fetchReconcileCandidates(sevenDaysAgo: Date) {
+    return this.prisma.walk.findMany({
+      where: {
+        status: WalkStatus.CONFIRMED,
+        mpPaymentId: { not: null },
+        updatedAt: { gte: sevenDaysAgo },
+      },
+      select: {
+        id: true,
+        walkerAmount: true,
+        walkerId: true,
+        platformFee: true,
+        mpPaymentId: true,
+        walker: { select: { mpAccessToken: true } },
+        participants: { select: { ownerId: true }, take: 1 },
+      },
+    });
   }
 
   // ─── Balance del paseador ────────────────────────────────

@@ -7,6 +7,7 @@ import {
   ForbiddenException,
   BadRequestException,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { WalkStatus } from '@prisma/client';
 import * as Sentry from '@sentry/nestjs';
@@ -817,6 +818,75 @@ describe('PaymentsService', () => {
       );
 
       captureSpy.mockRestore();
+    });
+
+    // ─── El findMany inicial (fuera del for, antes sin proteccion) ─────────
+    // El for de arriba ya aisla por walk (tests de mas arriba). Lo que
+    // quedaba desnudo era ESTE findMany: si el falla, nunca se llega al for
+    // y la corrida entera se iba sin loguear nada propio.
+
+    describe('falla el findMany que arma la lista de candidatos (antes del for)', () => {
+      afterEach(() => jest.restoreAllMocks());
+
+      it('reporta a Sentry con un tag distinto al del error por-walk, y NO tira la excepcion hacia arriba', async () => {
+        const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+        jest.spyOn(Logger.prototype, 'error').mockImplementation();
+        const dbError = new Error("Can't reach database server");
+        prisma.walk.findMany.mockRejectedValue(dbError);
+
+        await expect(service.reconcilePendingPayments()).resolves.not.toThrow();
+
+        expect(captureSpy).toHaveBeenCalledTimes(1);
+        expect(captureSpy).toHaveBeenCalledWith(
+          dbError,
+          expect.objectContaining({ tags: { reconcileStage: 'fetch-candidates' } }),
+        );
+      });
+
+      it('el mensaje dice que NINGUN pago se reconcilio en la corrida, no un "fallo la consulta" generico', async () => {
+        jest.spyOn(Sentry, 'captureException').mockImplementation();
+        const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+        prisma.walk.findMany.mockRejectedValue(new Error("Can't reach database server"));
+
+        await service.reconcilePendingPayments();
+
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('NINGUN pago se reconcilio en esta corrida'),
+        );
+        // Se distingue del mensaje del catch por-walk ("error procesando
+        // walk X") — nadie que lea el log a las 3 de la manana deberia
+        // confundir "el job ni arranco" con "un walk puntual fallo".
+        expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('error procesando walk'));
+      });
+
+      it('no llega al for: no se llama a fetch ni a walk.update', async () => {
+        jest.spyOn(Sentry, 'captureException').mockImplementation();
+        jest.spyOn(Logger.prototype, 'error').mockImplementation();
+        prisma.walk.findMany.mockRejectedValue(new Error("Can't reach database server"));
+
+        await service.reconcilePendingPayments();
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(prisma.walk.update).not.toHaveBeenCalled();
+      });
+
+      it('caso normal (el findMany no falla): mismo comportamiento de siempre, sin reportar nada a Sentry', async () => {
+        const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+        prisma.walk.findMany.mockResolvedValue([WALK_UNRESOLVED]);
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok:   true,
+          json: async () => ({ results: [{ id: 99999, status: 'approved' }] }),
+        });
+        mockPaymentGet.mockResolvedValue(approvedPayment());
+        prisma.walk.update.mockResolvedValue({});
+
+        await service.reconcilePendingPayments();
+
+        expect(captureSpy).not.toHaveBeenCalled();
+        expect(prisma.walk.update).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'walk-1' } }),
+        );
+      });
     });
   });
 
