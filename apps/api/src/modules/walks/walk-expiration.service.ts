@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
+import * as Sentry from "@sentry/nestjs";
 import { PrismaService } from "../../database/prisma.service";
 import { MailService } from "../../common/services/mail.service";
 import { WalkStatus, NotPerformedReason } from "@prisma/client";
@@ -64,25 +65,58 @@ export class WalkExpirationService {
   // empiece a traer aparejado un aviso al dueño de que le van a devolver la
   // plata (bloque E), eso pasa a ser cara al usuario — y una hora (o quince
   // minutos de más) de espera para algo así no corresponde.
+  // Los cuatro pases se aislan entre si: cada uno consulta un status
+  // distinto (PENDING / CONFIRMED sin onWayAt / WALKER_ON_WAY / CONFIRMED
+  // con onWayAt seteado), sin relacion entre si, asi que un fallo en uno
+  // (ej. "Can't reach database server", encontrado por Sentry en staging)
+  // no tiene por que llevarse puestos los otros tres. runPass() atrapa por
+  // pase, nunca por la corrida entera. Ninguno de los cuatro tiene ventana
+  // de tiempo con techo (a diferencia de remindOwner en
+  // WalkRemindersService) — un candidato sigue siendolo hasta que se
+  // marca, asi que aislar los pases no evita perdida de datos (no la hay)
+  // sino que evita que un pase colgado demore a los otros tres sin motivo.
   @Cron("0 */5 * * * *")
   async markNotPerformed() {
     const now = new Date();
+    const failed: string[] = [];
 
-    const neverConfirmed = await this.markNeverConfirmed(now);
-    const walkerNoShow = await this.markWalkerNoShow(now);
-    const onWayNeverStarted = await this.markOnWayNeverStarted(now);
-    const canary = await this.markCanary(now);
+    const neverConfirmed = await this.runPass(failed, "never_confirmed", () => this.markNeverConfirmed(now));
+    const walkerNoShow = await this.runPass(failed, "walker_no_show", () => this.markWalkerNoShow(now));
+    const onWayNeverStarted = await this.runPass(failed, "on_way_never_started", () => this.markOnWayNeverStarted(now));
+    const canary = await this.runPass(failed, "canario", () => this.markCanary(now));
 
     const total = neverConfirmed + walkerNoShow + onWayNeverStarted + canary;
+    // Este log ya era incondicional (a diferencia de sendReminders en
+    // WalkRemindersService, que solo logueaba con total > 0) — se mantiene
+    // asi, solo se le agrega el sufijo de fallos cuando corresponde.
+    const failedSuffix = failed.length > 0 ? ` — FALLARON: ${failed.join(", ")}` : "";
     this.logger.log(
       `markNotPerformed: ${total} paseos marcados NOT_PERFORMED ` +
         `(never_confirmed=${neverConfirmed} walker_no_show=${walkerNoShow} ` +
-        `on_way_never_started=${onWayNeverStarted} canario=${canary})`,
+        `on_way_never_started=${onWayNeverStarted} canario=${canary})${failedSuffix}`,
     );
     if (canary > 0) {
       this.logger.error(
         `markNotPerformed: el pase canario marcó ${canary} paseo(s) — hay un estado sin mapear, revisar`,
       );
+    }
+  }
+
+  // Aisla un pase del resto: si `fn` tira, se reporta (Sentry con el pase
+  // como tag + logger.error con CUAL pase fallo, nunca un mensaje generico
+  // — mismo criterio que el catch del webhook de pagos, ver
+  // payments.service.ts) y se devuelve 0 para que markNotPerformed() siga
+  // de largo con el pase siguiente. Un catch que solo loguea es un error
+  // que alguien decidio ocultar.
+  private async runPass(failed: string[], passName: string, fn: () => Promise<number>): Promise<number> {
+    try {
+      return await fn();
+    } catch (err) {
+      failed.push(passName);
+      Sentry.captureException(err, { tags: { notPerformedPass: passName } });
+      const detail = err instanceof Error ? err.message : JSON.stringify(err);
+      this.logger.error(`markNotPerformed: pase "${passName}" fallo, sigue con los demas: ${detail}`);
+      return 0;
     }
   }
 

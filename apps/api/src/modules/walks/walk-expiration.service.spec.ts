@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
+import * as Sentry from '@sentry/nestjs';
 import { WalkExpirationService } from './walk-expiration.service';
 import { PrismaService } from '../../database/prisma.service';
 import { MailService } from '../../common/services/mail.service';
@@ -287,6 +289,87 @@ describe('WalkExpirationService', () => {
       await service.markNotPerformed();
 
       expect(prisma.walk.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Aislamiento de pases ─────────────────────────────────────────────────
+  // Medido en staging (Sentry): GUAU-API-3, PrismaClientKnownRequestError
+  // ("Can't reach database server") en markNeverConfirmed, escalando —
+  // abortaba markNotPerformed() entero, y los otros tres pases (sin relacion
+  // entre si: consultan status distintos) nunca llegaban a correr.
+
+  describe('aislamiento de pases', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('un pase que falla NO impide que los otros tres corran', async () => {
+      jest.spyOn(Sentry, 'captureException').mockImplementation();
+      jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const dbError = new Error("Can't reach database server");
+
+      prisma.walk.findMany
+        .mockRejectedValueOnce(dbError) // never_confirmed: falla
+        .mockResolvedValueOnce([])      // walker_no_show
+        .mockResolvedValueOnce([])      // on_way_never_started
+        .mockResolvedValueOnce([{ ...BASE_CANDIDATE, scheduledAt: new Date(Date.now() - 2 * 60 * 60 * 1000) }]); // canario: tiene que correr igual
+
+      await service.markNotPerformed();
+
+      expect(prisma.walk.findMany).toHaveBeenCalledTimes(4);
+      expect(prisma.walk.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'walk-1', status: WalkStatus.CONFIRMED },
+          data: expect.objectContaining({ notPerformedReason: NotPerformedReason.NOBODY_ACTED }),
+        }),
+      );
+    });
+
+    it('el pase que falla reporta a Sentry con su tag, y logger.error dice cual pase fue', async () => {
+      const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const dbError = new Error("Can't reach database server");
+
+      prisma.walk.findMany
+        .mockResolvedValueOnce([]) // never_confirmed
+        .mockRejectedValueOnce(dbError) // walker_no_show: falla
+        .mockResolvedValueOnce([]) // on_way_never_started
+        .mockResolvedValueOnce([]); // canario
+
+      await service.markNotPerformed();
+
+      expect(captureSpy).toHaveBeenCalledTimes(1);
+      expect(captureSpy).toHaveBeenCalledWith(
+        dbError,
+        expect.objectContaining({ tags: { notPerformedPass: 'walker_no_show' } }),
+      );
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('walker_no_show'));
+    });
+
+    it('el resumen final sigue siendo incondicional y ahora suma el sufijo de fallos', async () => {
+      jest.spyOn(Sentry, 'captureException').mockImplementation();
+      jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+      const dbError = new Error("Can't reach database server");
+
+      prisma.walk.findMany
+        .mockRejectedValueOnce(dbError)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await service.markNotPerformed();
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('FALLARON'));
+    });
+
+    it('caso normal (ningun pase falla): mismo comportamiento de siempre, sin reportar nada a Sentry', async () => {
+      const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+      mockFourPasses(prisma, [[BASE_CANDIDATE], [], [], []]);
+
+      await service.markNotPerformed();
+
+      expect(prisma.walk.findMany).toHaveBeenCalledTimes(4);
+      expect(captureSpy).not.toHaveBeenCalled();
+      expect(prisma.walk.updateMany).toHaveBeenCalledTimes(1);
     });
   });
 });
