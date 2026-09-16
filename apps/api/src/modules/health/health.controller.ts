@@ -9,9 +9,6 @@ import { HealthService } from "./health.service";
 // demasiado permisivo para una ruta publica que toca la base.
 const HEALTH_THROTTLE = { default: { limit: 30, ttl: 60_000 } };
 
-// TEMPORAL — ver debugSentry() mas abajo.
-const DEBUG_SENTRY_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
-
 // Publica a proposito, sin JwtAuthGuard: UptimeRobot no tiene credenciales
 // para pegarle (ver la lista de rutas publicas en docs/guau-pendientes.md).
 //
@@ -39,21 +36,5 @@ export class HealthController {
   async check(@Res() res: Response) {
     const ok = await this.health.checkDatabase();
     res.status(ok ? 200 : 503).json({ status: ok ? "ok" : "degraded" });
-  }
-
-  // ==========================================================================
-  // TEMPORAL — BORRAR ESTE ENDPOINT. Sale del commit "chore(debug): endpoint
-  // temporal para probar Sentry en staging". Unico proposito: generar un
-  // Error comun (no HttpException) para confirmar que SentryGlobalFilter lo
-  // reporta de verdad en staging — es el camino que todavia nunca se probo
-  // con un error real (el unico error provocado hasta ahora fue un 400, que
-  // Sentry ignora a proposito). Revertir apenas se vea el evento en el
-  // dashboard de Sentry.
-  // ==========================================================================
-  @Get("debug-sentry")
-  @Throttle(DEBUG_SENTRY_THROTTLE)
-  @ApiOperation({ summary: "TEMPORAL: tira un error sin manejar para probar Sentry en staging" })
-  debugSentry(): never {
-    throw new Error("Prueba deliberada de Sentry — borrar este endpoint");
   }
 }
