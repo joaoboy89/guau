@@ -6,6 +6,7 @@ import { AxiosError } from "axios";
 import { useRequireAuth, useLogout } from "@/lib/auth";
 import { Container, Spinner } from "@/components/ui";
 import { Logo } from "@/components/Logo";
+import { AuthErrorState } from "@/components/AuthErrorState";
 import { WalkersTable } from "@/components/admin/WalkersTable";
 import { WalkerDetail } from "@/components/admin/WalkerDetail";
 import { adminWalkersAPI, type AdminWalkersResponse } from "@/lib/admin/api";
@@ -17,7 +18,7 @@ import { cn } from "@/lib/cn";
 // Escritorio-first como support/ (§7bis del módulo de soporte) — mismo tipo
 // de trabajo, alguien operando la plataforma, no un usuario final.
 export default function AdminWalkersPage() {
-  const { user, ready } = useRequireAuth("admin");
+  const { user, ready, error: authError } = useRequireAuth("admin");
   const logout = useLogout();
 
   const [tab, setTab] = useState<VerificationStatus>("PENDING");
@@ -59,6 +60,7 @@ export default function AdminWalkersPage() {
 
   const selected = result?.data.find((w) => w.id === selectedId) ?? null;
 
+  if (authError) return <AuthErrorState message={authError} />;
   if (!ready) return null;
 
   return (

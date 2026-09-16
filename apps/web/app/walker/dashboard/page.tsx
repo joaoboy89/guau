@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRequireAuth } from "@/lib/auth";
+import { AuthErrorState } from "@/components/AuthErrorState";
 import { walkersAPI, paymentsAPI, walksAPI } from "@/lib/api";
 import {
   STATUS_LABEL,
@@ -164,7 +165,7 @@ const BADGE: Record<
 };
 
 export default function WalkerDashboardPage() {
-  const { user, ready }             = useRequireAuth();
+  const { user, ready, error: authError } = useRequireAuth();
   const [profile, setProfile]       = useState<WalkerProfile | null>(null);
   const [available, setAvailable]   = useState(false);
   const [toggling, setToggling]     = useState(false);
@@ -600,6 +601,7 @@ export default function WalkerDashboardPage() {
     }
   };
 
+  if (authError) return <AuthErrorState message={authError} />;
   if (!ready || !profile) return null;
 
   const badge    = BADGE[profile.verificationStatus];

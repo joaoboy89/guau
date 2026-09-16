@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRequireAuth } from "@/lib/auth";
+import { AuthErrorState } from "@/components/AuthErrorState";
 import { walksAPI } from "@/lib/api";
 import { STATUS_LABEL, STATUS_VARIANT } from "@/lib/walk-status";
 import { Container, Card, Badge, Spinner, buttonStyles } from "@/components/ui";
@@ -27,7 +28,7 @@ interface WalksMeta {
 }
 
 export default function WalksPage() {
-  const { ready } = useRequireAuth();
+  const { ready, error } = useRequireAuth();
   const [walks, setWalks] = useState<Walk[]>([]);
   const [meta, setMeta] = useState<WalksMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,6 +74,8 @@ export default function WalksPage() {
    * lee como "la app se rompió" en una conexión lenta. Un spinner cuesta
    * lo mismo y dice "esperá", que es la verdad.
    */
+  if (error) return <AuthErrorState message={error} />;
+
   if (!ready || loading) {
     return (
       <main className="flex flex-1 items-center justify-center py-20 text-brand-primary">

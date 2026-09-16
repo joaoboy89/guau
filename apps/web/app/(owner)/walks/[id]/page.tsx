@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useRequireAuth } from "@/lib/auth";
+import { AuthErrorState } from "@/components/AuthErrorState";
 import { walksAPI, paymentsAPI } from "@/lib/api";
 import { AxiosError } from "axios";
 import { STATUS_LABEL, canCancelWalk } from "@/lib/walk-status";
@@ -34,7 +35,7 @@ interface WalkDetail {
 }
 
 export default function WalkDetailPage() {
-  const { ready } = useRequireAuth();
+  const { ready, error } = useRequireAuth();
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -129,6 +130,7 @@ export default function WalkDetailPage() {
     }
   };
 
+  if (error) return <AuthErrorState message={error} />;
   if (!ready || loading) return null;
 
   if (!walk) {

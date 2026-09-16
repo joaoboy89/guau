@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRequireAuth } from "@/lib/auth";
+import { AuthErrorState } from "@/components/AuthErrorState";
 import { dogsAPI, walkTypesAPI, walkersAPI, walksAPI } from "@/lib/api";
 import { toDatetimeLocalValue } from "@/lib/datetime";
 import { summarizeSchedule } from "@/lib/schedule";
@@ -41,7 +42,7 @@ interface WalkerScheduleSlot {
 }
 
 export default function NewWalkPage() {
-  const { ready } = useRequireAuth();
+  const { ready, error: authError } = useRequireAuth();
   const router = useRouter();
 
   // ── Perros ──
@@ -124,6 +125,7 @@ export default function NewWalkPage() {
       .finally(() => setScheduleLoading(false));
   }, [selectedWalkerId]);
 
+  if (authError) return <AuthErrorState message={authError} />;
   if (!ready) return null;
 
   // ── Agregar perro inline ──

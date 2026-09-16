@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRequireAuth } from "@/lib/auth";
+import { AuthErrorState } from "@/components/AuthErrorState";
 import { walksAPI } from "@/lib/api";
 import type { PendingQuestion } from "@guau/shared";
 import PendingQuestionCard from "@/components/PendingQuestionCard";
 
 export default function DashboardPage() {
-  const { user, ready } = useRequireAuth();
+  const { user, ready, error } = useRequireAuth();
 
   const [pending, setPending] = useState<PendingQuestion[]>([]);
   // walkId -> momento en que se confirmó DESDE esta pantalla, en esta
@@ -28,6 +29,7 @@ export default function DashboardPage() {
       });
   }, [ready]);
 
+  if (error) return <AuthErrorState message={error} />;
   if (!ready) return null;
 
   // Bloquea reservar mientras quede alguna sin responder — ya sea porque

@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
     "@types/jest": "^30.0.0",
     "@types/mapbox__mapbox-gl-geocoder": "^4.7.7",
     "@types/mapbox-gl": "^3.1.0",

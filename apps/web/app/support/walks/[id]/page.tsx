@@ -6,6 +6,7 @@ import Link from "next/link";
 import { AxiosError } from "axios";
 import { useRequireAuth } from "@/lib/auth";
 import { Container, Badge, Spinner } from "@/components/ui";
+import { AuthErrorState } from "@/components/AuthErrorState";
 import { STATUS_LABEL, STATUS_VARIANT } from "@/lib/walk-status";
 import { shortWalkId } from "@/lib/walk-id";
 import { supportAPI, type SupportWalkCase } from "@/lib/support/api";
@@ -17,7 +18,7 @@ import { ChatSection } from "@/components/support/ChatSection";
 // Escritorio primero, deliberado (docs/diseños/modulo-soporte.md §7bis):
 // soporte es un trabajo de escritorio. Usable en móvil, no optimizada.
 export default function SupportCasePage() {
-  const { ready } = useRequireAuth("admin");
+  const { ready, error: authError } = useRequireAuth("admin");
   const params = useParams<{ id: string }>();
 
   const [walk, setWalk] = useState<SupportWalkCase | null>(null);
@@ -37,6 +38,8 @@ export default function SupportCasePage() {
       })
       .finally(() => setLoading(false));
   }, [ready, params.id]);
+
+  if (authError) return <AuthErrorState message={authError} />;
 
   if (!ready || loading) {
     return (

@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useRequireAuth, useLogout } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { buttonStyles } from "@/components/ui";
+import { AuthErrorState } from "@/components/AuthErrorState";
 
 export default function AdminPage() {
-  const { user, ready } = useRequireAuth("admin");
+  const { user, ready, error } = useRequireAuth("admin");
   const logout = useLogout();
 
+  if (error) return <AuthErrorState message={error} />;
   if (!ready) return null;
 
   return (

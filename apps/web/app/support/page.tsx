@@ -5,6 +5,7 @@ import { AxiosError } from "axios";
 import { useRequireAuth, useLogout } from "@/lib/auth";
 import { Container, Spinner } from "@/components/ui";
 import { Logo } from "@/components/Logo";
+import { AuthErrorState } from "@/components/AuthErrorState";
 import { SearchForm } from "@/components/support/SearchForm";
 import { ResultsList } from "@/components/support/ResultsList";
 import { buildSearchQuery, type SupportSearchFields } from "@/lib/support/search-params";
@@ -18,7 +19,7 @@ import { supportAPI, type SupportSearchQuery, type SupportSearchResponse } from 
 // (§4: deny-by-default aplicado a una pantalla). Ese vacío inicial no es un
 // bug de esta pantalla, es el diseño.
 export default function SupportSearchPage() {
-  const { user, ready } = useRequireAuth("admin");
+  const { user, ready, error: authError } = useRequireAuth("admin");
   const logout = useLogout();
 
   const [lastQuery, setLastQuery] = useState<SupportSearchQuery | null>(null);
@@ -61,6 +62,7 @@ export default function SupportSearchPage() {
     void runSearch({ ...lastQuery, page });
   };
 
+  if (authError) return <AuthErrorState message={authError} />;
   if (!ready) return null;
 
   return (
