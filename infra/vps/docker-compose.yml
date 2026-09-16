@@ -50,6 +50,20 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: "0.0.0.0"
+      # Whitelist a proposito (nunca env_file: .env acá): este contenedor
+      # no tiene por que ver POSTGRES_PASSWORD, JWT_SECRET ni los MP_* del
+      # api — ventana 2 (que puede entrar) aplicada a infra, no solo a DTOs.
+      #
+      # OJO — instrumentation.ts (servidor) e instrumentation-client.ts
+      # (navegador) leen el MISMO nombre de variable pero por caminos
+      # distintos: al navegador el valor le llega HORNEADO en el bundle por
+      # el build-arg de .github/workflows/docker.yml — esta variable de
+      # runtime NO puede cambiarlo. Al servidor (Next corriendo acá) sí lo
+      # lee, al arrancar. Fuente de verdad del DSN que ve el navegador =
+      # el build-arg, no esto. Cambiar solo esto y redeployar no mueve a
+      # donde reporta el navegador, y no hay ningún error que lo delate.
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN}
+      NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

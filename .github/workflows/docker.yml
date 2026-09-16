@@ -94,8 +94,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ghcr.io/joaoboy89/guau-web:latest
+          # NEXT_PUBLIC_SENTRY_DSN acá es la fuente de verdad de lo que ve
+          # el navegador (Next lo hornea en el bundle en build time) — la
+          # variable de mismo nombre en infra/vps/docker-compose.yml es
+          # runtime y solo la lee el lado servidor. Cambiarla ahí no mueve
+          # a donde reporta el navegador.
           build-args: |
             NEXT_PUBLIC_API_URL=https://guauapi.jbsaasapp.com
+            NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_WEB }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
