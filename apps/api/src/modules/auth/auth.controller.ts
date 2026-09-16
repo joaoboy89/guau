@@ -7,6 +7,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Header,
   Res,
 } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
@@ -50,9 +51,20 @@ export class AuthController {
     return this.auth.registerWalker(dto);
   }
 
+  // Cache-Control: no-store en las cuatro rutas que devuelven o rotan
+  // sesion (login/refresh/logout/me) — explicito ruta por ruta, no un
+  // middleware global, para que se vea cual ruta lo tiene y por que. Un
+  // endpoint que dice quien sos no se cachea nunca: no es una optimizacion,
+  // es correctitud. Sin esto, Express (via @nestjs/platform-express) trae
+  // ETags debiles activados por defecto, y un cuerpo chico y estable como
+  // el de /auth/me es exactamente lo que termina cacheado y revalidado con
+  // If-None-Match — por eso Cloud Run reportaba 304 mientras Nest reportaba
+  // 200 (ver el commit anterior, que encontro esto investigando un rebote
+  // al login).
   @Post("login")
   @Throttle(AUTH_THROTTLE)
   @HttpCode(HttpStatus.OK)
+  @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "Login — setea cookies httpOnly y retorna perfil básico" })
   async login(
     @Body() dto: LoginDto,
@@ -67,6 +79,7 @@ export class AuthController {
   @Post("refresh")
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtRefreshGuard)
+  @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "Renovar tokens usando cookie de refresh" })
   async refresh(
     @CurrentUser() user: { sub: string; refreshToken: string },
@@ -82,6 +95,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "Cerrar sesión e invalidar refresh token" })
   async logout(
     @CurrentUser() user: { id: string },
@@ -97,6 +111,7 @@ export class AuthController {
   @Get("me")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "Perfil básico del usuario autenticado (vía cookie)" })
   me(@CurrentUser() user: { id: string }) {
     return this.auth.getMe(user.id);
