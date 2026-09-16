@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
+import * as Sentry from '@sentry/nestjs';
 import { WalkRemindersService } from './walk-reminders.service';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -379,6 +381,96 @@ describe('WalkRemindersService', () => {
 
       expect(prisma.notification.findMany).toHaveBeenCalledTimes(1);
       expect(notifications.create).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ─── Aislamiento de pases ─────────────────────────────────────────────────
+  // Medido en staging (Sentry): PrismaClientKnownRequestError, "Can't reach
+  // database server", abortaba sendReminders() entero — los seis pases
+  // compartian un solo try implicito. Estos tests fijan lo contrario: un
+  // pase que tira no se lleva puestos a los otros cinco, y el fallo se
+  // reporta (no se lo traga un catch mudo).
+
+  describe('aislamiento de pases', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('un pase que falla NO impide que los otros cinco corran', async () => {
+      jest.spyOn(Sentry, 'captureException').mockImplementation();
+      jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const dbError = new Error("Can't reach database server");
+
+      prisma.walk.findMany
+        .mockRejectedValueOnce(dbError) // onWay1: falla
+        .mockResolvedValueOnce([])      // onWay2
+        .mockResolvedValueOnce([])      // notStarted1
+        .mockResolvedValueOnce([])      // notStarted2
+        .mockResolvedValueOnce([])      // close1
+        .mockResolvedValueOnce([CLOSE_CANDIDATE]); // close2: tiene que correr igual
+
+      await service.sendReminders();
+
+      expect(prisma.walk.findMany).toHaveBeenCalledTimes(6);
+      expect(notifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'walker-user-3',
+          type: NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_2_WALKER,
+          data: { walkId: 'walk-4' },
+        }),
+      );
+    });
+
+    it('el pase que falla reporta a Sentry con su tag, y logger.error dice cual pase fue', async () => {
+      const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const dbError = new Error("Can't reach database server");
+
+      prisma.walk.findMany
+        .mockResolvedValueOnce([]) // onWay1
+        .mockResolvedValueOnce([]) // onWay2
+        .mockRejectedValueOnce(dbError) // notStarted1: falla
+        .mockResolvedValueOnce([]) // notStarted2
+        .mockResolvedValueOnce([]) // close1
+        .mockResolvedValueOnce([]); // close2
+
+      await service.sendReminders();
+
+      expect(captureSpy).toHaveBeenCalledTimes(1);
+      expect(captureSpy).toHaveBeenCalledWith(
+        dbError,
+        expect.objectContaining({ tags: { reminderPass: 'dueño T+5m' } }),
+      );
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('dueño T+5m'));
+    });
+
+    it('el resumen final avisa que algo fallo aunque total sea 0 — antes solo logueaba con total > 0', async () => {
+      jest.spyOn(Sentry, 'captureException').mockImplementation();
+      jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+      const dbError = new Error("Can't reach database server");
+
+      // Los seis pases fallan o no devuelven nada: total = 0.
+      prisma.walk.findMany
+        .mockRejectedValueOnce(dbError)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await service.sendReminders();
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('FALLARON'));
+    });
+
+    it('caso normal (ningun pase falla): mismo comportamiento de siempre, sin reportar nada a Sentry', async () => {
+      const captureSpy = jest.spyOn(Sentry, 'captureException').mockImplementation();
+      mockSixPasses({ onWay1: [WALKER_CANDIDATE], close1: [CLOSE_CANDIDATE] });
+
+      await service.sendReminders();
+
+      expect(prisma.walk.findMany).toHaveBeenCalledTimes(6);
+      expect(captureSpy).not.toHaveBeenCalled();
+      expect(notifications.create).toHaveBeenCalledTimes(3); // onWay1 + (close1 walker + close1 owner)
     });
   });
 });

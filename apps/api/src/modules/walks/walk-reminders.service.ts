@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
+import * as Sentry from "@sentry/nestjs";
 import { PrismaService } from "../../database/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { WalkStatus } from "@prisma/client";
@@ -41,29 +42,67 @@ export class WalkRemindersService {
   // min) una sola corrida los alcanza a los dos juntos y dejan de ser dos
   // avisos distintos — el segundo llega pisando al primero o directamente
   // nunca se distingue de él.
+  // Los seis pases se aislan entre si: cada uno tiene su propia ventana de
+  // tiempo, sin relacion con las de los demas (ver el WHERE de cada metodo
+  // mas abajo), asi que un fallo en uno (ej. "Can't reach database server",
+  // encontrado por Sentry en staging) no tiene por que llevarse puestos los
+  // otros cinco. runPass() atrapa por pase, nunca por la corrida entera.
   @Cron("0 */5 * * * *")
   async sendReminders() {
     const now = new Date();
+    const failed: string[] = [];
 
-    const onWay1 = await this.remindWalker(now, WALK_TIMING.ONWAY_REMINDER_1_MIN_BEFORE, NOTIFICATION_TYPES.WALK_ONWAY_REMINDER_1);
-    const onWay2 = await this.remindWalker(now, WALK_TIMING.ONWAY_REMINDER_2_MIN_BEFORE, NOTIFICATION_TYPES.WALK_ONWAY_REMINDER_2);
-    const notStarted1 = await this.remindOwner(now, WALK_TIMING.NOT_STARTED_ALERT_1_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_1);
-    const notStarted2 = await this.remindOwner(now, WALK_TIMING.NOT_STARTED_ALERT_2_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_2);
-    const close1 = await this.remindClose(
-      now, WALK_TIMING.CLOSE_REMINDER_1_MIN_AFTER,
-      NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_1_WALKER, NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_1_OWNER,
-    );
-    const close2 = await this.remindClose(
-      now, WALK_TIMING.CLOSE_REMINDER_2_MIN_AFTER,
-      NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_2_WALKER, NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_2_OWNER,
-    );
+    const onWay1 = await this.runPass(failed, "paseador T-1h15", () =>
+      this.remindWalker(now, WALK_TIMING.ONWAY_REMINDER_1_MIN_BEFORE, NOTIFICATION_TYPES.WALK_ONWAY_REMINDER_1));
+    const onWay2 = await this.runPass(failed, "paseador T-1h10", () =>
+      this.remindWalker(now, WALK_TIMING.ONWAY_REMINDER_2_MIN_BEFORE, NOTIFICATION_TYPES.WALK_ONWAY_REMINDER_2));
+    const notStarted1 = await this.runPass(failed, "dueño T+5m", () =>
+      this.remindOwner(now, WALK_TIMING.NOT_STARTED_ALERT_1_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_1));
+    const notStarted2 = await this.runPass(failed, "dueño T+10m", () =>
+      this.remindOwner(now, WALK_TIMING.NOT_STARTED_ALERT_2_MIN_AFTER, NOTIFICATION_TYPES.WALK_NOT_STARTED_ALERT_2));
+    const close1 = await this.runPass(failed, "cierre fin+0", () =>
+      this.remindClose(
+        now, WALK_TIMING.CLOSE_REMINDER_1_MIN_AFTER,
+        NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_1_WALKER, NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_1_OWNER,
+      ));
+    const close2 = await this.runPass(failed, "cierre fin+30m", () =>
+      this.remindClose(
+        now, WALK_TIMING.CLOSE_REMINDER_2_MIN_AFTER,
+        NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_2_WALKER, NOTIFICATION_TYPES.WALK_CLOSE_REMINDER_2_OWNER,
+      ));
 
     const total = onWay1 + onWay2 + notStarted1 + notStarted2 + close1 + close2;
-    if (total > 0) {
+    // Antes el criterio era `total > 0` a secas — tenia sentido cuando la
+    // unica razon de loguear era "paso algo". Ahora un pase puede fallar y
+    // devolver 0 sin que eso signifique "no habia nada que avisar": si no
+    // se agrega la condicion de `failed`, una corrida con tres pases OK y
+    // uno caido queda muda en este log (el fallo ya fue a Sentry, pero el
+    // resumen local es el que deja ver DE UN VISTAZO que la corrida no fue
+    // limpia, sin tener que cruzar con Sentry).
+    if (total > 0 || failed.length > 0) {
+      const failedSuffix = failed.length > 0 ? ` — FALLARON: ${failed.join(", ")}` : "";
       this.logger.log(
         `sendReminders: ${total} recordatorios (paseador T-1h15=${onWay1} T-1h10=${onWay2}, ` +
-          `dueño T+5m=${notStarted1} T+10m=${notStarted2}, cierre fin+0=${close1} fin+30m=${close2})`,
+          `dueño T+5m=${notStarted1} T+10m=${notStarted2}, cierre fin+0=${close1} fin+30m=${close2})${failedSuffix}`,
       );
+    }
+  }
+
+  // Aisla un pase del resto: si `fn` tira, se reporta (Sentry con el pase
+  // como tag + logger.error con CUAL pase fallo, nunca un mensaje generico
+  // — mismo criterio que el catch del webhook de pagos, ver
+  // payments.service.ts) y se devuelve 0 para que sendReminders() siga de
+  // largo con el pase siguiente. Un catch que solo loguea es un error que
+  // alguien decidio ocultar.
+  private async runPass(failed: string[], passName: string, fn: () => Promise<number>): Promise<number> {
+    try {
+      return await fn();
+    } catch (err) {
+      failed.push(passName);
+      Sentry.captureException(err, { tags: { reminderPass: passName } });
+      const detail = err instanceof Error ? err.message : JSON.stringify(err);
+      this.logger.error(`sendReminders: pase "${passName}" fallo, sigue con los demas: ${detail}`);
+      return 0;
     }
   }
 
