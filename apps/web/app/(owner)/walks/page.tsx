@@ -7,6 +7,7 @@ import { AuthErrorState } from "@/components/AuthErrorState";
 import { walksAPI } from "@/lib/api";
 import { STATUS_LABEL, STATUS_VARIANT } from "@/lib/walk-status";
 import { Container, Card, Badge, Spinner, buttonStyles } from "@/components/ui";
+import { formatDateTimeBA } from "@/lib/format-date";
 
 interface Walk {
   id: string;
@@ -154,10 +155,7 @@ export default function WalksPage() {
 }
 
 function WalkCard({ walk, showPayCta }: { walk: Walk; showPayCta?: boolean }) {
-  const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
-    dateStyle: "long",
-    timeStyle: "short",
-  });
+  const dateStr = formatDateTimeBA(new Date(walk.scheduledAt));
   const walkerName = walk.walker.user.firstName;
 
   return (

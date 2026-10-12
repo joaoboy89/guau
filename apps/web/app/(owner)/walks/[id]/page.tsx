@@ -12,6 +12,7 @@ import { Container, Button } from "@/components/ui";
 import CancelWalkDialog from "@/components/CancelWalkDialog";
 import ChatPanel from "@/components/ChatPanel";
 import { WalkIdBadge } from "@/components/WalkIdBadge";
+import { formatDateTimeBA } from "@/lib/format-date";
 
 interface WalkDetail {
   id: string;
@@ -148,10 +149,7 @@ export default function WalkDetailPage() {
 
   const dogs = walk.participants.map((p) => p.dog);
   const walkerName = walk.walker.user.firstName;
-  const dateStr = new Date(walk.scheduledAt).toLocaleString("es-AR", {
-    dateStyle: "long",
-    timeStyle: "short",
-  });
+  const dateStr = formatDateTimeBA(new Date(walk.scheduledAt));
 
   return (
     <main className="flex-1 py-6">
