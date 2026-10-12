@@ -555,6 +555,16 @@ export class PaymentsService {
       user_id: number;
     };
 
+    // Diagnostico del refresh_token (docs/guau-pendientes.md): hoy solo se
+    // persisten mpAccessToken y mpUserId, pero nunca se verifico si MP
+    // devuelve tambien refresh_token/expires_in para esta app en especifico
+    // (marketplace) o si la respuesta real trae mas o menos campos que la
+    // documentacion general. Solo las CLAVES del objeto, nunca los valores:
+    // `data` trae el access_token y el refresh_token en texto plano, y
+    // logueando los valores se filtrarian credenciales vivas a los logs del
+    // contenedor.
+    this.logger.log(`OAuth MP devolvio: ${Object.keys(data).join(", ")}`);
+
     const walker = await this.prisma.walkerProfile.findUnique({
       where: { userId },
     });
