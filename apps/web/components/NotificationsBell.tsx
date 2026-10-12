@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Bell } from "lucide-react";
 import { SOCKET_EVENTS } from "@guau/shared";
 import { notificationsAPI } from "@/lib/api";
 import { useAuth, useNotifs, type Notification } from "@/lib/store";
 import { connectSocket, joinUser } from "@/lib/socket";
+import { notificationHref } from "@/lib/notification-href";
 
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -64,10 +66,16 @@ export function NotificationsBell() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleSelect = (notification: Notification) => {
-    if (notification.isRead) return;
+  // Marcar leida es independiente de navegar: que ya este leida no
+  // significa que ya se resolvio, asi que siempre marca — nunca un early
+  // return por isRead. El cierre del panel va atado a si hay destino: si
+  // la notificacion navega, el dropdown no puede quedar abierto sobre la
+  // pantalla nueva; si no hay link, el usuario se queda donde estaba y el
+  // panel sigue abierto.
+  const handleSelect = (notification: Notification, navigating: boolean) => {
     markNotificationRead(notification.id);
     notificationsAPI.markRead(notification.id).catch(() => {});
+    if (navigating) setOpen(false);
   };
 
   if (!user) return null;
@@ -111,15 +119,13 @@ export function NotificationsBell() {
             </p>
           ) : (
             <ul>
-              {notifications.map((n) => (
-                <li key={n.id}>
-                  <button
-                    type="button"
-                    onClick={() => handleSelect(n)}
-                    className={`w-full text-left px-4 py-3 border-b border-brand-border last:border-b-0 transition-opacity hover:opacity-80 ${
-                      n.isRead ? "" : "bg-brand-primary-soft"
-                    }`}
-                  >
+              {notifications.map((n) => {
+                const href = notificationHref(user.role, n.data);
+                const itemClassName = `block w-full text-left px-4 py-3 border-b border-brand-border last:border-b-0 transition-opacity hover:opacity-80 ${
+                  n.isRead ? "" : "bg-brand-primary-soft"
+                }`;
+                const content = (
+                  <>
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-sm font-semibold text-brand-text-body">{n.title}</span>
                       {!n.isRead && (
@@ -128,9 +134,23 @@ export function NotificationsBell() {
                     </div>
                     <p className="text-xs text-brand-text-muted mt-0.5">{n.body}</p>
                     <p className="text-[11px] text-brand-text-muted mt-1">{timeAgo(n.createdAt)}</p>
-                  </button>
-                </li>
-              ))}
+                  </>
+                );
+
+                return (
+                  <li key={n.id}>
+                    {href ? (
+                      <Link href={href} onClick={() => handleSelect(n, true)} className={itemClassName}>
+                        {content}
+                      </Link>
+                    ) : (
+                      <button type="button" onClick={() => handleSelect(n, false)} className={itemClassName}>
+                        {content}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

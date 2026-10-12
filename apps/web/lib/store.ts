@@ -44,6 +44,10 @@ export interface Notification {
   type:      string;
   isRead:    boolean;
   createdAt: string;
+  // JSON crudo de la columna `data` del backend (notifications.service.ts)
+  // — forma libre a proposito, nunca asumir que trae un campo en especial
+  // sin chequearlo (ver notificationHref en lib/notification-href.ts).
+  data?:     unknown;
 }
 
 // ─── Auth slice ───────────────────────────────────────────────────────────────
