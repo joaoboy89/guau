@@ -1,13 +1,15 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
 } from "@nestjs/common";
 import { PrismaService } from "../../database/prisma.service";
 import { TrackingGateway } from "../tracking/tracking.gateway";
+import { NotificationsService } from "../notifications/notifications.service";
 import { SendMessageDto } from "./dto/send-message.dto";
-import { hasBlockingContactInfo, hasContactChannelMention } from "@guau/shared";
+import { hasBlockingContactInfo, hasContactChannelMention, NOTIFICATION_TYPES } from "@guau/shared";
 import { UserRole, WalkStatus } from "@prisma/client";
 
 // El chat vive mientras el paseo está abierto (decisión de Joa, guau-
@@ -24,9 +26,12 @@ const CLOSED_WALK_STATUSES: WalkStatus[] = [
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private prisma: PrismaService,
     private trackingGateway: TrackingGateway,
+    private notificationsService: NotificationsService,
   ) {}
 
   // ─── Crear conversación al confirmar un paseo ────────────
@@ -141,6 +146,10 @@ export class ChatService {
       select: {
         ownerId: true,
         walkerId: true,
+        // walkId se usa solo para la notificacion de abajo (navegar al
+        // paseo) — Conversation.walkId es String? (schema.prisma), asi que
+        // puede venir null; se maneja mas abajo, nunca se inventa un id.
+        walkId: true,
         walk: { select: { status: true } },
         // select, no include (Ventana #2: un include es un spread con otro
         // nombre) — acá solo hace falta el id del User de cada lado para
@@ -197,10 +206,70 @@ export class ChatService {
       message,
     });
 
+    // Notificacion persistente del mensaje — sin esto, si el destinatario
+    // no tiene abierta ESA pantalla exacta del chat, nunca se entera (el
+    // socket no deja rastro si nadie esta escuchando). Una por
+    // CONVERSACION, no por mensaje: mientras la anterior siga sin leer, no
+    // se crea otra (ver el comentario de CHAT_MESSAGE en
+    // packages/shared/constants/index.ts). Fire-and-forget con el mismo
+    // patron que confirmReceipt() en walks.service.ts: un chat que se cae
+    // porque no se pudo escribir una notificacion es mucho peor que una
+    // notificacion que no sale.
+    void this.notifyNewMessage(recipientUserId, conversationId, conversation.walkId, message.sender.firstName)
+      .catch((err) => this.logger.warn(`No se pudo crear la notificacion del mensaje: ${err}`));
+
     return message;
   }
 
   // ─── Helpers privados ────────────────────────────────────
+
+  private async notifyNewMessage(
+    recipientUserId: string,
+    conversationId: string,
+    walkId: string | null,
+    senderFirstName: string,
+  ) {
+    if (await this.hasUnreadChatNotification(recipientUserId, conversationId)) return;
+
+    await this.notificationsService.create({
+      userId: recipientUserId,
+      title: `${senderFirstName} te mandó un mensaje`,
+      body: "Abrí el chat del paseo para responderle.",
+      type: NOTIFICATION_TYPES.CHAT_MESSAGE,
+      // El body es generico a proposito (sin preview del mensaje): con
+      // varios mensajes acumulados antes de leerse, un preview del primero
+      // quedaria viejo y mentiria sobre lo que realmente dice la conversa.
+      //
+      // conversationId es la clave de deduplicacion (ver
+      // hasUnreadChatNotification) — se guarda siempre porque identifica
+      // la conversacion incluso cuando no hay walkId. walkId se agrega
+      // SOLO si existe: Conversation.walkId es nullable, y un walkId
+      // inventado generaria un link roto (notificationHref ya devuelve
+      // null sin el campo, que es el comportamiento correcto).
+      data: walkId ? { conversationId, walkId } : { conversationId },
+    });
+  }
+
+  // Busca sin leer, nunca con un filtro de Prisma por path de JSON
+  // (`data: { path: [...], equals: ... }`): si el path no matchea, ese
+  // filtro devuelve vacío en SILENCIO — se crearía la notificación
+  // duplicada que este chequeo existe para evitar, sin que nada lo
+  // delate. La cantidad de notificaciones de chat sin leer de una persona
+  // esta acotada por sus conversaciones abiertas (un dígito en la
+  // práctica) — trae esas pocas y compara en JS, donde un mal match
+  // revienta en vez de desaparecer. `take` igual, aunque el numero sea
+  // chico: una lista sin techo es una lista sin techo (Ventana #4).
+  private async hasUnreadChatNotification(userId: string, conversationId: string): Promise<boolean> {
+    const unread = await this.prisma.notification.findMany({
+      where: { userId, type: NOTIFICATION_TYPES.CHAT_MESSAGE, isRead: false },
+      select: { data: true },
+      take: 50,
+    });
+
+    return unread.some(
+      (n) => (n.data as { conversationId?: string } | null)?.conversationId === conversationId,
+    );
+  }
 
   private async assertConversationAccess(
     userId: string,

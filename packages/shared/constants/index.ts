@@ -212,6 +212,14 @@ export const NOTIFICATION_TYPES = {
   // queda bien: por eso son tipos nuevos, no una reutilizacion.
   WALKER_SUSPENDED:  "walker_suspended",
   WALKER_REINSTATED: "walker_reinstated",
+  // Mensaje de chat (chat.service.ts, sendMessage()) — el UNICO tipo
+  // deduplicado por CONVERSACION, no por walk: mientras la anterior siga
+  // sin leer, un mensaje nuevo no crea otra (decision de Joa: una
+  // coordinacion normal son 8-10 mensajes, y una notificacion por mensaje
+  // enterraria abajo los avisos que importan — "tu paseo esta por
+  // empezar", "el pago se acredito"). Todos los demas tipos de esta lista
+  // son eventos unicos: no hace falta este cuidado porque no se repiten.
+  CHAT_MESSAGE: "chat_message",
 } as const;
 
 export type NotificationType = typeof NOTIFICATION_TYPES[keyof typeof NOTIFICATION_TYPES];
